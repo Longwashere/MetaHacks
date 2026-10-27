@@ -1,0 +1,161 @@
+# Friction Log
+
+This project is an entry in the **Meta Global AI Developer Hackathon**: a Spine 2D asset
+site where users remix the textures of existing rigs from a prompt, using Meta's models.
+This log records where building it went slower than it should have.
+
+**Meta's models and tooling come first.** Friction with the Meta Model API, the Muse
+models and Muse Code is what Meta cares about most, so it goes in the first section,
+in enough detail that the Meta team could act on it. Other project friction goes in
+the second section.
+
+## Context
+
+- **Hackathon:** building period Oct 27 – Nov 4, 2026. Submissions are due **Wed, Nov 4, 9:00 PM ET** and need a public repo and a three-minute demo video of what was built during the event.
+- **This repo will be public.** Never write keys, tokens or personal data here.
+- **Meta models in use (Meta Model API, `https://api.meta.ai/v1`):**
+  - **Muse Spark** (`muse-spark-1.3`, `/chat/completions`): looks at the atlas pages and the user's prompt, and writes the repaint instructions (`backend/src/lib/meta.ts`, `planRemix`).
+  - **Muse Image** (`muse-image-1.0`, `/images/edits`): repaints each atlas page (`repaintPage`).
+  - **Muse Code:** not used yet.
+
+## How to add an entry
+
+Agents (Claude, Gemini, Muse Code) and people add to this file whenever something costs a
+retry, a wrong turn, a wasted model run (each one spends API credits), or the user's time.
+Add the entry in the same task, not later.
+
+- Decide the section first. Anything about Meta's models, API, docs, SDKs or Muse Code goes under **1. Meta models & tooling**, even if we worked around it.
+- For Meta entries, record what's needed to reproduce it: endpoint, model ID, the request fields, and the response or error text. Say whether it's **verified** (we called the API and saw it) or **from the docs** or **inferred**.
+- Put new entries at the top of their section's **Log**, under a dated heading (`### YYYY-MM-DD — short title`).
+- When an open item is fixed, move it out of **Open** and update its log entry's **Status**.
+
+```md
+### YYYY-MM-DD — Short title
+- **What happened:** the symptom, as the user saw it.
+- **Evidence:** (Meta entries) endpoint, model, request fields, response/error; verified / from docs / inferred.
+- **Cost:** retries, wasted runs (credits), rework, or user time.
+- **Cause:** the real reason, once known.
+- **Workaround / status:** what we changed (files), or "open".
+- **Ask for Meta:** (Meta entries, optional) the API, model or docs change that would remove this friction.
+- **Lesson:** what to do differently next time.
+```
+
+---
+
+## 1. Meta models & tooling
+
+### Open
+
+- **Muse Image can't return transparency**, so every page has to be put on a key colour and keyed back out. That's the source of most of the friction below. (2026-10-27)
+- **The key colour bleeds into the repainted art** (e.g. a teal axe on cyan runs), and Muse Image has no setting to stop it. (2026-10-27)
+- **Edit strength can only be set through prompt text.** We haven't found a strength or fidelity parameter for `/images/edits`; check the API reference before building more on prompt wording. (2026-10-27)
+- **Muse Image moves and resizes parts** by a few percent, so we need a pixel-alignment step after every call. (2026-10-27)
+
+### Log
+
+### 2026-10-27 — `/images/edits` has no transparent output
+- **What happened:** we needed transparent sprite pages. The agent first claimed transparency was impossible without testing it; the user pushed back, and three test calls settled it.
+- **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`, an RGBA PNG input, `size: "1024x1024"`:
+  - with `background: "transparent"`: `400 invalid_request_error`, "`background` is not a supported image edit field";
+  - without it: `200`, a 3-channel WebP;
+  - with `output_format: "png"`: a 3-channel PNG, and the response includes `"background": "opaque"`;
+  - a transparent input area came back **black**, because the RGB under alpha 0 is black.
+- **Cost:** one round of pushback, three API calls, and the whole key-colour pipeline.
+- **Workaround / status:** put pages on a saturated key colour; with outline kept, reuse the original alpha; otherwise key the colour out with unmixing and edge despill (`backend/src/lib/textures.ts`).
+- **Ask for Meta:** support `background: "transparent"` on edits, as image APIs shaped like OpenAI's do; or at least keep the input's alpha.
+- **Lesson:** the Meta API is OpenAI-shaped but doesn't support every OpenAI field. Test with one cheap call before saying something is impossible.
+
+### 2026-10-27 — Output size doesn't match the requested `size`
+- **What happened:** we asked for `1024x1024` and `1536x1536` and got `1600x1600` back both times.
+- **Evidence (verified):** this session's test calls, and the `*.generated.png` files in `backend/data/remixes/`. The docs say quality is high up to 1600px; the default output is WebP.
+- **Cost:** code has to resize every result back to the input's size, and can't trust pixel positions.
+- **Workaround / status:** `fitToPage` resizes the result to the padded square and crops it. Pages are sent padded to a square because the model only roughly keeps other aspect ratios.
+- **Ask for Meta:** honour `size` on edits, or document that it's a hint and what sizes come back.
+
+### 2026-10-27 — Muse Image shifts and stretches the parts
+- **What happened:** repainted parts landed beside their original outlines, leaving bands of background colour along one edge (Skeleton Archer, and the orc).
+- **Evidence (verified):** on the forest-orc run, 25% of the original part pixels fell on background before alignment. The best fit was a 3.8% vertical stretch plus a 6px shift.
+- **Cost:** several remix runs (credits) and an alignment step.
+- **Workaround / status:** `alignToPage` finds the stretch and shift that best match the original silhouettes and undoes it, bringing the 25% down to 4%. The rest is filled from neighbouring colour.
+- **Ask for Meta:** a mode for edits that keeps the input's geometry: same size, nothing moved.
+
+### 2026-10-27 — The background colour gets painted into the parts
+- **What happened:** the final textures showed a cyan rim and a dark-teal outline, and the axe came back teal.
+- **Evidence:** verified that where the model's dark outline meets cyan it paints dark teal, e.g. RGB (20, 80, 85). Inferred that cyan tints the art: in a test on a black background, with a similar but not identical prompt, the axe came back grey steel.
+- **Cost:** three fix rounds and two wasted runs.
+- **Workaround / status:** unmix the edges, despill within 4px of the background, and fill gaps from neighbouring colour (`textures.ts`). Colour bleeding into the art itself is still open.
+- **Ask for Meta:** transparency support (above) would remove this whole class of problem.
+
+### 2026-10-27 — A grey background hid grey parts
+- **What happened:** the Skeleton Archer remix left the bones unpainted.
+- **Evidence (verified, then fixed):** parts close to the grey background colour were treated as background. A run on magenta painted every part.
+- **Cost:** a bad run, and a first investigation that couldn't see what was sent (see "Remix runs couldn't be debugged").
+- **Workaround / status:** saturated key colours; `pickBackground` chooses the one farthest from the rig's colours and the prompt's.
+- **Lesson:** for image edits, the background colour is part of the prompt. Tell the model what colour it is, and keep it far from the art.
+
+### 2026-10-27 — Edit strength has no direct parameter
+- **What happened:** the user had to ask whether the strength slider reached the Meta API at all.
+- **Evidence (inferred from our code and the docs we read):** `/images/edits` is sent `model`, `prompt`, `images`, `size`, `n`. Strength only goes to Muse Spark as a phrase ("subtle / moderate / bold"), and reaches Muse Image only if Spark carries it into the edit prompt.
+- **Workaround / status:** open.
+- **Ask for Meta:** a strength or fidelity parameter for edits, or documentation of how much the prompt controls change.
+
+### 2026-10-27 — Image calls can take minutes
+- **What happened:** the user had to ask whether long jobs and timeouts were handled.
+- **Evidence:** Node's built-in fetch gives up after 5 minutes without response headers, which is too short for image generation. The docs list retryable `503 server_error` responses.
+- **Workaround / status:** `ai-fetch.ts` uses an undici agent with no header or body timeout, plus a timeout per call and per job (`config.ts`, set in `.env`), and one retry on 503. Remixes run as background jobs with a progress bar.
+- **Ask for Meta:** streaming or progress events for image jobs, so clients can show real progress instead of an estimate.
+
+### 2026-10-27 — Muse Spark structured output
+- **What happened:** the plan needs JSON (`{name, editPrompt}`).
+- **Evidence (from the docs):** the chat-completions docs mention `response_format` but don't describe the format types or JSON-mode behaviour.
+- **Workaround / status:** we ask for "JSON only" in the system prompt and parse the first `{` to the last `}`. An unusable reply falls back to the user's own prompt, which drops strength and style.
+- **Ask for Meta:** document `response_format` / JSON-schema support for Muse Spark.
+
+---
+
+## 2. Other project friction
+
+### Open
+
+- **Dev-server reloads kill remix jobs.** `tsx watch` restarts the backend on every file save, and jobs only live in memory, so a running remix is lost, wasting its credits. Its folder ends up with only `prompts.json`. Don't edit backend files while a remix is running, or tell the user their run was lost. (2026-10-27)
+- **Keyed mode is untested in a full run.** The despill fix for keyed mode (outline not kept) was only checked offline on saved model output. Still to see: gaps at joints, parts cut off at their region rectangle, and art close to the key colour turning transparent. (2026-10-27)
+- **Spine viewer `dispose` crash.** A failed skeleton download makes the Spine runtime throw `Cannot read properties of null (reading 'dispose')`. The cause was found, but the fix (fetch the rig files ourselves, fall back to the placeholder) was never applied. (2026-10-26)
+- **Node version.** React Router needs Node > 22.22.0; the dev machine runs 22.20.0, and every frontend command warns about it. (2026-10-27)
+- **An API key appeared in plain text in a chat session.** It's stored in `backend/.env` (gitignored), but rotate it before the repo goes public. (2026-10-27)
+
+### Log
+
+### 2026-10-27 — Background colour still visible after the fix
+- **What happened:** after the first keyed-mode fix, a run still showed a dark-teal outline around every part.
+- **Cost:** one wasted remix run.
+- **Cause:** dark edge pixels the model blended into the key counted as solid outline.
+- **Fix / status:** `despillEdges` in `textures.ts`. Teal-tinted pixels in that run went from 15,222 to 3,051, and what remains is legitimate blue/teal art.
+- **Lesson:** check a fix against the run that showed the bug. To test a fit change, re-run `fitToPage` on the saved `*.generated.png` offline. It reproduces the output byte for byte and needs no model call.
+
+### 2026-10-27 — The original outline cut off new shapes
+- **What happened:** the original page's alpha cut off anything the model drew outside the old outline, even with "keep outline" off.
+- **Fix / status:** with "keep outline" off, `fitToPage` keys the background out of the model output and clips it to each region's rectangle, which `parseAtlas` now reads.
+- **Lesson:** the "keep outline" option has to change the compositing too, not just the prompt.
+
+### 2026-10-27 — Remix runs couldn't be debugged
+- **What happened:** we couldn't check what a bad remix had sent, or tell which output folder belonged to which run.
+- **Fix / status:** prompts are logged, folders are named `<ISO timestamp>_<jobId>`, and each run writes `prompts.json` and `*.generated.png`.
+- **Lesson:** save the inputs and raw outputs of every model call from day one.
+
+### 2026-10-27 — Restructured into a monorepo after the frontend was built
+- **What happened:** the app was built as a single React Router project, then moved into `frontend/` to make room for `backend/`.
+- **Lesson:** if a backend is planned, start with workspaces.
+
+### 2026-10-26 — Interrupted run: did it change anything?
+- **What happened:** the user interrupted a debugging run and had to ask whether to undo its changes. It had only touched scratch files.
+- **Lesson:** while debugging, keep experiments in the scratchpad and say which project files changed.
+
+### 2026-10-26 — Spine viewer `dispose` crash was slow to diagnose
+- **What happened:** the site threw `TypeError: Cannot read properties of null (reading 'dispose')`; reading the library source didn't find the cause.
+- **Cause:** the Spine runtime treats a network-level failure as a successful download, then crashes on cleanup.
+- **Fix / status:** open (see above).
+- **Lesson:** for runtime errors, reproduce in the browser first (e.g. by blocking the request).
+
+### 2026-10-26 — Product scope changed after the UI was built
+- **What happened:** the first UI generated rigs from scratch. The real product remixes the textures of existing library rigs.
+- **Lesson:** confirm the core user flow before building screens.

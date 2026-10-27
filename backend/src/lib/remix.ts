@@ -103,7 +103,12 @@ export async function runRemix(
     signal.throwIfAborted();
     // The raw model output, kept for debugging how well it lined up with the page.
     await writeFile(path.join(outDir, `${path.parse(page.name).name}.generated.png`), generated);
-    await writeFile(path.join(outDir, page.name), await fitToPage(generated, modelInput, images[i], base.premultipliedAlpha));
+    // Kept outlines reuse the original alpha; otherwise the model's own shapes are keyed out.
+    const keyedRects = input.keepOutline ? null : page.rects;
+    await writeFile(
+      path.join(outDir, page.name),
+      await fitToPage(generated, modelInput, images[i], base.premultipliedAlpha, keyedRects),
+    );
     reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
   }
 

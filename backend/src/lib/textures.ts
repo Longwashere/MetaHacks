@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import type { PageRect } from "./atlas.js";
 
 /** A solid colour the transparent parts of a page are flattened onto before the models see it. */
 export interface Background {
@@ -168,15 +169,20 @@ export async function toDataUrl(image: Buffer, maxSide: number): Promise<string>
 }
 
 /**
- * Fits a repainted page back onto the original: same pixel size, and the original
- * alpha, so every region keeps its exact silhouette in the atlas. The image model
+ * Fits a repainted page back onto the original at the same pixel size. The image model
  * only returns opaque images at roughly the requested aspect ratio.
+ *
+ * With `keyedRects` null, every region keeps its exact silhouette: the original alpha
+ * is reused and the repainted colour is grown to fill it. Otherwise the parts take the
+ * model's own silhouettes, keyed out of the background and kept within `keyedRects`
+ * (the regions' areas on the page), so new shapes survive.
  */
 export async function fitToPage(
   generated: Buffer,
   input: ModelInput,
   page: PageImage,
   premultipliedAlpha: boolean,
+  keyedRects: PageRect[] | null,
 ): Promise<Buffer> {
   const square = await sharp(generated).resize(input.side, input.side, { fit: "fill" }).toBuffer();
   const rgb = await sharp(square)
@@ -186,10 +192,17 @@ export async function fitToPage(
     .raw()
     .toBuffer();
   const aligned = alignToPage(rgb, page, input.background);
-  fillBackgroundBleed(aligned, page, input.background);
+  let alpha: Uint8Array;
+  if (keyedRects) {
+    alpha = keyOut(aligned, page.width, page.height, input.background, keyedRects);
+  } else {
+    fillBackgroundBleed(aligned, page, input.background);
+    alpha = new Uint8Array(page.width * page.height);
+    for (let p = 0; p < alpha.length; p++) alpha[p] = page.rgba[p * 4 + 3];
+  }
   const out = Buffer.alloc(page.width * page.height * 4);
   for (let p = 0, i = 0; p < out.length; p += 4, i += 3) {
-    const a = page.rgba[p + 3];
+    const a = alpha[p / 4];
     const scale = premultipliedAlpha ? a / 255 : 1;
     out[p] = a === 0 ? 0 : Math.round(aligned[i] * scale);
     out[p + 1] = a === 0 ? 0 : Math.round(aligned[i + 1] * scale);
@@ -338,6 +351,113 @@ function backgroundMask(rgb: Buffer, width: number, height: number, background: 
     frontier = next;
   }
   return isBg;
+}
+
+/** Share of the background colour (0–1) up to which a pixel is solid part… */
+const KEY_SOLID = 0.25;
+/** …and from which it's fully background; in between, the part's edge blended with it. */
+const KEY_CLEAR = 0.85;
+
+/**
+ * Keys the background out of a repainted page: returns per-pixel alpha from how much
+ * of the background colour each pixel holds, and removes that share of the colour
+ * from the blended edge pixels in `rgb` so they don't keep a background-coloured rim.
+ * The matte is shrunk by a pixel to drop the outermost blended ring, and anything
+ * outside `rects` is cleared so a part can't spill into a neighbouring region.
+ */
+function keyOut(rgb: Buffer, width: number, height: number, background: Background, rects: PageRect[]): Uint8Array {
+  const key = hexToRgb(background.hex);
+  // The key's share is how far its full channels rise above its empty ones (pure cyan:
+  // min(g, b) - r). Neutral and warm colours score near zero, so the parts stay solid.
+  const full = [0, 1, 2].filter((c) => key[c] >= 192);
+  const empty = [0, 1, 2].filter((c) => key[c] <= 64);
+  const matte = new Float32Array(width * height);
+  for (let p = 0; p < matte.length; p++) {
+    const i = p * 3;
+    let high = 255, low = 0;
+    for (const c of full) high = Math.min(high, rgb[i + c]);
+    for (const c of empty) low = Math.max(low, rgb[i + c]);
+    const share = (high - low) / 255;
+    const a = Math.min(Math.max(1 - (share - KEY_SOLID) / (KEY_CLEAR - KEY_SOLID), 0), 1);
+    matte[p] = a;
+    if (a > 0 && a < 1) {
+      for (let c = 0; c < 3; c++) rgb[i + c] = Math.min(Math.max(Math.round((rgb[i + c] - (1 - a) * key[c]) / a), 0), 255);
+    }
+  }
+
+  despillEdges(rgb, width, height, key, matte);
+
+  const inRegion = new Uint8Array(width * height);
+  for (const r of rects) {
+    for (let y = Math.max(r.y, 0); y < Math.min(r.y + r.height, height); y++) {
+      inRegion.fill(1, y * width + Math.max(r.x, 0), y * width + Math.min(r.x + r.width, width));
+    }
+  }
+  const alpha = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x;
+      if (!inRegion[p]) continue;
+      const a = Math.min(
+        matte[p],
+        x > 0 ? matte[p - 1] : 0,
+        x < width - 1 ? matte[p + 1] : 0,
+        y > 0 ? matte[p - width] : 0,
+        y < height - 1 ? matte[p + width] : 0,
+      );
+      alpha[p] = Math.round(a * 255);
+    }
+  }
+  return alpha;
+}
+
+/** How far (px) into a part from the background its edge colours are despilled. */
+const DESPILL_REACH = 4;
+
+/**
+ * The model paints dark outlines that fade into the background (black into cyan comes
+ * out dark teal), which keying leaves solid. Within DESPILL_REACH of the background,
+ * removes the key's tint: the amount by which the key's full channels rise above its
+ * empty ones is taken off along the key's own colour, so dark teal goes back to dark
+ * grey. Parts' insides are left alone, so a teal or blue part keeps its colour.
+ */
+function despillEdges(rgb: Buffer, width: number, height: number, key: [number, number, number], matte: Float32Array) {
+  const keyMin = Math.min(...key), keyMax = Math.max(...key);
+  const weight = key.map((c) => (c - keyMin) / (keyMax - keyMin));
+  const full = [0, 1, 2].filter((c) => weight[c] >= 0.75);
+  const empty = [0, 1, 2].filter((c) => weight[c] <= 0.25);
+
+  const reached = new Uint8Array(width * height);
+  let frontier: number[] = [];
+  for (let p = 0; p < matte.length; p++) {
+    if (matte[p] < 1) {
+      reached[p] = 1;
+      frontier.push(p);
+    }
+  }
+  for (let pass = 0; pass < DESPILL_REACH && frontier.length > 0; pass++) {
+    const next: number[] = [];
+    for (const p of frontier) {
+      const x = p % width, y = (p - x) / width;
+      for (const q of [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, y > 0 ? p - width : -1, y < height - 1 ? p + width : -1]) {
+        if (q < 0 || reached[q]) continue;
+        reached[q] = 1;
+        next.push(q);
+      }
+    }
+    frontier = next;
+  }
+
+  for (let p = 0; p < reached.length; p++) {
+    if (!reached[p] || matte[p] === 0) continue;
+    const i = p * 3;
+    let high = 255, low = 0;
+    for (const c of full) high = Math.min(high, rgb[i + c]);
+    for (const c of empty) low = Math.max(low, rgb[i + c]);
+    const spill = high - low;
+    if (spill <= 0) continue;
+    for (let c = 0; c < 3; c++) rgb[i + c] = Math.max(0, Math.round(rgb[i + c] - spill * weight[c]));
+  }
 }
 
 /**
