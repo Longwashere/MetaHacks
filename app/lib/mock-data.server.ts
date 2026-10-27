@@ -12,12 +12,13 @@ const anim = (name: string, durationSec: number, loop = true): SpineAnimation =>
 // The examples aren't named consistently: `skel` is the skeleton's basename (Pro, Essential or
 // unsuffixed export) and `pages` is how many atlas pages it has (name-pma.png, name-pma_2.png, …).
 const exampleRig = (
-  name: string,
-  { skin = null, skel = `${name}-pro`, pages = 1 }: { skin?: string | null; skel?: string; pages?: number } = {},
+  folder: string,
+  baseFile: string,
+  { skin = null, pages = 1 }: { skin?: string | null; pages?: number } = {},
 ) => ({
-  skeletonUrl: `/spine/${name}/${skel}.skel`,
-  atlasUrl: `/spine/${name}/${name}-pma.atlas`,
-  textureUrls: Array.from({ length: pages }, (_, i) => `/spine/${name}/${name}-pma${i ? `_${i + 1}` : ""}.png`),
+  skeletonUrl: `/spine/${folder}/${baseFile}.skel`,
+  atlasUrl: `/spine/${folder}/${baseFile}.atlas`,
+  textureUrls: Array.from({ length: pages }, (_, i) => `/spine/${folder}/${baseFile}${i ? `_${i + 1}` : ""}.png`),
   premultipliedAlpha: true,
   skin,
 });
@@ -75,7 +76,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 9120,
     saves: 2604,
     thumbnailUrl: null,
-    files: exampleRig("spineboy"),
+    files: exampleRig("spineboy", "Spineboy"),
     tint: null,
   },
   {
@@ -98,7 +99,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 7340,
     saves: 2210,
     thumbnailUrl: null,
-    files: exampleRig("raptor"),
+    files: exampleRig("raptor", "Raptor"),
     tint: null,
   },
   {
@@ -121,7 +122,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5120,
     saves: 1960,
     thumbnailUrl: null,
-    files: exampleRig("goblins", { skin: "goblin" }),
+    files: exampleRig("goblins", "Goblin", { skin: "goblin" }),
     tint: null,
   },
   {
@@ -144,7 +145,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 2980,
     saves: 1240,
     thumbnailUrl: null,
-    files: exampleRig("owl"),
+    files: exampleRig("owl", "NightOwl"),
     tint: null,
   },
   {
@@ -167,7 +168,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 2210,
     saves: 860,
     thumbnailUrl: null,
-    files: exampleRig("powerup"),
+    files: exampleRig("powerup", "PowerUp"),
     tint: null,
   },
   {
@@ -202,7 +203,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6480,
     saves: 2050,
     thumbnailUrl: null,
-    files: exampleRig("hero", { skin: "weapon/sword" }),
+    files: exampleRig("hero", "Hero", { skin: "weapon/sword" }),
     tint: null,
   },
   {
@@ -225,7 +226,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4310,
     saves: 1420,
     thumbnailUrl: null,
-    files: exampleRig("alien"),
+    files: exampleRig("alien", "Alien"),
     tint: null,
   },
   {
@@ -248,7 +249,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5870,
     saves: 2130,
     thumbnailUrl: null,
-    files: exampleRig("dragon", { skel: "dragon-ess", pages: 5 }),
+    files: exampleRig("dragon", "Dragon", { pages: 5 }),
     tint: null,
   },
   {
@@ -271,7 +272,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 2140,
     saves: 690,
     thumbnailUrl: null,
-    files: exampleRig("speedy", { skel: "speedy-ess" }),
+    files: exampleRig("speedy", "Speedy"),
     tint: null,
   },
   {
@@ -301,7 +302,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6930,
     saves: 2780,
     thumbnailUrl: null,
-    files: exampleRig("mix-and-match", { skin: "full-skins/girl" }),
+    files: exampleRig("mix-and-match", "MixAndMatchKid", { skin: "full-skins/girl" }),
     tint: null,
   },
   {
@@ -340,7 +341,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 7710,
     saves: 3320,
     thumbnailUrl: null,
-    files: exampleRig("chibi-stickers", { skel: "chibi-stickers", pages: 10, skin: "spineboy" }),
+    files: exampleRig("chibi-stickers", "ChibiStickers", { pages: 10, skin: "spineboy" }),
     tint: null,
   },
   {
@@ -370,7 +371,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5420,
     saves: 2390,
     thumbnailUrl: null,
-    files: exampleRig("celestial-circus"),
+    files: exampleRig("celestial-circus", "CelestialCircus"),
     tint: null,
   },
   {
@@ -393,7 +394,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 1860,
     saves: 740,
     thumbnailUrl: null,
-    files: exampleRig("sack"),
+    files: exampleRig("sack", "Sack"),
     tint: null,
   },
   {
@@ -416,7 +417,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 2370,
     saves: 820,
     thumbnailUrl: null,
-    files: exampleRig("stretchyman"),
+    files: exampleRig("stretchyman", "Stretchyman"),
     tint: null,
   },
   {
@@ -439,7 +440,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4020,
     saves: 1310,
     thumbnailUrl: null,
-    files: exampleRig("tank"),
+    files: exampleRig("tank", "Tank"),
     tint: null,
   },
   {
@@ -462,7 +463,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 3150,
     saves: 1480,
     thumbnailUrl: null,
-    files: exampleRig("snowglobe", { pages: 5 }),
+    files: exampleRig("snowglobe", "SnowGlobe", { pages: 5 }),
     tint: null,
   },
   {
@@ -485,7 +486,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 2290,
     saves: 960,
     thumbnailUrl: null,
-    files: exampleRig("cloud-pot", { skel: "cloud-pot" }),
+    files: exampleRig("cloud-pot", "CloudPot"),
     tint: null,
   },
   {
@@ -508,7 +509,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 1940,
     saves: 710,
     thumbnailUrl: null,
-    files: exampleRig("windmill", { skel: "windmill-ess" }),
+    files: exampleRig("windmill", "Windmill"),
     tint: null,
   },
   {
@@ -531,7 +532,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 1520,
     saves: 580,
     thumbnailUrl: null,
-    files: exampleRig("vine"),
+    files: exampleRig("vine", "GrowingVine"),
     tint: null,
   },
   {
@@ -563,7 +564,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 410,
     saves: 188,
     thumbnailUrl: null,
-    files: exampleRig("spineboy"),
+    files: exampleRig("spineboy", "Spineboy"),
     tint: "#ff8a80",
   },
   {
@@ -839,7 +840,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6120,
     saves: 1802,
     thumbnailUrl: null,
-    files: exampleRig("coin"),
+    files: exampleRig("coin", "SpinningCoin"),
     tint: null,
   },
   {
@@ -933,7 +934,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 12450,
     saves: 4820,
     thumbnailUrl: null,
-    files: customRig("kettlebell-knight", "HulkForm2", { premultipliedAlpha: true }),
+    files: customRig("kettlebell-knight", "KettlebellKnight", { premultipliedAlpha: true }),
     tint: null,
   },
   {
@@ -956,7 +957,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4210,
     saves: 1340,
     thumbnailUrl: null,
-    files: customRig("rogue-bard", "HeroBard", { premultipliedAlpha: false }),
+    files: customRig("rogue-bard", "RogueBard", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -979,7 +980,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6890,
     saves: 2150,
     thumbnailUrl: null,
-    files: customRig("dark-knight", "Darkknight_monster05", { premultipliedAlpha: false }),
+    files: customRig("dark-knight", "DarkKnight", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1002,7 +1003,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5120,
     saves: 1640,
     thumbnailUrl: null,
-    files: customRig("skeleton-warrior", "skeleton_worrior", { premultipliedAlpha: false }),
+    files: customRig("skeleton-warrior", "SkeletonWarrior", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1025,7 +1026,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 3870,
     saves: 1220,
     thumbnailUrl: null,
-    files: customRig("skeleton-archer", "skeleton", { premultipliedAlpha: false }),
+    files: customRig("skeleton-archer", "SkeletonArcher", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1048,7 +1049,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4950,
     saves: 1580,
     thumbnailUrl: null,
-    files: customRig("skeleton-cavalier", "title_knight_740", { premultipliedAlpha: false }),
+    files: customRig("skeleton-cavalier", "SkeletonCavalier", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1071,7 +1072,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5430,
     saves: 1720,
     thumbnailUrl: null,
-    files: customRig("orc-berserker", "orc_warrior", { premultipliedAlpha: false }),
+    files: customRig("orc-berserker", "OrcBerserker", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1094,7 +1095,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4630,
     saves: 1490,
     thumbnailUrl: null,
-    files: customRig("corrupted-mage", "Unit_Spine_BirdMageSpe1Skin1", { premultipliedAlpha: false }),
+    files: customRig("corrupted-mage", "CorruptedMage", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1117,7 +1118,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 3980,
     saves: 1180,
     thumbnailUrl: null,
-    files: customRig("void-prophet", "CultistFollower", { premultipliedAlpha: false }),
+    files: customRig("void-prophet", "VoidProphet", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1140,7 +1141,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 8420,
     saves: 3110,
     thumbnailUrl: null,
-    files: customRig("dark-emperor", "DeathKnight", { premultipliedAlpha: false }),
+    files: customRig("dark-emperor", "DarkEmperor", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1163,7 +1164,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 7890,
     saves: 2650,
     thumbnailUrl: null,
-    files: customRig("abyssal-kraken", "Octopus_Anim_01", { premultipliedAlpha: false }),
+    files: customRig("abyssal-kraken", "AbyssalKraken", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1186,7 +1187,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 9210,
     saves: 3420,
     thumbnailUrl: null,
-    files: customRig("eldritch-horror", "BS_Cthulhu", { premultipliedAlpha: false }),
+    files: customRig("eldritch-horror", "EldritchHorror", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1209,7 +1210,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 8650,
     saves: 3040,
     thumbnailUrl: null,
-    files: customRig("magma-dragon", "Mission_104_dragon", { premultipliedAlpha: false }),
+    files: customRig("magma-dragon", "MagmaDragon", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1232,7 +1233,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6740,
     saves: 2280,
     thumbnailUrl: null,
-    files: customRig("inferno-titan", "Demogorgon", { premultipliedAlpha: false }),
+    files: customRig("inferno-titan", "InfernoTitan", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1255,7 +1256,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5320,
     saves: 1710,
     thumbnailUrl: null,
-    files: customRig("labyrinth-minotaur", "BlackBullhead", { premultipliedAlpha: false }),
+    files: customRig("labyrinth-minotaur", "LabyrinthMinotaur", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1301,7 +1302,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4890,
     saves: 1560,
     thumbnailUrl: null,
-    files: customRig("ancient-treant", "Treant", { premultipliedAlpha: false }),
+    files: customRig("ancient-treant", "AncientTreant", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1324,7 +1325,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4510,
     saves: 1430,
     thumbnailUrl: null,
-    files: customRig("water-elemental", "water_elemental", { premultipliedAlpha: false }),
+    files: customRig("water-elemental", "WaterElemental", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1347,7 +1348,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5110,
     saves: 1690,
     thumbnailUrl: null,
-    files: customRig("nightmare-stag", "AnimalAnim5", { premultipliedAlpha: false }),
+    files: customRig("nightmare-stag", "NightmareStag", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1370,7 +1371,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6320,
     saves: 2140,
     thumbnailUrl: null,
-    files: customRig("two-headed-hellhound", "DiYuShuangTouQuan", { premultipliedAlpha: false }),
+    files: customRig("two-headed-hellhound", "TwoHeadedHellhound", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1393,7 +1394,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5870,
     saves: 1890,
     thumbnailUrl: null,
-    files: customRig("shadow-wolf", "Unit_Spine_Wolf1", { premultipliedAlpha: false }),
+    files: customRig("shadow-wolf", "ShadowWolf", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1416,7 +1417,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 7420,
     saves: 2410,
     thumbnailUrl: null,
-    files: customRig("green-dungeon-slime", "TuXi01", { premultipliedAlpha: false }),
+    files: customRig("green-dungeon-slime", "GreenDungeonSlime", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1439,7 +1440,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 3620,
     saves: 1140,
     thumbnailUrl: null,
-    files: customRig("brood-spider", "spider_anim_85", { premultipliedAlpha: false }),
+    files: customRig("brood-spider", "BroodSpider", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1462,7 +1463,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4720,
     saves: 1510,
     thumbnailUrl: null,
-    files: customRig("cinder-imp", "Tiefling_Imp", { premultipliedAlpha: false }),
+    files: customRig("cinder-imp", "CinderImp", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1485,7 +1486,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4130,
     saves: 1370,
     thumbnailUrl: null,
-    files: customRig("ember-serpent", "Serpent_1", { premultipliedAlpha: false }),
+    files: customRig("ember-serpent", "EmberSerpent", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1508,7 +1509,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5290,
     saves: 1680,
     thumbnailUrl: null,
-    files: customRig("stone-gargoyle", "GargoyleEnemy", { premultipliedAlpha: false }),
+    files: customRig("stone-gargoyle", "StoneGargoyle", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1531,7 +1532,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6890,
     saves: 2450,
     thumbnailUrl: null,
-    files: customRig("fire-burst", "HuoYan", { premultipliedAlpha: false }),
+    files: customRig("fire-burst", "FireBurstVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1554,7 +1555,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5940,
     saves: 2180,
     thumbnailUrl: null,
-    files: customRig("ice-nova", "IceNova", { premultipliedAlpha: false }),
+    files: customRig("ice-nova", "IceNovaVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1577,7 +1578,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 7210,
     saves: 2670,
     thumbnailUrl: null,
-    files: customRig("slam-shockwave", "ShockWave", { premultipliedAlpha: false }),
+    files: customRig("slam-shockwave", "SlamShockwaveVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1600,7 +1601,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 8340,
     saves: 3120,
     thumbnailUrl: null,
-    files: customRig("summoning-circle", "eff_shenle_fazhen", { premultipliedAlpha: false }),
+    files: customRig("summoning-circle", "SummoningCircleVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1623,7 +1624,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5480,
     saves: 1920,
     thumbnailUrl: null,
-    files: customRig("blast-detonation", "BlastTNT", { premultipliedAlpha: false }),
+    files: customRig("blast-detonation", "BlastDetonationVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1646,7 +1647,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4720,
     saves: 1630,
     thumbnailUrl: null,
-    files: customRig("poison-blast", "PoisonBlast", { premultipliedAlpha: false }),
+    files: customRig("poison-blast", "PoisonBlastVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1669,7 +1670,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6120,
     saves: 2210,
     thumbnailUrl: null,
-    files: customRig("hit-spark", "shouSJ", { premultipliedAlpha: false }),
+    files: customRig("hit-spark", "HitSparksVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1692,7 +1693,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 5340,
     saves: 1890,
     thumbnailUrl: null,
-    files: customRig("holy-heal-glow", "CommonHeal_2", { premultipliedAlpha: false }),
+    files: customRig("holy-heal-glow", "HolyHealGlowVFX", { premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1715,7 +1716,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6780,
     saves: 2410,
     thumbnailUrl: null,
-    files: customRig("slash-arc", "zhuosao", { premultipliedAlpha: false }),
+    files: customRig("slash-arc", "SlashArcVFX", { premultipliedAlpha: false }),
     tint: null,
   },
 ];

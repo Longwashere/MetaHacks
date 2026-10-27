@@ -27,10 +27,13 @@ const store: MockStore = (globalStore.__spineMock ??= {
   jobs: new Map(),
 });
 
-// Ensure newly added assets are always present even when globalStore persists across HMR
+// Ensure assets are always up-to-date even when globalStore persists across HMR
 for (const a of MOCK_ASSETS) {
-  if (!store.assets.has(a.id)) {
+  const existing = store.assets.get(a.id);
+  if (!existing) {
     store.assets.set(a.id, a);
+  } else {
+    store.assets.set(a.id, { ...a, saves: existing.saves, downloads: existing.downloads });
   }
 }
 
