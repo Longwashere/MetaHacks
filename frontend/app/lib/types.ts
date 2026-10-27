@@ -92,6 +92,10 @@ export type PromptStatus = "original" | "rewording" | "reworded";
  * A remix keeps the base rig's skeleton, bones, slots and animations and only
  * regenerates the texture (atlas pages) from a prompt.
  */
+/** Which backend remix pipeline runs the job. v2 is the default; v1 is kept for comparison. */
+export const REMIX_API_VERSIONS = ["v2", "v1"] as const;
+export type RemixApiVersion = (typeof REMIX_API_VERSIONS)[number];
+
 export interface RemixInput {
   baseAssetId: string;
   /** Describes the new look, e.g. "black and crimson ninja robes". */
@@ -115,6 +119,7 @@ export interface RemixJob {
   /** Human-readable step, e.g. "Painting textures". */
   stage: string;
   input: RemixInput;
+  apiVersion: RemixApiVersion;
   /** Summary of the base rig so the progress UI can render without another fetch. */
   base: PreviewableAsset & Pick<SpineAsset, "id" | "name">;
   createdAt: string;

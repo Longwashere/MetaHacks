@@ -9,6 +9,7 @@ import { MOCK_ASSETS } from "~/lib/mock-data.server";
 import type {
   AssetAccent,
   AssetQuery,
+  RemixApiVersion,
   RemixInput,
   RemixJob,
   SpineAsset,
@@ -190,15 +191,19 @@ interface BackendRemixJob {
 }
 
 /**
- * BACKEND: POST /remixes  body = RemixInput + the base rig's atlas
+ * BACKEND: POST /{v1,v2}/remixes  body = RemixInput + the base rig's atlas
  * Returns immediately with a queued job; the UI polls getRemixJob.
  * Returns null if the base asset doesn't exist or has no files to repaint.
  */
-export async function createRemixJob(userId: string, input: RemixInput): Promise<RemixJob | null> {
+export async function createRemixJob(
+  userId: string,
+  input: RemixInput,
+  apiVersion: RemixApiVersion = "v2",
+): Promise<RemixJob | null> {
   const base = store.assets.get(input.baseAssetId);
   if (!base?.files) return null;
 
-  const res = await fetch(`${BACKEND_URL}/remixes`, {
+  const res = await fetch(`${BACKEND_URL}/${apiVersion}/remixes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -206,7 +211,7 @@ export async function createRemixJob(userId: string, input: RemixInput): Promise
       base: { name: base.name, atlasUrl: base.files.atlasUrl, premultipliedAlpha: base.files.premultipliedAlpha },
     }),
   });
-  if (!res.ok) throw new Error(`POST /remixes failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) throw new Error(`POST /${apiVersion}/remixes failed (${res.status}): ${await res.text()}`);
   const remote = (await res.json()) as BackendRemixJob;
 
   const job: RemixJob & { userId: string } = {
@@ -216,6 +221,7 @@ export async function createRemixJob(userId: string, input: RemixInput): Promise
     progress: 0,
     stage: "Queued",
     input,
+    apiVersion,
     base: {
       id: base.id,
       name: base.name,
@@ -236,18 +242,18 @@ export async function createRemixJob(userId: string, input: RemixInput): Promise
   return publicJob(job);
 }
 
-/** BACKEND: GET /remixes/:id (or push updates over SSE/WebSocket). */
+/** BACKEND: GET /{v1,v2}/remixes/:id (or push updates over SSE/WebSocket). */
 export async function getRemixJob(userId: string, jobId: string): Promise<RemixJob | null> {
   const job = store.jobs.get(jobId);
   if (!job || job.userId !== userId) return null;
   if (job.status === "queued" || job.status === "running") {
-    const res = await fetch(`${BACKEND_URL}/remixes/${encodeURIComponent(jobId)}`);
+    const res = await fetch(`${BACKEND_URL}/${job.apiVersion}/remixes/${encodeURIComponent(jobId)}`);
     if (res.status === 404) {
       // The backend keeps jobs in memory, so a restart loses them.
       job.status = "failed";
       job.error = "The remix service restarted. Try again.";
     } else if (!res.ok) {
-      throw new Error(`GET /remixes/${jobId} failed (${res.status})`);
+      throw new Error(`GET /${job.apiVersion}/remixes/${jobId} failed (${res.status})`);
     } else {
       applyBackendJob(job, (await res.json()) as BackendRemixJob);
     }

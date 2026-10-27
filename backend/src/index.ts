@@ -1,6 +1,7 @@
 import express from "express";
 import { PORT, REMIX_OUTPUT_DIR } from "./lib/config.js";
 import { remixesRouter } from "./routes/remixes.js";
+import { remixesV2Router } from "./v2/routes/remixes.js";
 
 const app = express();
 
@@ -10,7 +11,9 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.use("/remixes", remixesRouter);
+// v1 is also served at the unversioned /remixes path for older clients.
+app.use(["/remixes", "/v1/remixes"], remixesRouter);
+app.use("/v2/remixes", remixesV2Router);
 
 // Generated atlases and textures. The Spine viewer loads them with WebGL from the
 // frontend's origin, which needs CORS.

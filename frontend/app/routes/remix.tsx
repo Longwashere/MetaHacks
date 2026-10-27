@@ -54,7 +54,14 @@ import {
 import { getCurrentUser } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
-import { REMIX_STYLES, type RemixJob, type RemixStyle, type SpineAsset } from "~/lib/types";
+import {
+  REMIX_API_VERSIONS,
+  REMIX_STYLES,
+  type RemixApiVersion,
+  type RemixJob,
+  type RemixStyle,
+  type SpineAsset,
+} from "~/lib/types";
 import { cn } from "~/lib/utils";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -110,9 +117,11 @@ function filterRigs(rigs: SpineAsset[], q: string) {
   return rigs.filter((r) => [r.name, r.description, ...r.tags].join(" ").toLowerCase().includes(needle));
 }
 
-type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength", string>>;
+type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength" | "apiVersion", string>>;
 
 const isStyle = (v: unknown): v is RemixStyle => typeof v === "string" && REMIX_STYLES.some((s) => s === v);
+const isApiVersion = (v: unknown): v is RemixApiVersion =>
+  typeof v === "string" && REMIX_API_VERSIONS.some((s) => s === v);
 
 export async function action({ request }: Route.ActionArgs) {
   const user = await getCurrentUser(request);
@@ -127,14 +136,16 @@ export async function action({ request }: Route.ActionArgs) {
   const keepPosition = form.get("keepPosition") === "on";
   const keepSize = form.get("keepSize") === "on";
   const keepOutline = form.get("keepOutline") === "on";
+  const apiVersion = form.get("apiVersion");
 
   if (!baseAssetId) errors.base = "Choose a rig to remix.";
   if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters.";
   else if (prompt.length > 500) errors.prompt = "Keep it under 500 characters.";
   if (!isStyle(style)) errors.style = "Choose a style.";
   if (!Number.isFinite(strength) || strength < 0 || strength > 100) errors.strength = "Strength must be 0–100.";
+  if (!isApiVersion(apiVersion)) errors.apiVersion = "Choose a remix API version.";
 
-  if (Object.keys(errors).length > 0 || !isStyle(style)) {
+  if (Object.keys(errors).length > 0 || !isStyle(style) || !isApiVersion(apiVersion)) {
     return data({ errors }, { status: 400 });
   }
 
@@ -153,7 +164,7 @@ export async function action({ request }: Route.ActionArgs) {
     keepPosition,
     keepSize,
     keepOutline,
-  });
+  }, apiVersion);
   if (!job) return data({ errors: { base: "That rig no longer exists." } satisfies FieldErrors }, { status: 400 });
 
   throw redirect(`/remix?${new URLSearchParams({ base: baseAssetId, job: job.id })}`);
@@ -310,7 +321,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                   <div className="mr-auto">
                     <h2 className="text-lg font-semibold">{job.asset.name}</h2>
                     <p className="text-xs text-muted-foreground">
-                      Remix of {base.name}
+                      Remix of {base.name} · API {job.apiVersion}
                       {job.promptStatus === "reworded" && " · prompt re-worded for content policy"}
                     </p>
                   </div>
@@ -600,6 +611,23 @@ function RemixForm({ base, errors }: { base: SpineAsset; errors: FieldErrors }) 
         </div>
       </fieldset>
       <FieldError id="base-error" message={errors.base} />
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="apiVersion">Remix API</Label>
+        <Select name="apiVersion" defaultValue="v2">
+          <SelectTrigger id="apiVersion" className="w-full sm:w-48" aria-invalid={Boolean(errors.apiVersion)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {REMIX_API_VERSIONS.map((v) => (
+              <SelectItem key={v} value={v}>
+                {v === "v2" ? "v2 (default)" : v}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <FieldError id="apiVersion-error" message={errors.apiVersion} />
+      </div>
 
       <Button type="submit" size="lg" disabled={submitting} className="w-full">
         {submitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
