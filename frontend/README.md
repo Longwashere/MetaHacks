@@ -49,7 +49,7 @@ npm run build
 To build and run using Docker:
 
 ```bash
-docker build -t my-app .
+docker build -f frontend/Dockerfile -t my-app .  # run from the repo root
 
 # Run the container
 docker run -p 3000:3000 my-app

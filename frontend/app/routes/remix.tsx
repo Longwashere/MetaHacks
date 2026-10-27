@@ -133,6 +133,12 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ errors }, { status: 400 });
   }
 
+  const base = await getAsset(baseAssetId);
+  if (!base?.files) {
+    const message = base ? "This rig has no textures to repaint yet. Choose another one." : "That rig no longer exists.";
+    return data({ errors: { base: message } satisfies FieldErrors }, { status: 400 });
+  }
+
   const job = await createRemixJob(user.id, {
     baseAssetId,
     prompt,

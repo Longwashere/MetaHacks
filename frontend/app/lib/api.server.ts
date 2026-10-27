@@ -2,7 +2,8 @@
 // so connecting the real backend means replacing the bodies below — the UI
 // doesn't need to change. See BACKEND.md for the endpoint contract.
 //
-// Right now everything is an in-memory mock that resets when the server restarts.
+// Assets and libraries are an in-memory mock that resets when the server restarts.
+// Remix jobs run on the backend (BACKEND_URL).
 
 import { MOCK_ASSETS } from "~/lib/mock-data.server";
 import type {
@@ -11,6 +12,7 @@ import type {
   RemixInput,
   RemixJob,
   SpineAsset,
+  SpineAssetFiles,
 } from "~/lib/types";
 
 // Survive Vite HMR in dev by parking the mock store on globalThis.
@@ -38,7 +40,6 @@ for (const a of MOCK_ASSETS) {
 }
 
 const MOCK_LATENCY_MS = 150;
-const MOCK_REMIX_MS = 6000;
 const delay = (ms = MOCK_LATENCY_MS) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
@@ -172,18 +173,42 @@ export async function removeFromLibrary(userId: string, assetId: string): Promis
 // Remixing (re-texture an existing rig)
 // ---------------------------------------------------------------------------
 
+// The backend runs the job (Muse plans the look, Muse Image repaints the atlas pages).
+// Assets and users still live in the mock store above, so jobs are tracked here too.
+const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
+
+/** The parts of the backend's job we read. See backend/src/lib/types.ts. */
+interface BackendRemixJob {
+  id: string;
+  status: RemixJob["status"];
+  progress: number;
+  stage: string;
+  result: { name: string; atlasUrl: string; textureUrls: string[] } | null;
+  error: string | null;
+}
+
 /**
- * BACKEND: POST /remixes  body = RemixInput
- * Should return immediately with a queued job; the UI polls getRemixJob.
- * Returns null if the base asset doesn't exist (or the user can't access it).
+ * BACKEND: POST /remixes  body = RemixInput + the base rig's atlas
+ * Returns immediately with a queued job; the UI polls getRemixJob.
+ * Returns null if the base asset doesn't exist or has no files to repaint.
  */
 export async function createRemixJob(userId: string, input: RemixInput): Promise<RemixJob | null> {
-  await delay();
   const base = store.assets.get(input.baseAssetId);
-  if (!base) return null;
-  const id = `job_${crypto.randomUUID().slice(0, 8)}`;
+  if (!base?.files) return null;
+
+  const res = await fetch(`${BACKEND_URL}/remixes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...input,
+      base: { name: base.name, atlasUrl: base.files.atlasUrl, premultipliedAlpha: base.files.premultipliedAlpha },
+    }),
+  });
+  if (!res.ok) throw new Error(`POST /remixes failed (${res.status}): ${await res.text()}`);
+  const remote = (await res.json()) as BackendRemixJob;
+
   const job: RemixJob & { userId: string } = {
-    id,
+    id: remote.id,
     userId,
     status: "queued",
     progress: 0,
@@ -202,7 +227,8 @@ export async function createRemixJob(userId: string, input: RemixInput): Promise
     asset: null,
     error: null,
   };
-  store.jobs.set(id, job);
+  store.jobs.set(job.id, job);
+  applyBackendJob(job, remote);
   return publicJob(job);
 }
 
@@ -210,7 +236,18 @@ export async function createRemixJob(userId: string, input: RemixInput): Promise
 export async function getRemixJob(userId: string, jobId: string): Promise<RemixJob | null> {
   const job = store.jobs.get(jobId);
   if (!job || job.userId !== userId) return null;
-  advanceMockJob(job);
+  if (job.status === "queued" || job.status === "running") {
+    const res = await fetch(`${BACKEND_URL}/remixes/${encodeURIComponent(jobId)}`);
+    if (res.status === 404) {
+      // The backend keeps jobs in memory, so a restart loses them.
+      job.status = "failed";
+      job.error = "The remix service restarted. Try again.";
+    } else if (!res.ok) {
+      throw new Error(`GET /remixes/${jobId} failed (${res.status})`);
+    } else {
+      applyBackendJob(job, (await res.json()) as BackendRemixJob);
+    }
+  }
   return publicJob(job);
 }
 
@@ -218,45 +255,33 @@ function publicJob({ userId: _userId, ...job }: RemixJob & { userId: string }): 
   return job;
 }
 
-const STAGES = [
-  "Queued",
-  "Reading rig & atlas regions",
-  "Painting new textures",
-  "Matching seams across slots",
-  "Packing atlas",
-  "Exporting Spine project",
-];
+function applyBackendJob(job: RemixJob, remote: BackendRemixJob) {
+  job.status = remote.status;
+  job.progress = remote.progress;
+  job.stage = remote.stage;
+  job.error = remote.error;
+  if (remote.status !== "succeeded" || job.asset) return;
 
-const ACCENTS: AssetAccent[] = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
-const TINTS = ["#ff8a80", "#80d8ff", "#b9f6ca", "#ffd180", "#ea80fc"];
-
-/** Fake progress based on elapsed time. Delete with the mock. */
-function advanceMockJob(job: RemixJob) {
-  if (job.status === "succeeded" || job.status === "failed") return;
-  const elapsed = Date.now() - new Date(job.createdAt).getTime();
-  const progress = Math.min(1, elapsed / MOCK_REMIX_MS);
-  job.progress = progress;
-  job.status = progress >= 1 ? "succeeded" : progress > 0.05 ? "running" : "queued";
-  job.stage = STAGES[Math.min(STAGES.length - 1, Math.floor(progress * STAGES.length))];
-
-  if (job.status === "succeeded" && !job.asset) {
-    const base = store.assets.get(job.base.id);
-    if (!base) {
-      job.status = "failed";
-      job.error = "The base rig is no longer available.";
-      return;
-    }
-    job.stage = "Done";
-    job.asset = buildMockRemix(job, base);
-    store.assets.set(job.asset.id, job.asset);
+  const base = store.assets.get(job.base.id);
+  if (!remote.result || !base?.files) {
+    job.status = "failed";
+    job.error = "The base rig is no longer available.";
+    return;
   }
+  job.asset = buildRemix(job, base, base.files, remote.result);
+  store.assets.set(job.asset.id, job.asset);
 }
 
-function buildMockRemix(job: RemixJob, base: SpineAsset): SpineAsset {
+const ACCENTS: AssetAccent[] = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
+
+function buildRemix(
+  job: RemixJob,
+  base: SpineAsset,
+  baseFiles: SpineAssetFiles,
+  result: NonNullable<BackendRemixJob["result"]>,
+): SpineAsset {
   const { input } = job;
-  const words = input.prompt.split(/\s+/).filter((w) => w.length > 3).slice(0, 2);
-  const flavor = words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-  const name = flavor ? `${flavor} ${base.name}` : `${base.name} Remix`;
+  const name = result.name || `${base.name} Remix`;
   // Readable slug + short suffix for uniqueness, e.g. "crimson-ninja-wandering-monk-3f9a1c2b".
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const id = `${slug || "remix"}-${job.id.slice(4)}`;
@@ -275,12 +300,12 @@ function buildMockRemix(job: RemixJob, base: SpineAsset): SpineAsset {
     visibility: "private",
     author: { id: "you", name: "You" },
     createdAt: new Date().toISOString(),
-    accent: input.keepPalette ? base.accent : ACCENTS.filter((a) => a !== base.accent)[Math.floor(Math.random() * 4)],
+    accent: input.keepPalette ? base.accent : ACCENTS[(ACCENTS.indexOf(base.accent) + 1) % ACCENTS.length],
     downloads: 0,
     saves: 0,
     thumbnailUrl: null,
-    // The mock can't paint textures, so it reuses the base rig's files and tints them.
-    files: base.files,
-    tint: input.keepPalette ? null : TINTS[Math.floor(Math.random() * TINTS.length)],
+    // Same skeleton, new atlas pages painted by the backend.
+    files: { ...baseFiles, atlasUrl: result.atlasUrl, textureUrls: result.textureUrls },
+    tint: null,
   };
 }

@@ -1,4 +1,6 @@
-.react-router
-build
-node_modules
-README.md
+**/.react-router
+**/build
+**/dist
+**/node_modules
+**/README.md
+**/.env

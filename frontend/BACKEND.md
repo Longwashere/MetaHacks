@@ -29,8 +29,8 @@ Each function in `api.server.ts` has a `BACKEND:` comment with the endpoint it s
 | `listRemixesOf(assetId, limit)` | `GET /assets/:id/remixes` | Public `SpineAsset[]` whose `remixOf.id === assetId` |
 | `saveToLibrary(userId, assetId)` | `PUT /me/library/:assetId` | `void`. Should be idempotent. |
 | `removeFromLibrary(userId, assetId)` | `DELETE /me/library/:assetId` | `void`. Should be idempotent. |
-| `createRemixJob(userId, input)` | `POST /remixes` (JSON `RemixInput`) | `RemixJob` (return right away, status `queued`), or `null` if the base rig doesn't exist |
-| `getRemixJob(userId, jobId)` | `GET /remixes/:id` | `RemixJob \| null` |
+| `createRemixJob(userId, input)` | `POST /remixes` (JSON `RemixInput` + `base: { name, atlasUrl, premultipliedAlpha }`) | **Live:** calls the backend at `BACKEND_URL` (default `http://localhost:4000`). Returns `RemixJob`, or `null` if the base rig doesn't exist or has no files |
+| `getRemixJob(userId, jobId)` | `GET /remixes/:id` | **Live:** polls the backend while the job runs. `RemixJob \| null` |
 
 ## Remix flow
 
@@ -79,7 +79,7 @@ The viewer uses the official `@esotericsoftware/spine-player`, pinned to 4.2.x t
 
 **Example rigs:** `public/spine/` holds Esoteric's official example exports (spineboy, raptor, goblins, coin, owl, powerup), which back a few mock assets. They're for development only (see `public/spine/README.md`). Delete them once the backend serves real files.
 
-**Mock remixes** reuse the base rig's files and multiply a `tint` color over them. Real remixes have their own atlas pages, so drop `tint` from `SpineAsset` and from `SpineRuntime` when the backend lands.
+**Remixes** are painted by the backend (`backend/src/lib/remix.ts`): Muse Spark looks at the base atlas pages and writes an edit prompt and a name, Muse Image repaints each page, and the result is resized and clipped to the original page's alpha so every region still fits its attachment. The remix keeps the base skeleton and gets a new `.atlas` + pages served from the backend at `/files/remixes/<jobId>/` (with CORS). Only rigs with `files` can be remixed. `tint` is now only used by seed data; drop it once no asset sets it.
 
 If grid performance becomes a problem with many real rigs, show `thumbnailUrl` images in `AssetCard`/`RigPicker` and mount `SpineRuntime` only on hover.
 
