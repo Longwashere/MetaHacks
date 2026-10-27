@@ -3,7 +3,7 @@ import path from "node:path";
 import { isSafePageName, parseAtlas } from "./atlas.js";
 import { ASSET_BASE_URL, PUBLIC_URL, REMIX_OUTPUT_DIR } from "./config.js";
 import { planRemix, repaintPage } from "./meta.js";
-import { decodePage, fitToPage, toDataUrl, toModelInput } from "./textures.js";
+import { decodePage, fitToPage, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { RemixRequest, RemixResult } from "./types.js";
 
 export interface RemixProgress {
@@ -15,11 +15,15 @@ const IMAGE_MAX_SIDE = 1536;
 /** Muse only needs to see what the rig looks like, so it gets smaller pages, and at most a few. */
 const PLAN_MAX_SIDE = 768;
 const PLAN_MAX_PAGES = 4;
+/** Rough durations of the model calls, used to keep the progress bar moving while they run. */
+const PLAN_EXPECTED_MS = 6_000;
+const PAGE_EXPECTED_MS = 10_000;
 
 /**
  * Re-textures the base rig: fetches its atlas pages, has Muse plan the new look,
  * repaints each page with Muse Image and fits it back onto the original regions.
- * Writes the new .atlas and pages under REMIX_OUTPUT_DIR/<jobId>/.
+ * Writes the new .atlas and pages under REMIX_OUTPUT_DIR/<timestamp>_<jobId>/, plus a
+ * prompts.json recording what was asked for and sent to the models.
  *
  * Throw an Error with a user-facing message on failure; the job runner stores it as
  * `job.error`. `signal` fires when the whole job runs out of time — pass it through.
@@ -43,40 +47,57 @@ export async function runRemix(
     pages.map(async (p) => decodePage(await fetchBaseFile(atlasDir + p.name, signal), base.premultipliedAlpha)),
   );
 
-  onProgress(0.1, "Planning the new look");
-  const plan = await planRemix(
-    input,
-    {
-      name: base.name,
-      regions: pages.flatMap((p) => p.regions),
-      pageImages: await Promise.all(
-        images.slice(0, PLAN_MAX_PAGES).map(async (img) => (await toModelInput(img, PLAN_MAX_SIDE)).dataUrl),
-      ),
-    },
-    signal,
+  // One background for every page, so the reference page matches the one being painted.
+  const background = pickBackground(images, input.prompt);
+  const pageImages = await Promise.all(
+    images.slice(0, PLAN_MAX_PAGES).map(async (img) => (await toModelInput(img, PLAN_MAX_SIDE, background)).dataUrl),
+  );
+  const plan = await withProgress(onProgress, 0.1, 0.2, "Planning the new look", PLAN_EXPECTED_MS, () =>
+    planRemix(
+      input,
+      { name: base.name, regions: pages.flatMap((p) => p.regions), pageImages, background: background.name },
+      signal,
+    ),
   );
 
   const prompt = [
     plan.editPrompt,
     `Art style: ${input.style}.`,
-    "This image is a sprite atlas of separate character parts on a plain grey background.",
-    "Keep every part in exactly the same position, size and outline. Do not add, move, merge or resize parts. Keep the background plain grey.",
+    `This image is a sprite atlas of separate character parts on a solid ${background.name} background.`,
+    `Every shape that is not the ${background.name} background is a part; repaint all of them, including thin ones like bones, shafts and straps.`,
+    `Keep every part in exactly the same position, size and outline. Do not add, move, merge or resize parts. Keep the background solid ${background.name}.`,
   ].join(" ");
 
-  const outDir = path.join(REMIX_OUTPUT_DIR, jobId);
+  // Timestamp first so folders sort by creation time when browsing REMIX_OUTPUT_DIR.
+  const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
+  const outDir = path.join(REMIX_OUTPUT_DIR, folder);
   await mkdir(outDir, { recursive: true });
+  const { base: _base, ...request } = input;
+  await writeFile(
+    path.join(outDir, "prompts.json"),
+    JSON.stringify({ jobId, createdAt: new Date().toISOString(), base: base.name, request, plan, imagePrompt: prompt }, null, 2),
+  );
 
   let reference: string | null = null;
   for (const [i, page] of pages.entries()) {
-    onProgress(0.2 + (0.7 * i) / pages.length, pages.length > 1 ? `Painting page ${i + 1} of ${pages.length}` : "Painting new textures");
-    const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE);
-    const generated = await repaintPage(
-      modelInput,
-      reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
-      reference,
-      signal,
+    const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background);
+    const generated = await withProgress(
+      onProgress,
+      0.2 + (0.75 * i) / pages.length,
+      0.2 + (0.75 * (i + 1)) / pages.length,
+      pages.length > 1 ? `Painting page ${i + 1} of ${pages.length}` : "Painting new textures",
+      PAGE_EXPECTED_MS,
+      () =>
+        repaintPage(
+          modelInput,
+          reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
+          reference,
+          signal,
+        ),
     );
     signal.throwIfAborted();
+    // The raw model output, kept for debugging how well it lined up with the page.
+    await writeFile(path.join(outDir, `${path.parse(page.name).name}.generated.png`), generated);
     await writeFile(path.join(outDir, page.name), await fitToPage(generated, modelInput, images[i], base.premultipliedAlpha));
     reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
   }
@@ -85,7 +106,7 @@ export async function runRemix(
   // Regions are unchanged and page names are kept, so the base atlas works as-is.
   await writeFile(path.join(outDir, "remix.atlas"), atlasText);
 
-  const fileUrl = (name: string) => `${PUBLIC_URL}/files/remixes/${jobId}/${encodeURIComponent(name)}`;
+  const fileUrl = (name: string) => `${PUBLIC_URL}/files/remixes/${folder}/${encodeURIComponent(name)}`;
   return {
     name: plan.name,
     atlasUrl: fileUrl("remix.atlas"),
@@ -103,4 +124,30 @@ async function fetchBaseFile(filePath: string, signal: AbortSignal): Promise<Buf
     throw new Error("The base rig's files aren't available.");
   }
   return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Runs a slow model call, easing progress from `from` toward `to` while it waits so
+ * the bar doesn't sit still. Reaches about two thirds of the way after `expectedMs`
+ * and never quite gets to `to` until the call returns.
+ */
+async function withProgress<T>(
+  onProgress: RemixProgress,
+  from: number,
+  to: number,
+  stage: string,
+  expectedMs: number,
+  task: () => Promise<T>,
+): Promise<T> {
+  const start = Date.now();
+  onProgress(from, stage);
+  const timer = setInterval(() => {
+    const eased = 1 - Math.exp(-(Date.now() - start) / expectedMs);
+    onProgress(from + (to - from) * 0.95 * eased, stage);
+  }, 1000);
+  try {
+    return await task();
+  } finally {
+    clearInterval(timer);
+  }
 }

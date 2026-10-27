@@ -19,7 +19,7 @@ function apiKey(): string {
   return key;
 }
 
-const PLAN_SYSTEM_PROMPT = `You are the art director for 2D game assets. You are given atlas pages from a rigged Spine character: each page is a sprite sheet of separate body parts (regions) packed on a plain grey background.
+const PLAN_SYSTEM_PROMPT = `You are the art director for 2D game assets. You are given atlas pages from a rigged Spine character: each page is a sprite sheet of separate body parts (regions) packed on a plain solid-colour background (the user message names the colour). That background colour is not part of the character; ignore it.
 An image-editing model will repaint every page into a new look. Write its instructions.
 - Describe the new materials, colors, patterns and surface details for the parts you can see.
 - Every part must keep exactly the same position, size, outline and pose. Only what is painted inside each part changes.
@@ -31,17 +31,20 @@ Reply with JSON only, no markdown: {"name": "...", "editPrompt": "..."}
 /** Asks Muse Spark to turn the user's prompt into instructions for the image model. */
 export async function planRemix(
   input: RemixInput,
-  base: { name: string; regions: string[]; pageImages: string[] },
+  base: { name: string; regions: string[]; pageImages: string[]; background: string },
   signal: AbortSignal,
 ): Promise<RemixPlan> {
   const request = [
     `Asset: ${base.name}`,
     `Parts: ${base.regions.slice(0, 120).join(", ")}`,
+    `Page background: solid ${base.background}`,
     `Requested look: ${input.prompt}`,
     `Art style: ${input.style}`,
     `Change amount: ${strengthHint(input.strength)}`,
     input.keepPalette ? "Keep the original color palette; change details and materials only." : "",
   ].filter(Boolean).join("\n");
+  logPrompt(`chat/completions (${MUSE_MODEL}) system`, PLAN_SYSTEM_PROMPT);
+  logPrompt(`chat/completions (${MUSE_MODEL}) user + ${base.pageImages.length} page image(s)`, request);
 
   const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
     method: "POST",
@@ -68,7 +71,10 @@ export async function planRemix(
   }
 
   const plan = parsePlan(await res.json());
-  if (plan) return plan;
+  if (plan) {
+    logPrompt(`chat/completions (${MUSE_MODEL}) reply`, JSON.stringify(plan, null, 2));
+    return plan;
+  }
   // Muse's reply is untrusted; if it's unusable, fall back to the user's own words.
   console.warn("Muse returned an unusable plan; using the prompt as-is.");
   return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.` };
@@ -113,6 +119,7 @@ export async function repaintPage(
   reference: string | null,
   signal: AbortSignal,
 ): Promise<Buffer> {
+  logPrompt(`images/edits (${IMAGE_MODEL}) ${page.side}x${page.side}${reference ? " + reference page" : ""}`, prompt);
   const body = JSON.stringify({
     model: IMAGE_MODEL,
     prompt,
@@ -144,6 +151,11 @@ export async function repaintPage(
     }
     throw new Error("Couldn't paint the new textures. Try again.");
   }
+}
+
+/** Logs a prompt sent to (or plan returned by) the Meta API. Images are never logged. */
+function logPrompt(label: string, text: string) {
+  console.log(`[meta] ${label}:\n${text}\n`);
 }
 
 function getPath(value: unknown, path: (string | number)[]): unknown {

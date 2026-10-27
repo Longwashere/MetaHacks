@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, Bone, ExternalLink, Film, Loader2, Palette, Search, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Palette, Search, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Form,
@@ -15,6 +15,7 @@ import { AssetPlayer } from "~/components/AssetPlayer";
 import { RigPicker } from "~/components/RigPicker";
 import { SaveButton } from "~/components/SaveButton";
 import { SpinePreview } from "~/components/SpinePreview";
+import { SpriteSheet } from "~/components/SpriteSheet";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -53,7 +54,8 @@ import {
 import { getCurrentUser } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
-import { ART_STYLES, type ArtStyle, type SpineAsset } from "~/lib/types";
+import { ART_STYLES, type ArtStyle, type RemixJob, type SpineAsset } from "~/lib/types";
+import { cn } from "~/lib/utils";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return seoMeta({
@@ -168,9 +170,9 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   const active = job?.status === "queued" || job?.status === "running";
   useEffect(() => {
     if (!active) return;
-    const t = setTimeout(revalidate, 1000);
-    return () => clearTimeout(t);
-  }, [active, job?.progress, revalidate]);
+    const t = setInterval(revalidate, 1000);
+    return () => clearInterval(t);
+  }, [active, revalidate]);
 
   const withParams = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -310,7 +312,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                   <CardDescription className="line-clamp-2">“{job.input.prompt}”</CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
-                  <Progress value={Math.round(job.progress * 100)} aria-label="Remix progress" />
+                  <RemixProgress job={job} />
                   <SpinePreview
                     asset={job.base}
                     className="animate-pulse rounded-lg opacity-50"
@@ -320,6 +322,16 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
               </Card>
             )}
           </section>
+
+          <SpriteSheet
+            // Remount per rig/result so page and source selection start fresh.
+            key={`${base.id}:${job?.asset?.id ?? ""}`}
+            className="lg:col-span-2"
+            sources={[
+              ...(job?.status === "succeeded" && job.asset ? [{ label: "Remix", asset: job.asset }] : []),
+              { label: "Original", asset: base },
+            ]}
+          />
         </div>
       )}
 
@@ -336,6 +348,72 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
       )}
     </div>
   );
+}
+
+// Milestones mirror the progress values the backend reports (backend/src/lib/remix.ts).
+const REMIX_STEPS = [
+  { label: "Read rig", until: 0.1 },
+  { label: "Plan look", until: 0.2 },
+  { label: "Paint textures", until: 0.95 },
+  { label: "Pack atlas", until: 1 },
+];
+
+function RemixProgress({ job }: { job: RemixJob }) {
+  const percent = Math.round(job.progress * 100);
+  const current = REMIX_STEPS.findIndex((step) => job.progress < step.until);
+  const elapsed = useElapsedSeconds(job.createdAt);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between text-xs text-muted-foreground tabular-nums">
+        <span>{percent}%</span>
+        {elapsed !== null && <span>{formatElapsed(elapsed)} elapsed</span>}
+      </div>
+      <Progress value={percent} aria-label="Remix progress" />
+      <ol className="grid grid-cols-4 gap-2 text-xs">
+        {REMIX_STEPS.map((step, i) => {
+          const state = current === -1 || i < current ? "done" : i === current ? "active" : "todo";
+          return (
+            <li
+              key={step.label}
+              aria-current={state === "active" ? "step" : undefined}
+              className={cn(
+                "flex items-center gap-1.5",
+                state === "todo" ? "text-muted-foreground" : "text-foreground",
+                state === "active" && "font-medium",
+              )}
+            >
+              {state === "done" ? (
+                <CircleCheck className="size-3.5 shrink-0 text-primary" />
+              ) : state === "active" ? (
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+              ) : (
+                <Circle className="size-3.5 shrink-0" />
+              )}
+              <span className="truncate">{step.label}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+/** Seconds since `since`, ticking every second. Null until mounted, so SSR and hydration agree. */
+function useElapsedSeconds(since: string): number | null {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now === null ? null : Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
+}
+
+function formatElapsed(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
 }
 
 function BaseRigSummary({ base }: { base: SpineAsset }) {
