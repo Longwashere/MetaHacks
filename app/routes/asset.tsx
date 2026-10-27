@@ -87,6 +87,7 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
     viewParam === "skeleton" || viewParam === "overlay" ? viewParam : "skin";
   const boneColorParam = searchParams.get("boneColor");
   const boneColor = boneColorParam ? `#${boneColorParam.replace("#", "")}` : "#ef4444";
+  const showLabels = searchParams.get("labels") === "1";
 
   const handleViewModeChange = (nextMode: SpineViewMode) => {
     setSearchParams(
@@ -119,6 +120,21 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
     );
   };
 
+  const handleShowLabelsChange = (nextShow: boolean) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (!nextShow) {
+          next.delete("labels");
+        } else {
+          next.set("labels", "1");
+        }
+        return next;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  };
+
   const stats = [
     { label: "Bones", value: asset.boneCount },
     { label: "Slots", value: asset.slotCount },
@@ -131,6 +147,7 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
     const q = new URLSearchParams();
     if (viewMode !== "skin") q.set("view", viewMode);
     if (boneColor.toLowerCase() !== "#ef4444") q.set("boneColor", boneColor.replace("#", ""));
+    if (showLabels) q.set("labels", "1");
     const qs = q.toString();
     return qs ? `${base}?${qs}` : base;
   };
@@ -175,6 +192,8 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
             onViewModeChange={handleViewModeChange}
             boneColor={boneColor}
             onBoneColorChange={handleBoneColorChange}
+            showLabels={showLabels}
+            onShowLabelsChange={handleShowLabelsChange}
           />
 
           <div className="flex flex-col gap-6">

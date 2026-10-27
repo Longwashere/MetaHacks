@@ -1,4 +1,4 @@
-import { Bone, Eye, Layers, Pause, Play, Repeat } from "lucide-react";
+import { Bone, Eye, Layers, Pause, Play, Repeat, Tag } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { SpinePreview } from "~/components/SpinePreview";
@@ -22,6 +22,9 @@ interface AssetPlayerProps {
   /** Hex color for the bone rig lines (e.g. "#ef4444"). */
   boneColor?: string;
   onBoneColorChange?: (color: string) => void;
+  /** When true, renders bone name tags on the skeleton rig. */
+  showLabels?: boolean;
+  onShowLabelsChange?: (show: boolean) => void;
   className?: string;
 }
 
@@ -43,6 +46,8 @@ export function AssetPlayer({
   onViewModeChange,
   boneColor: controlledBoneColor,
   onBoneColorChange,
+  showLabels: controlledShowLabels,
+  onShowLabelsChange,
   className,
 }: AssetPlayerProps) {
   const [internalViewMode, setInternalViewMode] = useState<SpineViewMode>("skin");
@@ -52,6 +57,10 @@ export function AssetPlayer({
   const [internalBoneColor, setInternalBoneColor] = useState<string>("#ef4444");
   const boneColor = controlledBoneColor ?? internalBoneColor;
   const setBoneColor = onBoneColorChange ?? setInternalBoneColor;
+
+  const [internalShowLabels, setInternalShowLabels] = useState(false);
+  const showLabels = controlledShowLabels ?? internalShowLabels;
+  const setShowLabels = onShowLabelsChange ?? setInternalShowLabels;
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
@@ -91,45 +100,61 @@ export function AssetPlayer({
         </Tabs>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Bone Color Picker (active whenever skeleton/bones are shown) */}
+          {/* Bone Color Picker & Labels Toggle (active whenever skeleton/bones are shown) */}
           {bonesActive && (
-            <div className="flex items-center gap-1.5" role="group" aria-label="Bone rig line color">
-              <span className="text-[11px] font-medium text-muted-foreground">Rig color:</span>
-              <div className="flex items-center gap-1">
-                {BONE_PRESET_COLORS.map((preset) => {
-                  const isSelected = boneColor.toLowerCase() === preset.value.toLowerCase();
-                  return (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      onClick={() => setBoneColor(preset.value)}
-                      className={cn(
-                        "size-4.5 rounded-full transition-transform focus-visible:outline-2 focus-visible:outline-ring",
-                        isSelected ? "scale-115 ring-2 ring-primary ring-offset-1 ring-offset-background" : "border border-border/80 opacity-80 hover:scale-110 hover:opacity-100",
-                      )}
-                      style={{ backgroundColor: preset.value }}
-                      title={preset.name}
-                      aria-label={`Set bone color to ${preset.name}`}
-                      aria-pressed={isSelected}
-                    />
-                  );
-                })}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-1.5" role="group" aria-label="Bone rig line color">
+                <span className="text-[11px] font-medium text-muted-foreground">Rig color:</span>
+                <div className="flex items-center gap-1">
+                  {BONE_PRESET_COLORS.map((preset) => {
+                    const isSelected = boneColor.toLowerCase() === preset.value.toLowerCase();
+                    return (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setBoneColor(preset.value)}
+                        className={cn(
+                          "size-4.5 rounded-full transition-transform focus-visible:outline-2 focus-visible:outline-ring",
+                          isSelected ? "scale-115 ring-2 ring-primary ring-offset-1 ring-offset-background" : "border border-border/80 opacity-80 hover:scale-110 hover:opacity-100",
+                        )}
+                        style={{ backgroundColor: preset.value }}
+                        title={preset.name}
+                        aria-label={`Set bone color to ${preset.name}`}
+                        aria-pressed={isSelected}
+                      />
+                    );
+                  })}
 
-                {/* Custom Color Input */}
-                <label
-                  className="relative size-4.5 cursor-pointer rounded-full border border-border/80 bg-[conic-gradient(at_center,#ef4444,#f59e0b,#22c55e,#06b6d4,#a855f7,#ef4444)] shadow-xs transition-transform hover:scale-110"
-                  title="Choose custom bone color"
-                >
-                  <span className="sr-only">Choose custom bone color</span>
-                  <input
-                    type="color"
-                    value={boneColor}
-                    onChange={(e) => setBoneColor(e.target.value)}
-                    className="absolute inset-0 size-full cursor-pointer opacity-0"
-                    aria-label="Custom bone color picker"
-                  />
-                </label>
+                  {/* Custom Color Input */}
+                  <label
+                    className="relative size-4.5 cursor-pointer rounded-full border border-border/80 bg-[conic-gradient(at_center,#ef4444,#f59e0b,#22c55e,#06b6d4,#a855f7,#ef4444)] shadow-xs transition-transform hover:scale-110"
+                    title="Choose custom bone color"
+                  >
+                    <span className="sr-only">Choose custom bone color</span>
+                    <input
+                      type="color"
+                      value={boneColor}
+                      onChange={(e) => setBoneColor(e.target.value)}
+                      className="absolute inset-0 size-full cursor-pointer opacity-0"
+                      aria-label="Custom bone color picker"
+                    />
+                  </label>
+                </div>
               </div>
+
+              {/* Bone Labels Toggle */}
+              <Toggle
+                size="sm"
+                pressed={showLabels}
+                onPressedChange={setShowLabels}
+                variant="outline"
+                className="h-6.5 gap-1.5 px-2 text-[11px] font-medium"
+                aria-label={showLabels ? "Hide bone labels" : "Show bone labels"}
+                title="Toggle bone name tags on skeleton"
+              >
+                <Tag className="size-3" />
+                <span>Labels</span>
+              </Toggle>
             </div>
           )}
 
@@ -149,6 +174,7 @@ export function AssetPlayer({
         showBones={bonesActive}
         hideSkin={hideSkin}
         boneColor={boneColor}
+        showLabels={bonesActive && showLabels}
         className="border-b"
       />
       <div className="flex flex-col gap-4 p-4">

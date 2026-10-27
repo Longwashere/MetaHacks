@@ -24,6 +24,8 @@ export interface SpinePreviewProps {
   hideSkin?: boolean;
   /** Hex color for the skeleton bone lines. */
   boneColor?: string;
+  /** When true, display floating bone name tags on the skeleton rig. */
+  showLabels?: boolean;
   className?: string;
 }
 
@@ -39,6 +41,7 @@ export function SpinePreview({
   showBones = false,
   hideSkin = false,
   boneColor,
+  showLabels = false,
   className,
 }: SpinePreviewProps) {
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
@@ -69,6 +72,7 @@ export function SpinePreview({
             showBones={bonesActive}
             hideSkin={hideSkin}
             boneColor={boneColor}
+            showLabels={showLabels}
             tint={asset.tint}
             onStatusChange={setStatus}
           />
@@ -84,6 +88,7 @@ export function SpinePreview({
           showBones={bonesActive}
           hideSkin={hideSkin}
           boneColor={boneColor}
+          showLabels={showLabels}
         />
       )}
       {hideSkin && (

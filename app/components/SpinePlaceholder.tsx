@@ -49,9 +49,20 @@ interface SpinePlaceholderProps {
   showBones: boolean;
   hideSkin?: boolean;
   boneColor?: string;
+  showLabels?: boolean;
 }
 
-export function SpinePlaceholder({ category, animation, durationSec, playing, speed, showBones, hideSkin = false, boneColor }: SpinePlaceholderProps) {
+export function SpinePlaceholder({
+  category,
+  animation,
+  durationSec,
+  playing,
+  speed,
+  showBones,
+  hideSkin = false,
+  boneColor,
+  showLabels = false,
+}: SpinePlaceholderProps) {
   const motion = BIPED_MOTION[animation];
   const dur = (durationSec * (motion?.pace ?? 1)) / Math.max(speed, 0.1);
   const bonesActive = showBones || hideSkin;
@@ -68,13 +79,13 @@ export function SpinePlaceholder({ category, animation, durationSec, playing, sp
     >
       <ellipse cx="60" cy="130" rx="28" ry="4" className="fill-foreground/10" />
       {category === "character" ? (
-        <Biped motion={motion ?? BIPED_MOTION.idle} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} />
+        <Biped motion={motion ?? BIPED_MOTION.idle} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} showLabels={showLabels} />
       ) : category === "creature" ? (
-        <Blob animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} />
+        <Blob animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} showLabels={showLabels} />
       ) : category === "effect" ? (
         <Burst />
       ) : category === "prop" ? (
-        <Prop animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} />
+        <Prop animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} showLabels={showLabels} />
       ) : (
         <UiWidget />
       )}
@@ -82,11 +93,31 @@ export function SpinePlaceholder({ category, animation, durationSec, playing, sp
   );
 }
 
-function Bone({ x1, y1, x2, y2, color }: { x1: number; y1: number; x2: number; y2: number; color?: string }) {
+function Bone({
+  x1,
+  y1,
+  x2,
+  y2,
+  color,
+  label,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color?: string;
+  label?: string;
+}) {
   return (
     <g className="stroke-foreground" style={color ? { stroke: color } : undefined}>
       <line x1={x1} y1={y1} x2={x2} y2={y2} strokeWidth="1.4" />
       <circle cx={x1} cy={y1} r="2" className="fill-background" strokeWidth="1.2" />
+      {label && (
+        <g className="pointer-events-none select-none" transform={`translate(${x1 + 4}, ${y1 - 4})`}>
+          <rect x="0" y="-6" width={label.length * 5.2 + 8} height="11" rx="2" fill="rgba(15, 23, 42, 0.88)" stroke="rgba(255, 255, 255, 0.2)" strokeWidth="0.5" />
+          <text x="4" y="2" fill="#f8fafc" fontSize="6.5" fontFamily="monospace" fontWeight="600">{label}</text>
+        </g>
+      )}
     </g>
   );
 }
@@ -100,6 +131,7 @@ function Limb({
   showBones,
   hideSkin,
   boneColor,
+  label,
 }: {
   x1: number;
   y1: number;
@@ -109,24 +141,25 @@ function Limb({
   showBones: boolean;
   hideSkin?: boolean;
   boneColor?: string;
+  label?: string;
 }) {
   return (
     <g className={cn("part", className)}>
       {!hideSkin && (
         <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth="9" strokeLinecap="round" opacity="0.7" />
       )}
-      {showBones && <Bone x1={x1} y1={y1} x2={x2} y2={y2} color={boneColor} />}
+      {showBones && <Bone x1={x1} y1={y1} x2={x2} y2={y2} color={boneColor} label={label} />}
     </g>
   );
 }
 
-function Biped({ motion, showBones, hideSkin, boneColor }: { motion: Motion; showBones: boolean; hideSkin?: boolean; boneColor?: string }) {
+function Biped({ motion, showBones, hideSkin, boneColor, showLabels }: { motion: Motion; showBones: boolean; hideSkin?: boolean; boneColor?: string; showLabels?: boolean }) {
   return (
     <g className={cn("part", motion.root)}>
-      <Limb x1={54} y1={84} x2={50} y2={122} className={motion.legL} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
-      <Limb x1={66} y1={84} x2={70} y2={122} className={motion.legR} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
+      <Limb x1={54} y1={84} x2={50} y2={122} className={motion.legL} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} label={showLabels ? "leg_L" : undefined} />
+      <Limb x1={66} y1={84} x2={70} y2={122} className={motion.legR} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} label={showLabels ? "leg_R" : undefined} />
       <g className={cn("part", motion.body)}>
-        <Limb x1={46} y1={54} x2={38} y2={86} className={motion.armL} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
+        <Limb x1={46} y1={54} x2={38} y2={86} className={motion.armL} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} label={showLabels ? "arm_L" : undefined} />
         {!hideSkin ? (
           <>
             <rect x="45" y="48" width="30" height="40" rx="11" fill="currentColor" />
@@ -140,11 +173,11 @@ function Biped({ motion, showBones, hideSkin, boneColor }: { motion: Motion; sho
             <circle cx="60" cy="33" r="15" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
           </>
         )}
-        <Limb x1={74} y1={54} x2={82} y2={86} className={motion.armR} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
+        <Limb x1={74} y1={54} x2={82} y2={86} className={motion.armR} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} label={showLabels ? "arm_R" : undefined} />
         {showBones && (
           <>
-            <Bone x1={60} y1={88} x2={60} y2={50} color={boneColor} />
-            <Bone x1={60} y1={50} x2={60} y2={20} color={boneColor} />
+            <Bone x1={60} y1={88} x2={60} y2={50} color={boneColor} label={showLabels ? "spine" : undefined} />
+            <Bone x1={60} y1={50} x2={60} y2={20} color={boneColor} label={showLabels ? "head" : undefined} />
           </>
         )}
       </g>
@@ -152,7 +185,19 @@ function Biped({ motion, showBones, hideSkin, boneColor }: { motion: Motion; sho
   );
 }
 
-function Blob({ animation, showBones, hideSkin, boneColor }: { animation: string; showBones: boolean; hideSkin?: boolean; boneColor?: string }) {
+function Blob({
+  animation,
+  showBones,
+  hideSkin,
+  boneColor,
+  showLabels,
+}: {
+  animation: string;
+  showBones: boolean;
+  hideSkin?: boolean;
+  boneColor?: string;
+  showLabels?: boolean;
+}) {
   const anim =
     animation === "jump" ? "animate-spine-jump" : animation === "attack" ? "animate-spine-sway" : "animate-spine-pulse";
   return (
@@ -170,9 +215,9 @@ function Blob({ animation, showBones, hideSkin, boneColor }: { animation: string
       )}
       {showBones && (
         <>
-          <Bone x1={60} y1={124} x2={60} y2={86} color={boneColor} />
-          <Bone x1={60} y1={86} x2={40} y2={66} color={boneColor} />
-          <Bone x1={60} y1={86} x2={82} y2={66} color={boneColor} />
+          <Bone x1={60} y1={124} x2={60} y2={86} color={boneColor} label={showLabels ? "body" : undefined} />
+          <Bone x1={60} y1={86} x2={40} y2={66} color={boneColor} label={showLabels ? "eye_l" : undefined} />
+          <Bone x1={60} y1={86} x2={82} y2={66} color={boneColor} label={showLabels ? "eye_r" : undefined} />
         </>
       )}
     </g>
@@ -195,7 +240,19 @@ function Burst() {
   );
 }
 
-function Prop({ animation, showBones, hideSkin, boneColor }: { animation: string; showBones: boolean; hideSkin?: boolean; boneColor?: string }) {
+function Prop({
+  animation,
+  showBones,
+  hideSkin,
+  boneColor,
+  showLabels,
+}: {
+  animation: string;
+  showBones: boolean;
+  hideSkin?: boolean;
+  boneColor?: string;
+  showLabels?: boolean;
+}) {
   const lid = animation === "open" || animation === "collect" ? "animate-spine-strike origin-bottom-left!" : "";
   return (
     <g className="part animate-spine-bob">
@@ -215,7 +272,7 @@ function Prop({ animation, showBones, hideSkin, boneColor }: { animation: string
           </g>
         </>
       )}
-      {showBones && <Bone x1={28} y1={74} x2={92} y2={74} color={boneColor} />}
+      {showBones && <Bone x1={28} y1={74} x2={92} y2={74} color={boneColor} label={showLabels ? "lid_joint" : undefined} />}
     </g>
   );
 }

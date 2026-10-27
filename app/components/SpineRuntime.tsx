@@ -18,6 +18,8 @@ interface SpineRuntimeProps {
   hideSkin?: boolean;
   /** Hex color for the bone rig lines (e.g. "#ef4444"). */
   boneColor?: string;
+  /** When true, renders floating tags labeling each bone on the skeleton. */
+  showLabels?: boolean;
   /** Hex color multiplied over the textures (mock remixes). */
   tint: string | null;
   onStatusChange?: (status: SpineRuntimeStatus) => void;
@@ -51,12 +53,16 @@ export function SpineRuntime({
   showBones,
   hideSkin = false,
   boneColor,
+  showLabels = false,
   tint,
   onStatusChange,
   className,
 }: SpineRuntimeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<SpinePlayer | null>(null);
+  const tempVec = useRef<{ set: (x: number, y: number, z: number) => void; x: number; y: number } | null>(null);
+
   // The player reads config.debug every frame, so mutating this object toggles debug drawing.
   const debugRef = useRef<DebugFlags>({
     bones: false,
@@ -68,13 +74,13 @@ export function SpineRuntime({
     points: false,
     hulls: false,
   });
-  // Lets the (async) success callback see the latest props without re-creating the player.
-  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor });
+  // Lets the (async) callbacks see the latest props without re-creating the player.
+  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels });
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
   const inView = useInView(containerRef);
 
   useEffect(() => {
-    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor };
+    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels };
   });
 
   useEffect(() => {
@@ -88,8 +94,10 @@ export function SpineRuntime({
     let cancelled = false;
     setStatus("loading");
 
-    import("@esotericsoftware/spine-player").then(({ SpinePlayer }) => {
+    import("@esotericsoftware/spine-player").then(({ SpinePlayer, Vector3 }) => {
       if (cancelled) return;
+      tempVec.current = new Vector3();
+
       playerRef.current = new SpinePlayer(container, {
         skeleton: files.skeletonUrl,
         atlas: files.atlasUrl,
@@ -104,6 +112,113 @@ export function SpineRuntime({
         preserveDrawingBuffer: false,
         debug: debugRef.current,
         viewport: { padLeft: "8%", padRight: "8%", padTop: "8%", padBottom: "8%", transitionTime: 0.25 },
+        draw: (player) => {
+          const overlay = overlayCanvasRef.current;
+          if (!overlay) return;
+          const ctx = overlay.getContext("2d");
+          if (!ctx) return;
+
+          const glCanvas = player.canvas;
+          if (!glCanvas) return;
+
+          const dpr = window.devicePixelRatio || 1;
+          const displayW = glCanvas.clientWidth;
+          const displayH = glCanvas.clientHeight;
+          if (displayW === 0 || displayH === 0) return;
+
+          const physicalW = Math.round(displayW * dpr);
+          const physicalH = Math.round(displayH * dpr);
+          if (overlay.width !== physicalW || overlay.height !== physicalH) {
+            overlay.width = physicalW;
+            overlay.height = physicalH;
+          }
+
+          ctx.save();
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+          if (!latest.current.showLabels) {
+            ctx.restore();
+            return;
+          }
+
+          const camera = player.sceneRenderer?.camera;
+          const skeleton = player.skeleton;
+          const vec = tempVec.current;
+          if (!camera || !skeleton || !vec) {
+            ctx.restore();
+            return;
+          }
+
+          ctx.scale(dpr, dpr);
+
+          const currentBoneColor = latest.current.boneColor || "#ef4444";
+          const bones = skeleton.bones;
+
+          ctx.font = "600 9px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+          ctx.textBaseline = "middle";
+
+          for (let i = 0; i < bones.length; i++) {
+            const bone = bones[i];
+            const name = bone.data.name;
+            if (!name) continue;
+
+            vec.set(skeleton.x + bone.worldX, skeleton.y + bone.worldY, 0);
+            (camera as unknown as { worldToScreen: (v: unknown, w: number, h: number) => void }).worldToScreen(vec, displayW, displayH);
+
+            const screenX = vec.x;
+            const screenY = displayH - vec.y;
+
+            // Only draw if bone origin is on canvas
+            if (screenX < -20 || screenX > displayW + 20 || screenY < -20 || screenY > displayH + 20) {
+              continue;
+            }
+
+            const textWidth = ctx.measureText(name).width;
+            const badgeW = textWidth + 16;
+            const badgeH = 15;
+            const badgeX = screenX + 6;
+            const badgeY = screenY - 7;
+
+            // Joint anchor dot
+            ctx.beginPath();
+            ctx.arc(screenX, screenY, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = currentBoneColor;
+            ctx.fill();
+
+            // Connector line from joint to badge
+            ctx.beginPath();
+            ctx.moveTo(screenX, screenY);
+            ctx.lineTo(badgeX, badgeY + badgeH / 2);
+            ctx.strokeStyle = currentBoneColor + "99";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Label pill background
+            ctx.beginPath();
+            if (ctx.roundRect) {
+              ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3.5);
+            } else {
+              ctx.rect(badgeX, badgeY, badgeW, badgeH);
+            }
+            ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Little dot inside badge
+            ctx.beginPath();
+            ctx.arc(badgeX + 6, badgeY + badgeH / 2, 2, 0, Math.PI * 2);
+            ctx.fillStyle = currentBoneColor;
+            ctx.fill();
+
+            // Bone name text
+            ctx.fillStyle = "#f8fafc";
+            ctx.fillText(name, badgeX + 11, badgeY + badgeH / 2 + 0.5);
+          }
+
+          ctx.restore();
+        },
         success: (player) => {
           if (cancelled) return;
           const { animation, loop, playing, speed, tint, hideSkin } = latest.current;
@@ -208,6 +323,15 @@ export function SpineRuntime({
         status === "ready" ? "opacity-100" : "opacity-0",
         className,
       )}
-    />
+    >
+      <canvas
+        ref={overlayCanvasRef}
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-0 z-10 size-full transition-opacity duration-200",
+          showLabels ? "opacity-100" : "opacity-0",
+        )}
+      />
+    </div>
   );
 }
