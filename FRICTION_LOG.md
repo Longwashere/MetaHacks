@@ -53,6 +53,14 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-27 — Muse Image sometimes rejects remix prompts under its content policy
+- **What happened:** every now and then a remix failed with "The image model declined this prompt", and the user had to reword it themselves and spend another run.
+- **Evidence (reported by the user; request not captured here):** `POST /images/edits`, `muse-image-1.0`; the error body contains `content_policy_violation`. The rejected prompt is Muse Spark's own `editPrompt`, so our own model writes prompts the image model refuses.
+- **Cost:** a failed run per rejection (the planning call and any pages already painted), plus the user's time.
+- **Workaround / status:** on a `content_policy_violation`, Muse Spark re-words the `editPrompt` once and the page is retried; the UI shows the new prompt with a "Re-worded for content policy" badge (`rewordForContentPolicy` in `backend/src/lib/meta.ts`, retry in `remix.ts`). Not yet verified against a real rejection.
+- **Ask for Meta:** say in the error which part of the prompt was flagged, and give Muse Spark a way to check a prompt against Muse Image's policy before spending an image call.
+- **Lesson:** capture the rejected prompt and full error body next time it happens (`prompts.json` now records the re-worded prompt).
+
 ### 2026-10-27 — `/images/edits` has no transparent output
 - **What happened:** we needed transparent sprite pages. The agent first claimed transparency was impossible without testing it; the user pushed back, and three test calls settled it.
 - **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`, an RGBA PNG input, `size: "1024x1024"`:

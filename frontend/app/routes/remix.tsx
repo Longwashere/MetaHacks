@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Palette, Search, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Palette, Search, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Form,
@@ -294,7 +294,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
               <Alert variant="destructive">
                 <AlertCircle />
                 <AlertTitle>Remix failed</AlertTitle>
-                <AlertDescription>{job.error ?? "Something went wrong. Try again with a different prompt."}</AlertDescription>
+                <AlertDescription>
+                  {job.error ?? "Something went wrong. Try again with a different prompt."}
+                  <ExpandedPrompt job={job} />
+                </AlertDescription>
               </Alert>
             ) : job.status === "succeeded" && job.asset ? (
               <>
@@ -306,7 +309,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="mr-auto">
                     <h2 className="text-lg font-semibold">{job.asset.name}</h2>
-                    <p className="text-xs text-muted-foreground">Remix of {base.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Remix of {base.name}
+                      {job.promptStatus === "reworded" && " · prompt re-worded for content policy"}
+                    </p>
                   </div>
                   <SaveButton assetId={job.asset.id} assetName={job.asset.name} saved={savedIds.includes(job.asset.id)} />
                   <Button asChild variant="outline">
@@ -320,12 +326,24 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
               <Card className="h-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Loader2 className="size-4 animate-spin" /> {job.stage}
+                    <Loader2 className="size-4 animate-spin" />{" "}
+                    {job.promptStatus === "rewording" ? "Re-wording the prompt" : job.stage}
                   </CardTitle>
                   <CardDescription className="line-clamp-2">“{job.input.prompt}”</CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
                   <RemixProgress job={job} />
+                  {job.promptStatus === "rewording" && (
+                    <Alert>
+                      <ShieldAlert />
+                      <AlertTitle>The image model declined the prompt</AlertTitle>
+                      <AlertDescription>
+                        Its content policy rejected the prompt below, so Muse is re-wording it to keep the same look. The
+                        page is then painted again.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  <ExpandedPrompt job={job} />
                   <SpinePreview
                     asset={job.base}
                     className="animate-pulse rounded-lg opacity-50"
@@ -370,6 +388,25 @@ const REMIX_STEPS = [
   { label: "Paint textures", until: 0.95 },
   { label: "Pack atlas", until: 1 },
 ];
+
+/** Muse's expanded prompt for the image model, flagged when it was re-worded for the content policy. */
+function ExpandedPrompt({ job }: { job: RemixJob }) {
+  if (!job.editPrompt) return null;
+  return (
+    <div className="flex w-full flex-col gap-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-foreground">Expanded prompt</span>
+        {job.promptStatus === "rewording" && job.status === "running" && (
+          <Badge variant="outline">
+            <Loader2 className="animate-spin" /> Re-wording for content policy
+          </Badge>
+        )}
+        {job.promptStatus === "reworded" && <Badge variant="secondary">Re-worded for content policy</Badge>}
+      </div>
+      <p className="max-h-32 overflow-y-auto text-muted-foreground">{job.editPrompt}</p>
+    </div>
+  );
+}
 
 function RemixProgress({ job }: { job: RemixJob }) {
   const percent = Math.round(job.progress * 100);

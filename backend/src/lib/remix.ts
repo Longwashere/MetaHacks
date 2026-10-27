@@ -2,12 +2,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isSafePageName, parseAtlas } from "./atlas.js";
 import { ASSET_BASE_URL, PUBLIC_URL, REMIX_OUTPUT_DIR } from "./config.js";
-import { keptPartProperties, planRemix, repaintPage } from "./meta.js";
+import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy } from "./meta.js";
 import { decodePage, fitToPage, pickBackground, toDataUrl, toModelInput } from "./textures.js";
-import type { RemixRequest, RemixResult } from "./types.js";
+import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
 
 export interface RemixProgress {
   (progress: number, stage: string): void;
+}
+
+/** Called with the edit prompt Muse Image is given, and whether it's being re-worded for the content policy. */
+export interface RemixPromptUpdate {
+  (editPrompt: string, status: PromptStatus): void;
 }
 
 /** Longest side of the images sent to Muse Image (its quality tops out around 1600px). */
@@ -27,11 +32,15 @@ const PAGE_EXPECTED_MS = 10_000;
  *
  * Throw an Error with a user-facing message on failure; the job runner stores it as
  * `job.error`. `signal` fires when the whole job runs out of time — pass it through.
+ *
+ * If Muse Image rejects the prompt under its content policy, Muse re-words the edit
+ * prompt once and the page is retried; the new prompt is used for the remaining pages.
  */
 export async function runRemix(
   jobId: string,
   input: RemixRequest,
   onProgress: RemixProgress,
+  onPrompt: RemixPromptUpdate,
   signal: AbortSignal,
 ): Promise<RemixResult> {
   const { base } = input;
@@ -60,9 +69,11 @@ export async function runRemix(
     ),
   );
 
+  onPrompt(plan.editPrompt, "original");
+
   const kept = keptPartProperties(input);
-  const prompt = [
-    plan.editPrompt,
+  const buildImagePrompt = (editPrompt: string) => [
+    editPrompt,
     // With "auto", the plan already carries the style (the original one, or the prompt's).
     input.style === "auto" ? "" : `Art style: ${input.style}.`,
     `This image is a sprite atlas of separate character parts on a solid ${background.name} background.`,
@@ -72,16 +83,32 @@ export async function runRemix(
   ]
     .filter(Boolean)
     .join(" ");
+  let editPrompt = plan.editPrompt;
+  let reworded: string | null = null;
 
   // Timestamp first so folders sort by creation time when browsing REMIX_OUTPUT_DIR.
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
   const outDir = path.join(REMIX_OUTPUT_DIR, folder);
   await mkdir(outDir, { recursive: true });
   const { base: _base, ...request } = input;
-  await writeFile(
-    path.join(outDir, "prompts.json"),
-    JSON.stringify({ jobId, createdAt: new Date().toISOString(), base: base.name, request, plan, imagePrompt: prompt }, null, 2),
-  );
+  const writePrompts = () =>
+    writeFile(
+      path.join(outDir, "prompts.json"),
+      JSON.stringify(
+        {
+          jobId,
+          createdAt: new Date().toISOString(),
+          base: base.name,
+          request,
+          plan,
+          imagePrompt: buildImagePrompt(editPrompt),
+          ...(reworded ? { rewordedForContentPolicy: true } : {}),
+        },
+        null,
+        2,
+      ),
+    );
+  await writePrompts();
 
   let reference: string | null = null;
   for (const [i, page] of pages.entries()) {
@@ -92,13 +119,33 @@ export async function runRemix(
       0.2 + (0.75 * (i + 1)) / pages.length,
       pages.length > 1 ? `Painting page ${i + 1} of ${pages.length}` : "Painting new textures",
       PAGE_EXPECTED_MS,
-      () =>
-        repaintPage(
-          modelInput,
-          reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
-          reference,
-          signal,
-        ),
+      async () => {
+        const paint = () => {
+          const prompt = buildImagePrompt(editPrompt);
+          return repaintPage(
+            modelInput,
+            reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
+            reference,
+            signal,
+          );
+        };
+        try {
+          return await paint();
+        } catch (error) {
+          // Re-word once per job; a second rejection reaches the user.
+          if (!(error instanceof ContentPolicyError) || reworded) throw error;
+          onPrompt(editPrompt, "rewording");
+          reworded = await rewordForContentPolicy(editPrompt, signal);
+          if (!reworded) {
+            onPrompt(editPrompt, "original");
+            throw error;
+          }
+          editPrompt = reworded;
+          onPrompt(editPrompt, "reworded");
+          await writePrompts();
+          return await paint();
+        }
+      },
     );
     signal.throwIfAborted();
     // The raw model output, kept for debugging how well it lined up with the page.

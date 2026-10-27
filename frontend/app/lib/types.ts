@@ -86,6 +86,8 @@ export interface SpineAsset {
 
 export type RemixStatus = "queued" | "running" | "succeeded" | "failed";
 
+export type PromptStatus = "original" | "rewording" | "reworded";
+
 /**
  * A remix keeps the base rig's skeleton, bones, slots and animations and only
  * regenerates the texture (atlas pages) from a prompt.
@@ -116,6 +118,13 @@ export interface RemixJob {
   /** Summary of the base rig so the progress UI can render without another fetch. */
   base: PreviewableAsset & Pick<SpineAsset, "id" | "name">;
   createdAt: string;
+  /** Muse's expanded prompt for the image model; null until the look is planned. */
+  editPrompt: string | null;
+  /**
+   * "rewording" while Muse re-words `editPrompt` after the image model's content policy
+   * rejected it, "reworded" once the new prompt is in use.
+   */
+  promptStatus: PromptStatus;
   asset: SpineAsset | null;
   error: string | null;
 }

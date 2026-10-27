@@ -9,6 +9,8 @@ export type RemixStyle = (typeof REMIX_STYLES)[number];
 
 export type RemixStatus = "queued" | "running" | "succeeded" | "failed";
 
+export type PromptStatus = "original" | "rewording" | "reworded";
+
 export interface RemixInput {
   baseAssetId: string;
   /** Describes the new look, e.g. "black and crimson ninja robes". */
@@ -53,6 +55,13 @@ export interface RemixJob {
   stage: string;
   input: RemixRequest;
   createdAt: string; // ISO 8601
+  /** Muse's expanded prompt for the image model; null until the look is planned. */
+  editPrompt: string | null;
+  /**
+   * "rewording" while Muse re-words `editPrompt` after the image model's content policy
+   * rejected it, "reworded" once the new prompt is in use.
+   */
+  promptStatus: PromptStatus;
   result: RemixResult | null;
   error: string | null;
 }

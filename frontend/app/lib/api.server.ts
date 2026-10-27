@@ -183,6 +183,8 @@ interface BackendRemixJob {
   status: RemixJob["status"];
   progress: number;
   stage: string;
+  editPrompt: string | null;
+  promptStatus: RemixJob["promptStatus"];
   result: { name: string; atlasUrl: string; textureUrls: string[] } | null;
   error: string | null;
 }
@@ -224,6 +226,8 @@ export async function createRemixJob(userId: string, input: RemixInput): Promise
       tint: base.tint,
     },
     createdAt: new Date().toISOString(),
+    editPrompt: null,
+    promptStatus: "original",
     asset: null,
     error: null,
   };
@@ -259,6 +263,8 @@ function applyBackendJob(job: RemixJob, remote: BackendRemixJob) {
   job.status = remote.status;
   job.progress = remote.progress;
   job.stage = remote.stage;
+  job.editPrompt = remote.editPrompt;
+  job.promptStatus = remote.promptStatus;
   job.error = remote.error;
   if (remote.status !== "succeeded" || job.asset) return;
 

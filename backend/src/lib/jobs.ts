@@ -16,6 +16,8 @@ export function createRemixJob(input: RemixRequest): RemixJob {
     stage: "Queued",
     input,
     createdAt: new Date().toISOString(),
+    editPrompt: null,
+    promptStatus: "original",
     result: null,
     error: null,
   };
@@ -38,6 +40,10 @@ async function runJob(job: RemixJob) {
       (progress, stage) => {
         job.progress = Math.min(Math.max(progress, 0), 0.99);
         job.stage = stage;
+      },
+      (editPrompt, promptStatus) => {
+        job.editPrompt = editPrompt;
+        job.promptStatus = promptStatus;
       },
       deadline,
     );

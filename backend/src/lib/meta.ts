@@ -161,11 +161,52 @@ export async function repaintPage(
     const text = await res.text();
     if (res.status === 503 && attempt === 0) continue;
     console.error(`Muse Image request failed (${res.status})`, text);
-    if (text.includes("content_policy_violation")) {
-      throw new Error("The image model declined this prompt. Try describing the look differently.");
-    }
+    if (text.includes("content_policy_violation")) throw new ContentPolicyError();
     throw new Error("Couldn't paint the new textures. Try again.");
   }
+}
+
+/** Muse Image refused the prompt under its content policy. The message is user-facing. */
+export class ContentPolicyError extends Error {
+  constructor() {
+    super("The image model declined this prompt. Try describing the look differently.");
+    this.name = "ContentPolicyError";
+  }
+}
+
+const REWORD_SYSTEM_PROMPT = `You rewrite prompts for an image-editing model that repaints 2D game sprite sheets.
+The prompt you are given was rejected by the Muse Image content policy. Re-word this prompt so it does not get rejected by the Muse Image generation content policy, while keeping the same look: materials, colors, patterns and art style. Soften or drop anything violent, gory, sexual, hateful, or naming real people, brands or copyrighted characters; describe the look in neutral visual terms instead.
+Reply with the new prompt only: one paragraph, at most 1000 characters, no quotes or markdown.`;
+
+/**
+ * Asks Muse Spark to re-word an edit prompt that Muse Image rejected under its content
+ * policy. Returns null when the reply is unusable.
+ */
+export async function rewordForContentPolicy(editPrompt: string, signal: AbortSignal): Promise<string | null> {
+  logPrompt(`chat/completions (${MUSE_MODEL}) reword for content policy`, editPrompt);
+  const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: MUSE_MODEL,
+      messages: [
+        { role: "system", content: REWORD_SYSTEM_PROMPT },
+        { role: "user", content: editPrompt },
+      ],
+    }),
+    timeoutMs: MUSE_TIMEOUT_MS,
+    signal,
+  });
+  if (!res.ok) {
+    console.error(`Muse reword request failed (${res.status})`, await res.text());
+    return null;
+  }
+  const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
+  if (typeof content !== "string") return null;
+  const reworded = content.replace(/^["'`\s]+|["'`\s]+$/g, "").replace(/\s+/g, " ").trim().slice(0, 1500);
+  if (reworded.length < 20) return null;
+  logPrompt(`chat/completions (${MUSE_MODEL}) reworded`, reworded);
+  return reworded;
 }
 
 /** Logs a prompt sent to (or plan returned by) the Meta API. Images are never logged. */
