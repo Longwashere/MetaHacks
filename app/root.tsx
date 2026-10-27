@@ -5,10 +5,19 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useFetcher,
+  useRouteLoaderData,
 } from "react-router";
 
 import type { Route } from "./+types/root";
+import { Toaster } from "~/components/ui/sonner";
+import { TooltipProvider } from "~/components/ui/tooltip";
+import { getTheme, type Theme } from "~/lib/theme.server";
 import "./app.css";
+
+export async function loader({ request }: Route.LoaderArgs) {
+  return { theme: await getTheme(request) };
+}
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -24,16 +33,26 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  const loaderData = useRouteLoaderData<typeof loader>("root");
+  // Optimistically apply the theme while the ThemeToggle fetcher is in flight.
+  const themeFetcher = useFetcher({ key: "theme" });
+  const pendingTheme = themeFetcher.formData?.get("theme");
+  const theme: Theme =
+    pendingTheme === "light" || pendingTheme === "dark"
+      ? pendingTheme
+      : (loaderData?.theme ?? "dark");
+
   return (
-    <html lang="en">
+    <html lang="en" className={theme}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
       </head>
-      <body>
-        {children}
+      <body className="min-h-svh antialiased">
+        <TooltipProvider>{children}</TooltipProvider>
+        <Toaster theme={theme} richColors={false} position="bottom-right" />
         <ScrollRestoration />
         <Scripts />
       </body>
@@ -62,11 +81,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   return (
-    <main className="pt-16 p-4 container mx-auto">
-      <h1>{message}</h1>
-      <p>{details}</p>
+    <main className="container mx-auto p-4 pt-16">
+      <h1 className="text-2xl font-semibold">{message}</h1>
+      <p className="text-muted-foreground">{details}</p>
       {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
+        <pre className="mt-4 w-full overflow-x-auto rounded-md bg-muted p-4 text-sm">
           <code>{stack}</code>
         </pre>
       )}

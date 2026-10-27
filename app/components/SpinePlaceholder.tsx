@@ -1,0 +1,195 @@
+import { cn } from "~/lib/utils";
+import type { AssetCategory } from "~/lib/types";
+
+// Stand-in for assets that have no exported Spine files yet: a stylised SVG rig
+// whose animations are faked with CSS keyframes (see the spine-* keyframes in app.css).
+// Rendered inside <SpinePreview>, which supplies the frame and accent color.
+
+interface Motion {
+  root?: string;
+  body?: string;
+  armL?: string;
+  armR?: string;
+  legL?: string;
+  legR?: string;
+  /** Multiplier on the clip duration. */
+  pace?: number;
+}
+
+const BIPED_MOTION: Record<string, Motion> = {
+  idle: { body: "animate-spine-bob", armL: "animate-spine-sway", armR: "animate-spine-sway" },
+  walk: {
+    body: "animate-spine-bob",
+    armL: "animate-spine-swing",
+    armR: "animate-spine-swing-rev",
+    legL: "animate-spine-swing-rev",
+    legR: "animate-spine-swing",
+    pace: 1,
+  },
+  run: {
+    body: "animate-spine-bob",
+    armL: "animate-spine-swing",
+    armR: "animate-spine-swing-rev",
+    legL: "animate-spine-swing-rev",
+    legR: "animate-spine-swing",
+    pace: 0.6,
+  },
+  jump: { root: "animate-spine-jump", armL: "animate-spine-sway", armR: "animate-spine-sway" },
+  attack: { body: "animate-spine-sway", armR: "animate-spine-strike" },
+  hit: { body: "animate-spine-sway", pace: 0.5 },
+  death: { body: "animate-spine-sway", root: "animate-spine-pulse" },
+};
+
+interface SpinePlaceholderProps {
+  category: AssetCategory;
+  animation: string;
+  durationSec: number;
+  playing: boolean;
+  speed: number;
+  showBones: boolean;
+}
+
+export function SpinePlaceholder({ category, animation, durationSec, playing, speed, showBones }: SpinePlaceholderProps) {
+  const motion = BIPED_MOTION[animation];
+  const dur = (durationSec * (motion?.pace ?? 1)) / Math.max(speed, 0.1);
+
+  return (
+    <svg
+      viewBox="0 0 120 140"
+      aria-hidden
+      className={cn(
+        "size-3/4 [&_.part]:origin-top [&_.part]:[transform-box:fill-box]",
+        !playing && "[&_*]:[animation-play-state:paused]",
+      )}
+      style={{ "--spine-dur": `${dur}s` } as React.CSSProperties}
+    >
+      <ellipse cx="60" cy="130" rx="28" ry="4" className="fill-foreground/10" />
+      {category === "character" ? (
+        <Biped motion={motion ?? BIPED_MOTION.idle} showBones={showBones} />
+      ) : category === "creature" ? (
+        <Blob animation={animation} showBones={showBones} />
+      ) : category === "effect" ? (
+        <Burst />
+      ) : category === "prop" ? (
+        <Prop animation={animation} showBones={showBones} />
+      ) : (
+        <UiWidget />
+      )}
+    </svg>
+  );
+}
+
+function Bone({ x1, y1, x2, y2 }: { x1: number; y1: number; x2: number; y2: number }) {
+  return (
+    <g className="stroke-foreground">
+      <line x1={x1} y1={y1} x2={x2} y2={y2} strokeWidth="1.2" />
+      <circle cx={x1} cy={y1} r="2" className="fill-background" strokeWidth="1.2" />
+    </g>
+  );
+}
+
+function Limb({
+  x1,
+  y1,
+  x2,
+  y2,
+  className,
+  showBones,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  className?: string;
+  showBones: boolean;
+}) {
+  return (
+    <g className={cn("part", className)}>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth="9" strokeLinecap="round" opacity="0.7" />
+      {showBones && <Bone x1={x1} y1={y1} x2={x2} y2={y2} />}
+    </g>
+  );
+}
+
+function Biped({ motion, showBones }: { motion: Motion; showBones: boolean }) {
+  return (
+    <g className={cn("part", motion.root)}>
+      <Limb x1={54} y1={84} x2={50} y2={122} className={motion.legL} showBones={showBones} />
+      <Limb x1={66} y1={84} x2={70} y2={122} className={motion.legR} showBones={showBones} />
+      <g className={cn("part", motion.body)}>
+        <Limb x1={46} y1={54} x2={38} y2={86} className={motion.armL} showBones={showBones} />
+        <rect x="45" y="48" width="30" height="40" rx="11" fill="currentColor" />
+        <circle cx="60" cy="33" r="15" fill="currentColor" />
+        <circle cx="55" cy="31" r="2.2" className="fill-background" />
+        <circle cx="65" cy="31" r="2.2" className="fill-background" />
+        <Limb x1={74} y1={54} x2={82} y2={86} className={motion.armR} showBones={showBones} />
+        {showBones && (
+          <>
+            <Bone x1={60} y1={88} x2={60} y2={50} />
+            <Bone x1={60} y1={50} x2={60} y2={20} />
+          </>
+        )}
+      </g>
+    </g>
+  );
+}
+
+function Blob({ animation, showBones }: { animation: string; showBones: boolean }) {
+  const anim =
+    animation === "jump" ? "animate-spine-jump" : animation === "attack" ? "animate-spine-sway" : "animate-spine-pulse";
+  return (
+    <g className={cn("part origin-bottom!", anim)}>
+      <path d="M22 124 C 18 76, 44 52, 62 52 C 84 52, 104 78, 98 124 Z" fill="currentColor" />
+      <circle cx="50" cy="86" r="6" className="fill-background" />
+      <circle cx="74" cy="86" r="6" className="fill-background" />
+      <circle cx="51" cy="87" r="2.5" className="fill-foreground" />
+      <circle cx="75" cy="87" r="2.5" className="fill-foreground" />
+      {showBones && (
+        <>
+          <Bone x1={60} y1={124} x2={60} y2={86} />
+          <Bone x1={60} y1={86} x2={40} y2={66} />
+          <Bone x1={60} y1={86} x2={82} y2={66} />
+        </>
+      )}
+    </g>
+  );
+}
+
+function Burst() {
+  return (
+    <g>
+      <g className="part animate-spine-spin origin-center!">
+        {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+          <rect key={deg} x="58" y="20" width="4" height="22" rx="2" fill="currentColor" opacity="0.6" transform={`rotate(${deg} 60 70)`} />
+        ))}
+      </g>
+      <g className="part animate-spine-pulse origin-center!">
+        <circle cx="60" cy="70" r="26" fill="none" stroke="currentColor" strokeWidth="4" />
+        <circle cx="60" cy="70" r="14" fill="currentColor" />
+      </g>
+    </g>
+  );
+}
+
+function Prop({ animation, showBones }: { animation: string; showBones: boolean }) {
+  const lid = animation === "open" || animation === "collect" ? "animate-spine-strike origin-bottom-left!" : "";
+  return (
+    <g className="part animate-spine-bob">
+      <rect x="28" y="72" width="64" height="50" rx="6" fill="currentColor" />
+      <rect x="54" y="84" width="12" height="14" rx="2" className="fill-background" />
+      <g className={cn("part", lid)}>
+        <rect x="26" y="54" width="68" height="22" rx="8" fill="currentColor" opacity="0.75" />
+      </g>
+      {showBones && <Bone x1={28} y1={74} x2={92} y2={74} />}
+    </g>
+  );
+}
+
+function UiWidget() {
+  return (
+    <g className="part animate-spine-pulse origin-center!">
+      <rect x="14" y="48" width="92" height="44" rx="22" fill="none" stroke="currentColor" strokeWidth="4" />
+      <path d="M52 58 L 74 70 L 52 82 Z" fill="currentColor" />
+    </g>
+  );
+}
