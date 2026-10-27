@@ -89,13 +89,13 @@ export function TweakPanel({
   };
 
   return (
-    <div className={cn("flex flex-col overflow-hidden rounded-xl border bg-card", className)}>
-      <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-4 py-2.5">
-        <div className="flex flex-col">
-          <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+    <div className={cn("flex flex-col gap-4", className)}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <h2 className="flex items-center gap-1.5 leading-none font-semibold">
             <SlidersHorizontal className="size-4 text-muted-foreground" /> Tweak the rig
           </h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {save.disabledReason ??
               "Save writes Look, Rig and Parts edits into the remix's skeleton file. Motion and debug settings are preview only."}
           </p>
@@ -120,14 +120,14 @@ export function TweakPanel({
       </div>
 
       <Tabs defaultValue="look" className="gap-0">
-        <TabsList className="mx-4 mt-3 grid w-auto grid-cols-4">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="look">Look</TabsTrigger>
           <TabsTrigger value="motion">Motion</TabsTrigger>
           <TabsTrigger value="rig">Rig</TabsTrigger>
           <TabsTrigger value="parts">Parts</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="look" className="flex flex-col gap-4 p-4">
+        <TabsContent value="look" className="flex flex-col gap-4 pt-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <ColorField id="tw-tint" label="Tint" value={tweaks.tint} onChange={(tint) => set({ tint })} onClear={tweaks.tint !== "#ffffff" ? () => set({ tint: "#ffffff" }) : undefined} />
             <ColorField
@@ -172,7 +172,7 @@ export function TweakPanel({
           </fieldset>
         </TabsContent>
 
-        <TabsContent value="motion" className="flex flex-col gap-4 p-4">
+        <TabsContent value="motion" className="flex flex-col gap-4 pt-4">
           <SliderField
             id="tw-mix"
             label="Crossfade between animations"
@@ -235,7 +235,7 @@ export function TweakPanel({
           />
         </TabsContent>
 
-        <TabsContent value="rig" className="flex flex-col gap-4 p-4">
+        <TabsContent value="rig" className="flex flex-col gap-4 pt-4">
           {!rig ? (
             <p className="text-sm text-muted-foreground">Loading the rig…</p>
           ) : (
@@ -290,7 +290,7 @@ export function TweakPanel({
           )}
         </TabsContent>
 
-        <TabsContent value="parts" className="flex flex-col gap-4 p-4">
+        <TabsContent value="parts" className="flex flex-col gap-4 pt-4">
           {!rig ? (
             <p className="text-sm text-muted-foreground">Loading the rig…</p>
           ) : (

@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Palette, Search, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Palette, Search, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -44,7 +44,7 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { Slider } from "~/components/ui/slider";
-import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Textarea } from "~/components/ui/textarea";
 import {
   createRemixJob,
@@ -198,6 +198,16 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   const tweak = useTweakSession(base?.id ?? null);
   const savedRemix = job?.status === "succeeded" ? job.asset : null;
   const tweakPanel = { ...tweak.panel, save: useSaveTweaks(savedRemix?.id ?? null, tweak) };
+  // Tweaks need a rig on screen: the original before a remix, or the finished remix.
+  const canTweak = !job || savedRemix !== null;
+  const [panelTab, setPanelTab] = useState<"generate" | "tweak">("generate");
+  const tweaking = canTweak && panelTab === "tweak";
+  // Picking and the part outline only make sense while the Tweak tab is open.
+  const playerTweaks: SpineTweakBinding = {
+    ...tweak.binding,
+    picking: tweaking && tweak.binding.picking,
+    selectedPart: tweaking ? tweak.binding.selectedPart : null,
+  };
 
   // Poll the job while it's in progress. BACKEND: could be replaced by SSE/WebSocket push.
   const active = job?.status === "queued" || job?.status === "running";
@@ -284,104 +294,129 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
           )}
         </section>
       ) : (
-        <div className="grid gap-8 lg:grid-cols-2">
-          <div className="flex flex-col gap-6 lg:self-start">
-            <BaseRigSummary base={base} />
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  <span className="text-muted-foreground">Step 2 ·</span> Describe the new look
-                </CardTitle>
-                <CardDescription>Textures are repainted to fit the existing atlas regions, so every animation keeps working.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <RemixForm key={base.id} base={base} errors={errors} />
-              </CardContent>
-            </Card>
-          </div>
-
-          <section aria-label="Result" aria-live="polite" className="flex flex-col gap-4">
-            {!job ? (
-              <>
-                <AssetPlayer
-                  asset={base}
-                  animation={anim ?? base.animations[0]?.name ?? "idle"}
-                  animationHref={(name) => withParams({ anim: name })}
-                  tweaks={tweak.binding}
-                />
-                <p className="text-center text-sm text-muted-foreground">Previewing the original rig. Your remix will appear here.</p>
-                <TweakPanel {...tweakPanel} />
-              </>
-            ) : job.status === "failed" ? (
-              <Alert variant="destructive">
-                <AlertCircle />
-                <AlertTitle>Remix failed</AlertTitle>
-                <AlertDescription>
-                  {job.error ?? "Something went wrong. Try again with a different prompt."}
-                  <ExpandedPrompt job={job} />
-                </AlertDescription>
-              </Alert>
-            ) : job.status === "succeeded" && job.asset ? (
-              <>
-                <AssetPlayer
-                  asset={job.asset}
-                  animation={anim ?? job.asset.animations[0]?.name ?? "idle"}
-                  animationHref={(name) => withParams({ anim: name })}
-                  tweaks={tweak.binding}
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="mr-auto">
-                    <h2 className="text-lg font-semibold">{job.asset.name}</h2>
-                    <p className="text-xs text-muted-foreground">
-                      Remix of {base.name} · API {job.apiVersion}
-                      {job.promptStatus === "reworded" && " · prompt re-worded for content policy"}
-                    </p>
+        <div className="flex flex-col gap-8">
+          {/* The two columns get their own grid so the sticky preview stops above the sprite sheet. */}
+          <div className="grid gap-8 lg:grid-cols-2">
+            <div className="flex flex-col gap-6 lg:self-start">
+              <BaseRigSummary base={base} />
+              <Card>
+                <Tabs
+                  value={tweaking ? "tweak" : "generate"}
+                  onValueChange={(v) => setPanelTab(v === "tweak" ? "tweak" : "generate")}
+                  className="gap-6"
+                >
+                  <div className="px-6">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="generate">
+                        <Sparkles /> Generate
+                      </TabsTrigger>
+                      <TabsTrigger value="tweak" disabled={!canTweak} title={canTweak ? undefined : "Available once the remix finishes"}>
+                        <SlidersHorizontal /> Tweak
+                      </TabsTrigger>
+                    </TabsList>
                   </div>
-                  <SaveButton assetId={job.asset.id} assetName={job.asset.name} saved={savedIds.includes(job.asset.id)} />
-                  <Button asChild variant="outline">
-                    <Link to={assetPath(job.asset)}>
-                      <ExternalLink /> Open
-                    </Link>
-                  </Button>
-                </div>
-                <TweakPanel {...tweakPanel} />
-              </>
-            ) : (
-              <Card className="h-full">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Loader2 className="size-4 animate-spin" />{" "}
-                    {job.promptStatus === "rewording" ? "Re-wording the prompt" : job.stage}
-                  </CardTitle>
-                  <CardDescription className="line-clamp-2">“{job.input.prompt}”</CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-4">
-                  <RemixProgress job={job} />
-                  {job.promptStatus === "rewording" && (
-                    <Alert>
-                      <ShieldAlert />
-                      <AlertTitle>The image model declined the prompt</AlertTitle>
-                      <AlertDescription>
-                        Its content policy rejected the prompt below, so Muse is re-wording it to keep the same look. The
-                        page is then painted again.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  <ExpandedPrompt job={job} />
-                  <SpinePreview
-                    asset={job.base}
-                    className="animate-pulse rounded-lg opacity-50"
-                    showBones
-                  />
-                </CardContent>
+                  {/* Both tabs stay mounted so the prompt and the tweak panel keep their state. */}
+                  <TabsContent value="generate" forceMount className="flex flex-col gap-6 data-[state=inactive]:hidden">
+                    <CardHeader>
+                      <CardTitle>
+                        <span className="text-muted-foreground">Step 2 ·</span> Describe the new look
+                      </CardTitle>
+                      <CardDescription>Textures are repainted to fit the existing atlas regions, so every animation keeps working.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <RemixForm key={base.id} base={base} errors={errors} />
+                    </CardContent>
+                  </TabsContent>
+                  <TabsContent value="tweak" forceMount className="data-[state=inactive]:hidden">
+                    <CardContent>
+                      <TweakPanel {...tweakPanel} />
+                    </CardContent>
+                  </TabsContent>
+                </Tabs>
               </Card>
-            )}
-          </section>
+            </div>
+
+            {/* Sticks while the tweak panel scrolls, so the rig stays beside the controls. */}
+            <section aria-label="Result" aria-live="polite" className="flex flex-col gap-4 lg:sticky lg:top-20 lg:self-start">
+              {!job ? (
+                <>
+                  <AssetPlayer
+                    asset={base}
+                    animation={anim ?? base.animations[0]?.name ?? "idle"}
+                    animationHref={(name) => withParams({ anim: name })}
+                    tweaks={playerTweaks}
+                  />
+                  <p className="text-center text-sm text-muted-foreground">Previewing the original rig. Your remix will appear here.</p>
+                </>
+              ) : job.status === "failed" ? (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertTitle>Remix failed</AlertTitle>
+                  <AlertDescription>
+                    {job.error ?? "Something went wrong. Try again with a different prompt."}
+                    <ExpandedPrompt job={job} />
+                  </AlertDescription>
+                </Alert>
+              ) : job.status === "succeeded" && job.asset ? (
+                <>
+                  <AssetPlayer
+                    asset={job.asset}
+                    animation={anim ?? job.asset.animations[0]?.name ?? "idle"}
+                    animationHref={(name) => withParams({ anim: name })}
+                    tweaks={playerTweaks}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="mr-auto">
+                      <h2 className="text-lg font-semibold">{job.asset.name}</h2>
+                      <p className="text-xs text-muted-foreground">
+                        Remix of {base.name} · API {job.apiVersion}
+                        {job.promptStatus === "reworded" && " · prompt re-worded for content policy"}
+                      </p>
+                    </div>
+                    <SaveButton assetId={job.asset.id} assetName={job.asset.name} saved={savedIds.includes(job.asset.id)} />
+                    <Button asChild variant="outline">
+                      <Link to={assetPath(job.asset)}>
+                        <ExternalLink /> Open
+                      </Link>
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <Card className="h-full">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Loader2 className="size-4 animate-spin" />{" "}
+                      {job.promptStatus === "rewording" ? "Re-wording the prompt" : job.stage}
+                    </CardTitle>
+                    <CardDescription className="line-clamp-2">“{job.input.prompt}”</CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4">
+                    <RemixProgress job={job} />
+                    {job.promptStatus === "rewording" && (
+                      <Alert>
+                        <ShieldAlert />
+                        <AlertTitle>The image model declined the prompt</AlertTitle>
+                        <AlertDescription>
+                          Its content policy rejected the prompt below, so Muse is re-wording it to keep the same look. The
+                          page is then painted again.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    <ExpandedPrompt job={job} />
+                    <SpinePreview
+                      asset={job.base}
+                      className="animate-pulse rounded-lg opacity-50"
+                      showBones
+                    />
+                  </CardContent>
+                </Card>
+              )}
+            </section>
+          </div>
 
           <SpriteSheet
             // Remount per rig/result so page and source selection start fresh.
             key={`${base.id}:${job?.asset?.id ?? ""}`}
-            className="lg:col-span-2"
             sources={[
               ...(job?.status === "succeeded" && job.asset ? [{ label: "Remix", asset: job.asset }] : []),
               { label: "Original", asset: base },
