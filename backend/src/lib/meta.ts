@@ -22,7 +22,6 @@ function apiKey(): string {
 const PLAN_SYSTEM_PROMPT = `You are the art director for 2D game assets. You are given atlas pages from a rigged Spine character: each page is a sprite sheet of separate body parts (regions) packed on a plain solid-colour background (the user message names the colour). That background colour is not part of the character; ignore it.
 An image-editing model will repaint every page into a new look. Write its instructions.
 - Describe the new materials, colors, patterns and surface details for the parts you can see.
-- Every part must keep exactly the same position, size, outline and pose. Only what is painted inside each part changes.
 - Never ask for new parts, text, backgrounds or scenery.
 Reply with JSON only, no markdown: {"name": "...", "editPrompt": "..."}
 - name: 2 to 5 words naming the remixed asset, Title Case.
@@ -34,14 +33,19 @@ export async function planRemix(
   base: { name: string; regions: string[]; pageImages: string[]; background: string },
   signal: AbortSignal,
 ): Promise<RemixPlan> {
+  const kept = keptPartProperties(input);
   const request = [
     `Asset: ${base.name}`,
     `Parts: ${base.regions.slice(0, 120).join(", ")}`,
     `Page background: solid ${base.background}`,
     `Requested look: ${input.prompt}`,
-    `Art style: ${input.style}`,
-    `Change amount: ${strengthHint(input.strength)}`,
+    input.style === "auto"
+      ? "Art style: keep the original art style of the pages, unless the requested look names a different one"
+      : `Art style: ${input.style}`,
+    `Change amount: ${strengthHint(input.strength, input.keepOutline)}`,
     input.keepPalette ? "Keep the original color palette; change details and materials only." : "",
+    kept ? `Every part must keep exactly the same ${kept}.` : "",
+    input.keepOutline ? "Only what is painted inside each part changes." : "",
   ].filter(Boolean).join("\n");
   logPrompt(`chat/completions (${MUSE_MODEL}) system`, PLAN_SYSTEM_PROMPT);
   logPrompt(`chat/completions (${MUSE_MODEL}) user + ${base.pageImages.length} page image(s)`, request);
@@ -80,10 +84,21 @@ export async function planRemix(
   return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.` };
 }
 
-function strengthHint(strength: number): string {
+function strengthHint(strength: number, keepOutline: boolean): string {
   if (strength < 0.34) return "subtle — keep the shading, line work and shapes; change colors and materials only";
   if (strength < 0.67) return "moderate — restyle materials and details, keep the overall character recognizable";
-  return "bold — reimagine the surface details freely, but keep every part's silhouette";
+  return keepOutline ? "bold — reimagine the surface details freely, but keep every part's silhouette" : "bold — reimagine the surface details freely";
+}
+
+/**
+ * The part properties the user asked the models to keep, as prompt wording, e.g.
+ * "position, size and outline". Empty when none were ticked.
+ */
+export function keptPartProperties(input: RemixInput): string {
+  const kept = [input.keepPosition && "position", input.keepSize && "size", input.keepOutline && "outline"].filter(
+    (p): p is string => typeof p === "string",
+  );
+  return kept.length > 1 ? `${kept.slice(0, -1).join(", ")} and ${kept.at(-1)}` : (kept[0] ?? "");
 }
 
 function parsePlan(body: unknown): RemixPlan | null {

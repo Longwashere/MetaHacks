@@ -292,7 +292,7 @@ function buildRemix(
     id,
     name,
     description: `Remix of ${base.name}: ${input.prompt}`,
-    style: input.style,
+    style: input.style === "auto" ? base.style : input.style,
     tags: [...new Set([...base.tags, "remix"])],
     prompt: input.prompt,
     remixOf: { id: base.id, name: base.name },

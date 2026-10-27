@@ -203,8 +203,6 @@ export async function fitToPage(
 const ALIGN_MAX_SCALE = 0.08;
 const ALIGN_MAX_SHIFT = 0.05;
 const ALIGN_SCALE_STEP = 0.002;
-/** Per-channel tolerance for telling the model's background from its parts when aligning. */
-const ALIGN_BG_TOLERANCE = 60;
 
 /**
  * The model tends to stretch or shift its output a little, so repainted parts land
@@ -215,18 +213,13 @@ const ALIGN_BG_TOLERANCE = 60;
  */
 function alignToPage(rgb: Buffer, page: PageImage, background: Background): Buffer {
   const { width, height } = page;
-  const [br, bg, bb] = hexToRgb(background.hex);
+  const isBg = backgroundMask(rgb, width, height, background);
   const genRows = new Float64Array(height), genCols = new Float64Array(width);
   const pageRows = new Float64Array(height), pageCols = new Float64Array(width);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const p = y * width + x;
-      const i = p * 3;
-      const isPart =
-        Math.abs(rgb[i] - br) > ALIGN_BG_TOLERANCE ||
-        Math.abs(rgb[i + 1] - bg) > ALIGN_BG_TOLERANCE ||
-        Math.abs(rgb[i + 2] - bb) > ALIGN_BG_TOLERANCE;
-      if (isPart) {
+      if (!isBg[p]) {
         genRows[y]++;
         genCols[x]++;
       }
@@ -290,27 +283,77 @@ function fitAxis(target: Float64Array, generated: Float64Array): { scale: number
   return best;
 }
 
-/** How far (px) repainted colour is grown into background-coloured pixels. */
-const BLEED_FILL_PASSES = 8;
 /** Per-channel tolerance; the model doesn't reproduce the key colour exactly. */
-const BLEED_TOLERANCE = 40;
+const BACKGROUND_TOLERANCE = 40;
+/** How far (px) from the plain background a background-tinted pixel still counts as background. */
+const TINT_REACH = 6;
+/** A pixel is background-tinted when its hue lines up with the background's this closely (cosine)… */
+const TINT_MIN_ALIGNMENT = 0.9;
+/** …and it has at least this much colour (distance from its own grey level). */
+const TINT_MIN_CHROMA = 24;
+
+/**
+ * Marks the model's background pixels: the plain background colour, plus the pixels
+ * along part edges where the model blended the background with the part (e.g. dark
+ * teal where a dark outline meets cyan). Those keep the background's hue but not its
+ * brightness, so they're matched by hue, and only near plain background so parts
+ * that happen to share the hue aren't touched.
+ */
+function backgroundMask(rgb: Buffer, width: number, height: number, background: Background): Uint8Array {
+  const key = hexToRgb(background.hex);
+  const keyMean = (key[0] + key[1] + key[2]) / 3;
+  const keyChroma = key.map((c) => c - keyMean);
+  const keyNorm = Math.hypot(...keyChroma);
+
+  const isBg = new Uint8Array(width * height);
+  const tinted = new Uint8Array(width * height);
+  for (let p = 0; p < isBg.length; p++) {
+    const i = p * 3;
+    const r = rgb[i], g = rgb[i + 1], b = rgb[i + 2];
+    if (Math.abs(r - key[0]) <= BACKGROUND_TOLERANCE && Math.abs(g - key[1]) <= BACKGROUND_TOLERANCE && Math.abs(b - key[2]) <= BACKGROUND_TOLERANCE) {
+      isBg[p] = 1;
+      continue;
+    }
+    const mean = (r + g + b) / 3;
+    const cr = r - mean, cg = g - mean, cb = b - mean;
+    const norm = Math.hypot(cr, cg, cb);
+    if (norm >= TINT_MIN_CHROMA && (cr * keyChroma[0] + cg * keyChroma[1] + cb * keyChroma[2]) / (norm * keyNorm) >= TINT_MIN_ALIGNMENT) {
+      tinted[p] = 1;
+    }
+  }
+
+  // Grow from the plain background into neighbouring tinted pixels, one ring per pass.
+  let frontier: number[] = [];
+  for (let p = 0; p < isBg.length; p++) if (isBg[p]) frontier.push(p);
+  for (let pass = 0; pass < TINT_REACH && frontier.length > 0; pass++) {
+    const next: number[] = [];
+    for (const p of frontier) {
+      const x = p % width, y = (p - x) / width;
+      for (const q of [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, y > 0 ? p - width : -1, y < height - 1 ? p + width : -1]) {
+        if (q < 0 || isBg[q] || !tinted[q]) continue;
+        isBg[q] = 1;
+        next.push(q);
+      }
+    }
+    frontier = next;
+  }
+  return isBg;
+}
+
+/** How far (px) repainted colour is grown into background pixels. */
+const BLEED_FILL_PASSES = 8;
 
 /**
  * The model's parts can land a few pixels inside the original outlines, which would
  * leave a background-coloured halo once the original alpha is applied. Grows the surrounding
- * repainted colour over background-coloured pixels, one pixel ring per pass.
+ * repainted colour over background pixels, one pixel ring per pass.
  */
 function fillBackgroundBleed(rgb: Buffer, page: PageImage, background: Background) {
   const { width, height } = page;
-  const [br, bg, bb] = hexToRgb(background.hex);
-  const isBg = new Uint8Array(width * height);
-  for (let p = 0; p < isBg.length; p++) {
-    const i = p * 3;
-    // Soft edges were blended with the background before the model saw them, so they
-    // come back tinted with it; replace them too.
-    const softEdge = page.rgba[p * 4 + 3] < 255;
-    isBg[p] = softEdge || (Math.abs(rgb[i] - br) <= BLEED_TOLERANCE && Math.abs(rgb[i + 1] - bg) <= BLEED_TOLERANCE && Math.abs(rgb[i + 2] - bb) <= BLEED_TOLERANCE) ? 1 : 0;
-  }
+  const isBg = backgroundMask(rgb, width, height, background);
+  // Soft edges were blended with the background before the model saw them, so they
+  // come back tinted with it; replace them too.
+  for (let p = 0; p < isBg.length; p++) if (page.rgba[p * 4 + 3] < 255) isBg[p] = 1;
 
   for (let pass = 0; pass < BLEED_FILL_PASSES; pass++) {
     const filled: number[] = [];

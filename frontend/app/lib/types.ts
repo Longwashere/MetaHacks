@@ -19,6 +19,10 @@ export const ART_STYLES = [
 ] as const;
 export type ArtStyle = (typeof ART_STYLES)[number];
 
+/** Remix styles: "auto" lets the prompt pick the style, or keeps the base rig's when it doesn't. */
+export const REMIX_STYLES = ["auto", ...ART_STYLES] as const;
+export type RemixStyle = (typeof REMIX_STYLES)[number];
+
 export const SORT_OPTIONS = ["popular", "newest", "name"] as const;
 export type SortOption = (typeof SORT_OPTIONS)[number];
 
@@ -90,11 +94,15 @@ export interface RemixInput {
   baseAssetId: string;
   /** Describes the new look, e.g. "black and crimson ninja robes". */
   prompt: string;
-  style: ArtStyle;
+  style: RemixStyle;
   /** 0–1. Low keeps close to the original texture, high reinterprets it freely. */
   strength: number;
   /** Keep the original palette and only change details. */
   keepPalette: boolean;
+  /** Ask the models to keep each part's exact position, size and outline in the atlas. */
+  keepPosition: boolean;
+  keepSize: boolean;
+  keepOutline: boolean;
 }
 
 export interface RemixJob {

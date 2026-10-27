@@ -54,7 +54,7 @@ import {
 import { getCurrentUser } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
-import { ART_STYLES, type ArtStyle, type RemixJob, type SpineAsset } from "~/lib/types";
+import { REMIX_STYLES, type RemixJob, type RemixStyle, type SpineAsset } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -112,7 +112,7 @@ function filterRigs(rigs: SpineAsset[], q: string) {
 
 type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength", string>>;
 
-const isStyle = (v: unknown): v is ArtStyle => typeof v === "string" && ART_STYLES.some((s) => s === v);
+const isStyle = (v: unknown): v is RemixStyle => typeof v === "string" && REMIX_STYLES.some((s) => s === v);
 
 export async function action({ request }: Route.ActionArgs) {
   const user = await getCurrentUser(request);
@@ -124,6 +124,9 @@ export async function action({ request }: Route.ActionArgs) {
   const style = form.get("style");
   const strength = Number(form.get("strength"));
   const keepPalette = form.get("keepPalette") === "on";
+  const keepPosition = form.get("keepPosition") === "on";
+  const keepSize = form.get("keepSize") === "on";
+  const keepOutline = form.get("keepOutline") === "on";
 
   if (!baseAssetId) errors.base = "Choose a rig to remix.";
   if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters.";
@@ -147,11 +150,21 @@ export async function action({ request }: Route.ActionArgs) {
     style,
     strength: strength / 100,
     keepPalette,
+    keepPosition,
+    keepSize,
+    keepOutline,
   });
   if (!job) return data({ errors: { base: "That rig no longer exists." } satisfies FieldErrors }, { status: 400 });
 
   throw redirect(`/remix?${new URLSearchParams({ base: baseAssetId, job: job.id })}`);
 }
+
+/** Optional prompt constraints; all off by default so the model can reshape parts. */
+const KEEP_PART_OPTIONS = [
+  { name: "keepPosition", label: "Position" },
+  { name: "keepSize", label: "Size" },
+  { name: "keepOutline", label: "Outline" },
+] as const;
 
 const EXAMPLE_PROMPTS = [
   "Black and crimson ninja outfit, moonlit palette",
@@ -489,18 +502,21 @@ function RemixForm({ base, errors }: { base: SpineAsset; errors: FieldErrors }) 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor="style">Art style</Label>
-          <Select name="style" defaultValue={base.style}>
+          <Select name="style" defaultValue="auto">
             <SelectTrigger id="style" className="w-full capitalize" aria-invalid={Boolean(errors.style)}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {ART_STYLES.map((s) => (
+              {REMIX_STYLES.map((s) => (
                 <SelectItem key={s} value={s} className="capitalize">
-                  {s}
+                  {s === "auto" ? "Auto (from prompt)" : s}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Auto uses a style named in your prompt, or keeps the {base.style} style.
+          </p>
           <FieldError id="style-error" message={errors.style} />
         </div>
         <div className="flex flex-col gap-3">
@@ -532,6 +548,20 @@ function RemixForm({ base, errors }: { base: SpineAsset; errors: FieldErrors }) 
           <Palette className="size-4 text-muted-foreground" /> Keep the original color palette
         </Label>
       </div>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium">Keep each part's exact</legend>
+        <div className="flex flex-wrap gap-x-5 gap-y-2">
+          {KEEP_PART_OPTIONS.map(({ name, label }) => (
+            <div key={name} className="flex items-center gap-2">
+              <Checkbox id={name} name={name} />
+              <Label htmlFor={name} className="font-normal">
+                {label}
+              </Label>
+            </div>
+          ))}
+        </div>
+      </fieldset>
       <FieldError id="base-error" message={errors.base} />
 
       <Button type="submit" size="lg" disabled={submitting} className="w-full">

@@ -39,13 +39,14 @@ Users don't create rigs from scratch. They pick an existing rig and re-texture i
 1. **Pick a base rig.** `/remix` shows a picker with two tabs: **All rigs** (`listAssets`, searchable with `?rq=`) and **My library** (`getLibrary`). Choosing a rig sets `?base=<assetId>`. The asset page's "Remix this rig" button links straight to that URL.
 2. **Describe the new look.** The form posts `RemixInput` to the `action` in `app/routes/remix.tsx`:
    ```ts
-   { baseAssetId, prompt, style, strength /* 0–1 */, keepPalette /* boolean */ }
+   { baseAssetId, prompt, style, strength /* 0–1 */, keepPalette, keepPosition, keepSize, keepOutline /* booleans */ }
    ```
+   `style` is one of `REMIX_STYLES`: `"auto"` (the default) leaves the style to the prompt and otherwise keeps the base rig's, or an `ArtStyle` to force one. The resulting asset's `style` is the base rig's for `"auto"`.
    The action validates it on the server. Return field errors as `data({ errors }, { status: 400 })`; the keys are `base`, `prompt`, `style` and `strength`.
 3. **Run the job.** `createRemixJob` returns a job, and the action redirects to `/remix?base=<id>&job=<jobId>`. While the job is `queued` or `running`, the page re-runs its loader every second, which calls `getRemixJob`. Fill in `progress` (0–1) and `stage` (for example "Painting new textures").
 4. **Show the result.** On `succeeded`, `job.asset` must be a full `SpineAsset` with `remixOf: { id, name }` set to the base rig. Copy `category`, `boneCount`, `slotCount`, `spineVersion` and `animations` from the base, since they don't change. The remix appears under **My Library → Remixes** and in a "Remixes of …" section on the base rig's page once it's public. On `failed`, set `job.error` to a user-facing message.
 
-The backend will need the base rig's atlas regions (slot attachments and their UV rects) so new textures fit the existing mesh and region attachments. `strength` and `keepPalette` are hints for the texture model.
+The backend will need the base rig's atlas regions (slot attachments and their UV rects) so new textures fit the existing mesh and region attachments. `strength`, `keepPalette` and `keepPosition` / `keepSize` / `keepOutline` are hints for the texture model; the keep-part options are off by default and only add the matching instruction to the prompts.
 
 If a remix takes longer than a minute or so, consider server-sent events (SSE) or a WebSocket instead of polling. You can add an SSE resource route and replace the `useEffect` polling in `remix.tsx`.
 

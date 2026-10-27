@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { createRemixJob, getRemixJob } from "../lib/jobs.js";
-import { ART_STYLES, type ArtStyle, type RemixBase, type RemixRequest } from "../lib/types.js";
+import { REMIX_STYLES, type RemixBase, type RemixRequest, type RemixStyle } from "../lib/types.js";
 
 type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength", string>>;
 
@@ -33,7 +33,7 @@ function parseRemixInput(body: unknown): { input: RemixRequest } | { errors: Fie
 
   const baseAssetId = typeof b.baseAssetId === "string" ? b.baseAssetId.trim() : "";
   const prompt = typeof b.prompt === "string" ? b.prompt.trim() : "";
-  const { style, strength, keepPalette } = b;
+  const { style, strength, keepPalette, keepPosition, keepSize, keepOutline } = b;
 
   const base = parseBase(b.base);
 
@@ -47,7 +47,19 @@ function parseRemixInput(body: unknown): { input: RemixRequest } | { errors: Fie
   }
 
   if (Object.keys(errors).length > 0 || !base || !isStyle(style) || typeof strength !== "number") return { errors };
-  return { input: { baseAssetId, prompt, style, strength, keepPalette: keepPalette === true, base } };
+  return {
+    input: {
+      baseAssetId,
+      prompt,
+      style,
+      strength,
+      keepPalette: keepPalette === true,
+      keepPosition: keepPosition === true,
+      keepSize: keepSize === true,
+      keepOutline: keepOutline === true,
+      base,
+    },
+  };
 }
 
 /** The base rig's files. `atlasUrl` must be a plain path; it's fetched from ASSET_BASE_URL. */
@@ -60,6 +72,6 @@ function parseBase(value: unknown): RemixBase | null {
   return { name: name.trim(), atlasUrl, premultipliedAlpha };
 }
 
-function isStyle(value: unknown): value is ArtStyle {
-  return typeof value === "string" && (ART_STYLES as readonly string[]).includes(value);
+function isStyle(value: unknown): value is RemixStyle {
+  return typeof value === "string" && (REMIX_STYLES as readonly string[]).includes(value);
 }

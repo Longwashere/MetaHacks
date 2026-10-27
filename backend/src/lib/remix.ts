@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isSafePageName, parseAtlas } from "./atlas.js";
 import { ASSET_BASE_URL, PUBLIC_URL, REMIX_OUTPUT_DIR } from "./config.js";
-import { planRemix, repaintPage } from "./meta.js";
+import { keptPartProperties, planRemix, repaintPage } from "./meta.js";
 import { decodePage, fitToPage, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { RemixRequest, RemixResult } from "./types.js";
 
@@ -60,13 +60,18 @@ export async function runRemix(
     ),
   );
 
+  const kept = keptPartProperties(input);
   const prompt = [
     plan.editPrompt,
-    `Art style: ${input.style}.`,
+    // With "auto", the plan already carries the style (the original one, or the prompt's).
+    input.style === "auto" ? "" : `Art style: ${input.style}.`,
     `This image is a sprite atlas of separate character parts on a solid ${background.name} background.`,
     `Every shape that is not the ${background.name} background is a part; repaint all of them, including thin ones like bones, shafts and straps.`,
-    `Keep every part in exactly the same position, size and outline. Do not add, move, merge or resize parts. Keep the background solid ${background.name}.`,
-  ].join(" ");
+    kept ? `Keep every part in exactly the same ${kept}.` : "",
+    `Do not add or merge parts. Keep the background solid ${background.name}.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   // Timestamp first so folders sort by creation time when browsing REMIX_OUTPUT_DIR.
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
