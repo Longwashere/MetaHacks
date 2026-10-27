@@ -14,6 +14,10 @@ interface SpineRuntimeProps {
   playing: boolean;
   speed: number;
   showBones: boolean;
+  /** When true, only the skeleton / rig is drawn and the skin textures are hidden. */
+  hideSkin?: boolean;
+  /** Hex color for the bone rig lines (e.g. "#ef4444"). */
+  boneColor?: string;
   /** Hex color multiplied over the textures (mock remixes). */
   tint: string | null;
   onStatusChange?: (status: SpineRuntimeStatus) => void;
@@ -21,6 +25,17 @@ interface SpineRuntimeProps {
 }
 
 type DebugFlags = NonNullable<SpinePlayerConfig["debug"]>;
+
+function applyBoneLineColor(sdr: any, hex?: string) {
+  if (!sdr?.boneLineColor || !hex) return;
+  const clean = hex.replace("#", "");
+  if (clean.length === 6) {
+    const r = parseInt(clean.substring(0, 2), 16) / 255;
+    const g = parseInt(clean.substring(2, 4), 16) / 255;
+    const b = parseInt(clean.substring(4, 6), 16) / 255;
+    sdr.boneLineColor.set(r, g, b, 1);
+  }
+}
 
 /**
  * Renders a real Spine skeleton with the official web player (WebGL).
@@ -34,6 +49,8 @@ export function SpineRuntime({
   playing,
   speed,
   showBones,
+  hideSkin = false,
+  boneColor,
   tint,
   onStatusChange,
   className,
@@ -52,12 +69,12 @@ export function SpineRuntime({
     hulls: false,
   });
   // Lets the (async) success callback see the latest props without re-creating the player.
-  const latest = useRef({ animation, loop, playing, speed, tint });
+  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor });
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
   const inView = useInView(containerRef);
 
   useEffect(() => {
-    latest.current = { animation, loop, playing, speed, tint };
+    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor };
   });
 
   useEffect(() => {
@@ -89,11 +106,35 @@ export function SpineRuntime({
         viewport: { padLeft: "8%", padRight: "8%", padTop: "8%", padBottom: "8%", transitionTime: 0.25 },
         success: (player) => {
           if (cancelled) return;
-          const { animation, loop, playing, speed, tint } = latest.current;
+          const { animation, loop, playing, speed, tint, hideSkin } = latest.current;
           if (player.skeleton?.data.findAnimation(animation)) player.setAnimation(animation, loop);
           player.speed = speed;
-          if (tint) player.skeleton?.color.setFromString(tint);
+          if (hideSkin) {
+            player.skeleton?.color.set(0, 0, 0, 0);
+          } else if (tint) {
+            player.skeleton?.color.setFromString(tint);
+          }
           if (!playing) player.pause();
+
+          // Configure skeleton debug renderer line color and width
+          const sdr = (player as unknown as { sceneRenderer?: { skeletonDebugRenderer?: { boneWidth: number; boneLineColor: { set: (r: number, g: number, b: number, a: number) => void } } } }).sceneRenderer?.skeletonDebugRenderer;
+          if (sdr) {
+            sdr.boneWidth = 2.5;
+            applyBoneLineColor(sdr, latest.current.boneColor);
+          }
+
+          // Intercept drawSkeleton to dynamically skip drawing skin textures/meshes when hideSkin is true
+          const sr = (player as unknown as { sceneRenderer?: { drawSkeleton: (...args: unknown[]) => void; _origDrawSkeleton?: (...args: unknown[]) => void } }).sceneRenderer;
+          if (sr && !sr._origDrawSkeleton) {
+            sr._origDrawSkeleton = sr.drawSkeleton.bind(sr);
+            sr.drawSkeleton = function (...args: unknown[]) {
+              if (latest.current.hideSkin) {
+                return;
+              }
+              return sr._origDrawSkeleton?.apply(this, args);
+            };
+          }
+
           setStatus("ready");
         },
         error: (_player, message) => {
@@ -135,15 +176,27 @@ export function SpineRuntime({
   }, [status, speed]);
 
   useEffect(() => {
-    debugRef.current.bones = showBones;
-  }, [showBones]);
+    debugRef.current.bones = showBones || hideSkin;
+  }, [showBones, hideSkin]);
+
+  useEffect(() => {
+    const sdr = (playerRef.current as unknown as { sceneRenderer?: { skeletonDebugRenderer?: unknown } })?.sceneRenderer?.skeletonDebugRenderer;
+    if (status === "ready" && sdr) {
+      applyBoneLineColor(sdr, boneColor);
+    }
+  }, [status, boneColor]);
 
   useEffect(() => {
     const color = playerRef.current?.skeleton?.color;
     if (status !== "ready" || !color) return;
-    if (tint) color.setFromString(tint);
-    else color.set(1, 1, 1, 1);
-  }, [status, tint]);
+    if (hideSkin) {
+      color.set(0, 0, 0, 0);
+    } else if (tint) {
+      color.setFromString(tint);
+    } else {
+      color.set(1, 1, 1, 1);
+    }
+  }, [status, tint, hideSkin]);
 
   return (
     <div

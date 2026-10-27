@@ -1,9 +1,10 @@
 import { ChevronRight, Download, FileJson, GitFork, Repeat, Wand2 } from "lucide-react";
-import { Link, data, href, isRouteErrorResponse } from "react-router";
+import { Link, data, href, isRouteErrorResponse, useSearchParams } from "react-router";
 import type { Route } from "./+types/asset";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
 import { SaveButton } from "~/components/SaveButton";
+import type { SpineViewMode } from "~/lib/types";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -80,12 +81,59 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export default function AssetPage({ loaderData }: Route.ComponentProps) {
   const { asset, animation, related, remixes, savedIds } = loaderData;
   const saved = savedIds.includes(asset.id);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewParam = searchParams.get("view");
+  const viewMode: SpineViewMode =
+    viewParam === "skeleton" || viewParam === "overlay" ? viewParam : "skin";
+  const boneColorParam = searchParams.get("boneColor");
+  const boneColor = boneColorParam ? `#${boneColorParam.replace("#", "")}` : "#ef4444";
+
+  const handleViewModeChange = (nextMode: SpineViewMode) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (nextMode === "skin") {
+          next.delete("view");
+        } else {
+          next.set("view", nextMode);
+        }
+        return next;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  };
+
+  const handleBoneColorChange = (nextColor: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        const clean = nextColor.replace("#", "").toLowerCase();
+        if (clean === "ef4444") {
+          next.delete("boneColor");
+        } else {
+          next.set("boneColor", clean);
+        }
+        return next;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  };
+
   const stats = [
     { label: "Bones", value: asset.boneCount },
     { label: "Slots", value: asset.slotCount },
     { label: "Animations", value: asset.animations.length },
     { label: "Spine", value: asset.spineVersion },
   ];
+
+  const buildAnimationUrl = (name: string) => {
+    const base = assetPath(asset, name);
+    const q = new URLSearchParams();
+    if (viewMode !== "skin") q.set("view", viewMode);
+    if (boneColor.toLowerCase() !== "#ef4444") q.set("boneColor", boneColor.replace("#", ""));
+    const qs = q.toString();
+    return qs ? `${base}?${qs}` : base;
+  };
 
   return (
     <div className="flex flex-col gap-10">
@@ -122,7 +170,11 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
           <AssetPlayer
             asset={asset}
             animation={animation?.name ?? asset.animations[0]?.name ?? "idle"}
-            animationHref={(name) => assetPath(asset, name)}
+            animationHref={buildAnimationUrl}
+            viewMode={viewMode}
+            onViewModeChange={handleViewModeChange}
+            boneColor={boneColor}
+            onBoneColorChange={handleBoneColorChange}
           />
 
           <div className="flex flex-col gap-6">
@@ -233,7 +285,7 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
           {asset.animations.map((a) => (
             <li key={a.name}>
               <Link
-                to={assetPath(asset, a.name)}
+                to={buildAnimationUrl(a.name)}
                 aria-current={a.name === animation?.name ? "page" : undefined}
                 className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-accent aria-[current=page]:border-primary"
               >

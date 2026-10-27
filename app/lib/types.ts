@@ -22,6 +22,9 @@ export type ArtStyle = (typeof ART_STYLES)[number];
 export const SORT_OPTIONS = ["popular", "newest", "name"] as const;
 export type SortOption = (typeof SORT_OPTIONS)[number];
 
+/** View modes for previewing Spine assets: full textured skin, rig skeleton only, or overlay. */
+export type SpineViewMode = "skin" | "skeleton" | "overlay";
+
 /** Theme token used to tint the asset's preview. Maps to --chart-N in app.css. */
 export type AssetAccent = "chart-1" | "chart-2" | "chart-3" | "chart-4" | "chart-5";
 

@@ -47,11 +47,14 @@ interface SpinePlaceholderProps {
   playing: boolean;
   speed: number;
   showBones: boolean;
+  hideSkin?: boolean;
+  boneColor?: string;
 }
 
-export function SpinePlaceholder({ category, animation, durationSec, playing, speed, showBones }: SpinePlaceholderProps) {
+export function SpinePlaceholder({ category, animation, durationSec, playing, speed, showBones, hideSkin = false, boneColor }: SpinePlaceholderProps) {
   const motion = BIPED_MOTION[animation];
   const dur = (durationSec * (motion?.pace ?? 1)) / Math.max(speed, 0.1);
+  const bonesActive = showBones || hideSkin;
 
   return (
     <svg
@@ -65,13 +68,13 @@ export function SpinePlaceholder({ category, animation, durationSec, playing, sp
     >
       <ellipse cx="60" cy="130" rx="28" ry="4" className="fill-foreground/10" />
       {category === "character" ? (
-        <Biped motion={motion ?? BIPED_MOTION.idle} showBones={showBones} />
+        <Biped motion={motion ?? BIPED_MOTION.idle} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} />
       ) : category === "creature" ? (
-        <Blob animation={animation} showBones={showBones} />
+        <Blob animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} />
       ) : category === "effect" ? (
         <Burst />
       ) : category === "prop" ? (
-        <Prop animation={animation} showBones={showBones} />
+        <Prop animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} />
       ) : (
         <UiWidget />
       )}
@@ -79,10 +82,10 @@ export function SpinePlaceholder({ category, animation, durationSec, playing, sp
   );
 }
 
-function Bone({ x1, y1, x2, y2 }: { x1: number; y1: number; x2: number; y2: number }) {
+function Bone({ x1, y1, x2, y2, color }: { x1: number; y1: number; x2: number; y2: number; color?: string }) {
   return (
-    <g className="stroke-foreground">
-      <line x1={x1} y1={y1} x2={x2} y2={y2} strokeWidth="1.2" />
+    <g className="stroke-foreground" style={color ? { stroke: color } : undefined}>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} strokeWidth="1.4" />
       <circle cx={x1} cy={y1} r="2" className="fill-background" strokeWidth="1.2" />
     </g>
   );
@@ -95,6 +98,8 @@ function Limb({
   y2,
   className,
   showBones,
+  hideSkin,
+  boneColor,
 }: {
   x1: number;
   y1: number;
@@ -102,31 +107,44 @@ function Limb({
   y2: number;
   className?: string;
   showBones: boolean;
+  hideSkin?: boolean;
+  boneColor?: string;
 }) {
   return (
     <g className={cn("part", className)}>
-      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth="9" strokeLinecap="round" opacity="0.7" />
-      {showBones && <Bone x1={x1} y1={y1} x2={x2} y2={y2} />}
+      {!hideSkin && (
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth="9" strokeLinecap="round" opacity="0.7" />
+      )}
+      {showBones && <Bone x1={x1} y1={y1} x2={x2} y2={y2} color={boneColor} />}
     </g>
   );
 }
 
-function Biped({ motion, showBones }: { motion: Motion; showBones: boolean }) {
+function Biped({ motion, showBones, hideSkin, boneColor }: { motion: Motion; showBones: boolean; hideSkin?: boolean; boneColor?: string }) {
   return (
     <g className={cn("part", motion.root)}>
-      <Limb x1={54} y1={84} x2={50} y2={122} className={motion.legL} showBones={showBones} />
-      <Limb x1={66} y1={84} x2={70} y2={122} className={motion.legR} showBones={showBones} />
+      <Limb x1={54} y1={84} x2={50} y2={122} className={motion.legL} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
+      <Limb x1={66} y1={84} x2={70} y2={122} className={motion.legR} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
       <g className={cn("part", motion.body)}>
-        <Limb x1={46} y1={54} x2={38} y2={86} className={motion.armL} showBones={showBones} />
-        <rect x="45" y="48" width="30" height="40" rx="11" fill="currentColor" />
-        <circle cx="60" cy="33" r="15" fill="currentColor" />
-        <circle cx="55" cy="31" r="2.2" className="fill-background" />
-        <circle cx="65" cy="31" r="2.2" className="fill-background" />
-        <Limb x1={74} y1={54} x2={82} y2={86} className={motion.armR} showBones={showBones} />
+        <Limb x1={46} y1={54} x2={38} y2={86} className={motion.armL} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
+        {!hideSkin ? (
+          <>
+            <rect x="45" y="48" width="30" height="40" rx="11" fill="currentColor" />
+            <circle cx="60" cy="33" r="15" fill="currentColor" />
+            <circle cx="55" cy="31" r="2.2" className="fill-background" />
+            <circle cx="65" cy="31" r="2.2" className="fill-background" />
+          </>
+        ) : (
+          <>
+            <rect x="45" y="48" width="30" height="40" rx="11" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
+            <circle cx="60" cy="33" r="15" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
+          </>
+        )}
+        <Limb x1={74} y1={54} x2={82} y2={86} className={motion.armR} showBones={showBones} hideSkin={hideSkin} boneColor={boneColor} />
         {showBones && (
           <>
-            <Bone x1={60} y1={88} x2={60} y2={50} />
-            <Bone x1={60} y1={50} x2={60} y2={20} />
+            <Bone x1={60} y1={88} x2={60} y2={50} color={boneColor} />
+            <Bone x1={60} y1={50} x2={60} y2={20} color={boneColor} />
           </>
         )}
       </g>
@@ -134,21 +152,27 @@ function Biped({ motion, showBones }: { motion: Motion; showBones: boolean }) {
   );
 }
 
-function Blob({ animation, showBones }: { animation: string; showBones: boolean }) {
+function Blob({ animation, showBones, hideSkin, boneColor }: { animation: string; showBones: boolean; hideSkin?: boolean; boneColor?: string }) {
   const anim =
     animation === "jump" ? "animate-spine-jump" : animation === "attack" ? "animate-spine-sway" : "animate-spine-pulse";
   return (
     <g className={cn("part origin-bottom!", anim)}>
-      <path d="M22 124 C 18 76, 44 52, 62 52 C 84 52, 104 78, 98 124 Z" fill="currentColor" />
-      <circle cx="50" cy="86" r="6" className="fill-background" />
-      <circle cx="74" cy="86" r="6" className="fill-background" />
-      <circle cx="51" cy="87" r="2.5" className="fill-foreground" />
-      <circle cx="75" cy="87" r="2.5" className="fill-foreground" />
+      {!hideSkin ? (
+        <>
+          <path d="M22 124 C 18 76, 44 52, 62 52 C 84 52, 104 78, 98 124 Z" fill="currentColor" />
+          <circle cx="50" cy="86" r="6" className="fill-background" />
+          <circle cx="74" cy="86" r="6" className="fill-background" />
+          <circle cx="51" cy="87" r="2.5" className="fill-foreground" />
+          <circle cx="75" cy="87" r="2.5" className="fill-foreground" />
+        </>
+      ) : (
+        <path d="M22 124 C 18 76, 44 52, 62 52 C 84 52, 104 78, 98 124 Z" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
+      )}
       {showBones && (
         <>
-          <Bone x1={60} y1={124} x2={60} y2={86} />
-          <Bone x1={60} y1={86} x2={40} y2={66} />
-          <Bone x1={60} y1={86} x2={82} y2={66} />
+          <Bone x1={60} y1={124} x2={60} y2={86} color={boneColor} />
+          <Bone x1={60} y1={86} x2={40} y2={66} color={boneColor} />
+          <Bone x1={60} y1={86} x2={82} y2={66} color={boneColor} />
         </>
       )}
     </g>
@@ -171,16 +195,27 @@ function Burst() {
   );
 }
 
-function Prop({ animation, showBones }: { animation: string; showBones: boolean }) {
+function Prop({ animation, showBones, hideSkin, boneColor }: { animation: string; showBones: boolean; hideSkin?: boolean; boneColor?: string }) {
   const lid = animation === "open" || animation === "collect" ? "animate-spine-strike origin-bottom-left!" : "";
   return (
     <g className="part animate-spine-bob">
-      <rect x="28" y="72" width="64" height="50" rx="6" fill="currentColor" />
-      <rect x="54" y="84" width="12" height="14" rx="2" className="fill-background" />
-      <g className={cn("part", lid)}>
-        <rect x="26" y="54" width="68" height="22" rx="8" fill="currentColor" opacity="0.75" />
-      </g>
-      {showBones && <Bone x1={28} y1={74} x2={92} y2={74} />}
+      {!hideSkin ? (
+        <>
+          <rect x="28" y="72" width="64" height="50" rx="6" fill="currentColor" />
+          <rect x="54" y="84" width="12" height="14" rx="2" className="fill-background" />
+          <g className={cn("part", lid)}>
+            <rect x="26" y="54" width="68" height="22" rx="8" fill="currentColor" opacity="0.75" />
+          </g>
+        </>
+      ) : (
+        <>
+          <rect x="28" y="72" width="64" height="50" rx="6" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
+          <g className={cn("part", lid)}>
+            <rect x="26" y="54" width="68" height="22" rx="8" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
+          </g>
+        </>
+      )}
+      {showBones && <Bone x1={28} y1={74} x2={92} y2={74} color={boneColor} />}
     </g>
   );
 }

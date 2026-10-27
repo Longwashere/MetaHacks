@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { Bone, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { SpinePlaceholder } from "~/components/SpinePlaceholder";
 import { SpineRuntime, type SpineRuntimeStatus } from "~/components/SpineRuntime";
@@ -20,6 +20,10 @@ export interface SpinePreviewProps {
   playing?: boolean;
   speed?: number;
   showBones?: boolean;
+  /** When true, hide the skin textures and display only the skeleton rig. */
+  hideSkin?: boolean;
+  /** Hex color for the skeleton bone lines. */
+  boneColor?: string;
   className?: string;
 }
 
@@ -33,12 +37,15 @@ export function SpinePreview({
   playing = true,
   speed = 1,
   showBones = false,
+  hideSkin = false,
+  boneColor,
   className,
 }: SpinePreviewProps) {
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
   const clip = asset.animations.find((a) => a.name === animation) ?? asset.animations[0];
   const name = clip?.name ?? "idle";
   const live = asset.files !== null && status !== "error";
+  const bonesActive = showBones || hideSkin;
 
   return (
     <div
@@ -59,7 +66,9 @@ export function SpinePreview({
             loop={clip?.loop ?? true}
             playing={playing}
             speed={speed}
-            showBones={showBones}
+            showBones={bonesActive}
+            hideSkin={hideSkin}
+            boneColor={boneColor}
             tint={asset.tint}
             onStatusChange={setStatus}
           />
@@ -72,8 +81,16 @@ export function SpinePreview({
           durationSec={clip?.durationSec ?? 1.6}
           playing={playing}
           speed={speed}
-          showBones={showBones}
+          showBones={bonesActive}
+          hideSkin={hideSkin}
+          boneColor={boneColor}
         />
+      )}
+      {hideSkin && (
+        <span className="pointer-events-none absolute top-3 left-3 flex items-center gap-1.5 rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
+          <Bone className="size-3 text-primary" />
+          Skeleton Rig
+        </span>
       )}
       {!live && asset.files && (
         <span className="absolute bottom-2 left-2 rounded bg-background/80 px-1.5 py-0.5 text-[10px] text-muted-foreground">
