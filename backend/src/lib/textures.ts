@@ -290,7 +290,7 @@ const TINT_REACH = 6;
 /** A pixel is background-tinted when its hue lines up with the background's this closely (cosine)… */
 const TINT_MIN_ALIGNMENT = 0.9;
 /** …and it has at least this much colour (distance from its own grey level). */
-const TINT_MIN_CHROMA = 24;
+const TINT_MIN_CHROMA = 10;
 
 /**
  * Marks the model's background pixels: the plain background colour, plus the pixels
@@ -340,13 +340,11 @@ function backgroundMask(rgb: Buffer, width: number, height: number, background: 
   return isBg;
 }
 
-/** How far (px) repainted colour is grown into background pixels. */
-const BLEED_FILL_PASSES = 8;
-
 /**
  * The model's parts can land a few pixels inside the original outlines, which would
  * leave a background-coloured halo once the original alpha is applied. Grows the surrounding
- * repainted colour over background pixels, one pixel ring per pass.
+ * repainted colour over every background pixel the page shows (alpha > 0), one pixel ring
+ * per pass, until none are left. Pixels the page hides are skipped; their colour is dropped.
  */
 function fillBackgroundBleed(rgb: Buffer, page: PageImage, background: Background) {
   const { width, height } = page;
@@ -354,34 +352,44 @@ function fillBackgroundBleed(rgb: Buffer, page: PageImage, background: Backgroun
   // Soft edges were blended with the background before the model saw them, so they
   // come back tinted with it; replace them too.
   for (let p = 0; p < isBg.length; p++) if (page.rgba[p * 4 + 3] < 255) isBg[p] = 1;
+  const needsFill = (p: number) => isBg[p] === 1 && page.rgba[p * 4 + 3] > 0;
 
-  for (let pass = 0; pass < BLEED_FILL_PASSES; pass++) {
+  let frontier: number[] = [];
+  for (let p = 0; p < isBg.length; p++) if (needsFill(p)) frontier.push(p);
+  while (frontier.length > 0) {
     const filled: number[] = [];
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const p = y * width + x;
-        if (!isBg[p]) continue;
-        let r = 0, g = 0, b = 0, n = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = x + dx, ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-            const q = ny * width + nx;
-            if (isBg[q]) continue;
-            r += rgb[q * 3];
-            g += rgb[q * 3 + 1];
-            b += rgb[q * 3 + 2];
-            n++;
-          }
+    const waiting: number[] = [];
+    for (const p of frontier) {
+      const x = p % width, y = (p - x) / width;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const q = ny * width + nx;
+          if (isBg[q]) continue;
+          r += rgb[q * 3];
+          g += rgb[q * 3 + 1];
+          b += rgb[q * 3 + 2];
+          n++;
         }
-        if (n === 0) continue;
-        rgb[p * 3] = Math.round(r / n);
-        rgb[p * 3 + 1] = Math.round(g / n);
-        rgb[p * 3 + 2] = Math.round(b / n);
-        filled.push(p);
       }
+      if (n === 0) {
+        waiting.push(p);
+        continue;
+      }
+      rgb[p * 3] = Math.round(r / n);
+      rgb[p * 3 + 1] = Math.round(g / n);
+      rgb[p * 3 + 2] = Math.round(b / n);
+      filled.push(p);
     }
-    if (filled.length === 0) break;
+    // Nothing repainted can reach what's left (the model dropped the whole part): fall
+    // back to the original page's colours rather than leave the background showing.
+    if (filled.length === 0) {
+      for (const p of waiting) rgb.set(page.rgba.subarray(p * 4, p * 4 + 3), p * 3);
+      break;
+    }
     for (const p of filled) isBg[p] = 0;
+    frontier = waiting;
   }
 }
