@@ -1,0 +1,160 @@
+CultistFollower.png
+pma: false
+size:2211,707
+filter:Linear,Linear
+Amulet
+bounds:392,20,70,97
+offsets:1,1,71,98
+rotate: 90
+AmuletChain
+bounds:989,8,79,81
+rotate: 270
+Amulet_glow1
+bounds:1998,57,80,98
+offsets:1,1,80,98
+Amulet_glow2
+bounds:2027,314,79,97
+offsets:1,1,80,98
+Amulet_glow3
+bounds:2126,482,73,97
+offsets:1,1,74,98
+Amulet_glow4
+bounds:2043,458,80,97
+offsets:1,1,80,98
+Cape
+bounds:680,92,193,315
+HoodNeck
+bounds:1841,396,198,135
+rotate: 270
+Top
+bounds:1382,453,177,252
+armL1
+bounds:1739,429,153,167
+armL2
+bounds:1952,344,91,154
+rotate: 180
+armR1
+bounds:3,215,93,171
+rotate: 180
+armR2
+bounds:608,434,138,136
+armR2_2
+bounds:1874,567,138,138
+rotate: 180
+attack_effect
+bounds:579,150,449,554
+rotate: 180
+elite/Amulet
+bounds:707,17,70,97
+offsets:1,1,71,98
+rotate: 90
+elite/AmuletChain
+bounds:308,6,80,81
+rotate: 270
+elite/Cape
+bounds:1308,159,194,315
+elite/HoodNeck
+bounds:1850,194,198,135
+rotate: 270
+elite/Top
+bounds:1494,141,177,252
+elite/armL1
+bounds:1785,32,153,166
+rotate: 180
+elite/armL2
+bounds:1970,158,91,154
+rotate: 180
+elite/armR1
+bounds:243,108,93,171
+rotate: 270
+elite/armR2
+bounds:1959,569,138,136
+elite/armR2_2
+bounds:1074,20,138,138
+rotate: 270
+elite/head
+bounds:2051,150,93,119
+rotate: 180
+elite/hood
+bounds:1224,29,159,177
+elite/hood_back
+bounds:1703,101,117,180
+elite/skirt_L
+bounds:759,483,222,467
+rotate: 90
+elite/skirt_R
+bounds:959,90,159,452
+rotate: 180
+elite/skirt_main
+bounds:3,176,389,529
+elite/weapon_Axe
+bounds:1592,38,177,355
+elite/weapon_Dagger
+bounds:1586,395,87,237
+offsets:1,1,87,237
+footL
+bounds:108,20,117,64
+footR
+bounds:807,17,117,57
+rotate: 180
+handL
+bounds:2118,362,81,118
+rotate: 180
+handL_2
+bounds:2093,617,87,84
+rotate: 90
+handL_3
+bounds:3,21,63,102
+offsets:0,1,63,102
+rotate: 90
+handR_1_back
+bounds:2138,165,75,69
+rotate: 90
+handR_1_front
+bounds:1179,8,63,69
+handR_2
+bounds:2109,270,87,84
+rotate: 90
+head
+bounds:2081,45,93,119
+hood
+bounds:1719,264,159,177
+hood_back
+bounds:854,50,117,180
+rotate: 90
+legL2
+bounds:492,30,90,213
+rotate: 90
+legR2
+bounds:1919,42,76,198
+mouth_1
+bounds:104,686,27,18
+offsets:1,0,27,18
+mouth_2
+bounds:36,681,29,23
+mouth_3
+bounds:146,686,25,18
+offsets:1,0,26,18
+mouth_4
+bounds:72,681,29,23
+mouth_5
+bounds:3,674,30,30
+seasonal/halloween_pumpkingmask
+bounds:1424,35,133,126
+offsets:1,0,134,126
+skirt_L
+bounds:1118,146,222,466
+rotate: 180
+skirt_R
+bounds:231,51,159,452
+rotate: 90
+skirt_main
+bounds:290,176,388,529
+rotate: 180
+weapon_Axe
+bounds:1649,339,177,356
+rotate: 180
+weapon_Dagger
+bounds:3,87,87,237
+offsets:0,1,87,237
+rotate: 90

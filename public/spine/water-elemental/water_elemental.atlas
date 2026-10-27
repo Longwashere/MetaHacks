@@ -1,0 +1,47 @@
+water_elemental.png
+pma: false
+size:768,768
+filter:Linear,Linear
+body
+bounds:3,197,264,568
+head
+bounds:515,453,107,211
+offsets:0,1,107,212
+rotate: 90
+l_arm
+bounds:3,3,153,191
+offsets:1,0,153,191
+l_hand
+bounds:482,309,141,187
+offsets:0,1,141,188
+rotate: 90
+l_neck
+bounds:270,12,176,155
+offsets:0,4,176,159
+rotate: 90
+l_shoulder
+bounds:428,21,108,167
+l_shoulder_armor
+bounds:270,351,146,209
+offsets:0,1,146,209
+rotate: 90
+r_arm
+bounds:270,500,242,186
+offsets:2,2,252,188
+r_hand
+bounds:270,191,157,177
+offsets:1,0,158,177
+rotate: 90
+r_neck
+bounds:539,155,151,156
+offsets:1,0,152,156
+rotate: 90
+r_shoulder
+bounds:159,3,108,191
+r_shoulder_armor
+bounds:531,563,202,215
+offsets:1,1,203,215
+rotate: 90
+under_water
+bounds:270,689,258,76
+offsets:0,1,258,77

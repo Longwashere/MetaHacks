@@ -1,0 +1,35 @@
+TuXi01.png
+size:848,848
+filter:Linear,Linear
+pma: false
+body
+bounds:0,0,666,459
+left eye
+bounds:267,507,87,81
+offsets:2,2,90,84
+rotate:90
+left_arm
+bounds:525,507,73,80
+offsets:2,2,77,83
+left_eye2
+bounds:396,507,87,81
+rotate:90
+mouse
+bounds:0,653,126,53
+offsets:2,2,129,56
+mouse2
+bounds:646,507,129,69
+right eye
+bounds:134,507,98,85
+offsets:2,2,101,89
+rotate:90
+right_arm
+bounds:714,0,98,89
+offsets:4,2,104,92
+rotate:90
+right_eye2
+bounds:0,507,98,86
+rotate:90
+shadow
+bounds:174,653,144,47
+offsets:3,3,150,53

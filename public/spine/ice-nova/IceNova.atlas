@@ -1,0 +1,165 @@
+IceNova.png
+pma: false
+size:3040,3040
+filter:Linear,Linear
+24-1
+bounds:1424,2423,126,138
+rotate: 90
+24-2
+bounds:2441,2146,184,189
+offsets:1,1,185,189
+rotate: 90
+24-3
+bounds:1574,1773,255,246
+offsets:1,0,255,246
+24-4
+bounds:273,1773,311,289
+offsets:0,1,311,290
+24-5
+bounds:2007,1329,340,324
+offsets:1,2,341,326
+24-7
+bounds:459,1329,373,344
+offsets:1,0,374,344
+rotate: 90
+24-8
+bounds:867,1329,370,354
+offsets:1,0,371,354
+ShockWave02_004
+bounds:388,2423,146,143
+offsets:1,0,146,143
+ShockWave02_005
+bounds:1018,2423,145,142
+offsets:1,1,146,143
+ShockWave02_006
+bounds:808,2423,146,142
+offsets:1,1,146,143
+ShockWave02_007
+bounds:598,2423,146,143
+offsets:1,0,146,143
+bingdi
+bounds:1301,1329,353,214
+offsets:5,14,368,226
+rotate: 90
+bz0058
+bounds:165,2423,159,172
+offsets:1,1,159,173
+bz0060
+bounds:2694,2146,186,183
+offsets:0,1,186,183
+bz0062
+bounds:2175,2146,200,202
+offsets:0,1,200,203
+rotate: 90
+bz0064
+bounds:1904,2146,201,207
+offsets:0,1,201,207
+rotate: 90
+bz0066
+bounds:1627,2146,204,213
+rotate: 90
+bz0068
+bounds:1204,2146,210,213
+rotate: 90
+bz0071
+bounds:682,2146,213,178
+offsets:1,1,213,179
+rotate: 90
+caihonghuiguang
+bounds:2606,1329,309,309
+offsets:1,1,309,309
+di1
+bounds:1893,1773,240,93
+offsets:2,15,240,94
+rotate: 90
+di2
+bounds:648,1773,278,104
+offsets:0,10,278,105
+rotate: 90
+di3
+bounds:2368,1773,236,104
+offsets:0,10,236,104
+rotate: 90
+di4
+bounds:1402,1773,255,108
+offsets:1,10,255,108
+rotate: 90
+di5
+bounds:1481,2146,208,82
+offsets:2,12,209,82
+rotate: 90
+di6
+bounds:2536,1773,216,69
+offsets:3,15,216,69
+rotate: 90
+di7
+bounds:2669,1773,215,67
+offsets:3,17,215,67
+rotate: 90
+fz
+bounds:2597,790,402,404
+rotate: 90
+guang
+bounds:816,1773,271,283
+rotate: 90
+guangyun
+bounds:0,790,475,477
+offsets:7,9,489,492
+rotate: 90
+ice
+bounds:0,1773,209,309
+ice-1
+bounds:1163,1773,175,259
+offsets:1,1,176,260
+ks
+bounds:0,2146,618,213
+shou_01
+bounds:1603,790,426,432
+offsets:156,136,761,726
+rotate: 90
+shou_02
+bounds:2239,0,539,534
+offsets:104,85,761,726
+shou_03
+bounds:1560,0,615,615
+offsets:71,51,761,726
+shou_04
+bounds:799,0,697,687
+offsets:35,20,761,726
+shou_05
+bounds:0,0,735,726
+offsets:18,0,761,726
+shouji14_1
+bounds:924,2146,210,216
+offsets:3,6,213,227
+rotate: 90
+shouji14_2
+bounds:1579,1329,364,345
+offsets:5,17,377,374
+shouji14_3
+bounds:0,1329,395,380
+offsets:12,19,419,414
+shouji14_4
+bounds:2099,790,434,418
+offsets:13,18,458,450
+shouji14_5
+bounds:1076,790,463,429
+offsets:13,19,489,465
+shouji14_6
+bounds:541,790,471,457
+offsets:24,20,512,498
+smoke_18_00003
+bounds:2411,1329,318,131
+rotate: 90
+snow-1
+bounds:1626,2423,91,97
+wu
+bounds:2050,1773,254,237
+offsets:20,41,299,305
+xing
+bounds:1227,2423,135,133
+rotate: 90
+yy
+bounds:0,2423,183,101
+offsets:2,19,183,101
+rotate: 90

@@ -27,6 +27,13 @@ const store: MockStore = (globalStore.__spineMock ??= {
   jobs: new Map(),
 });
 
+// Ensure newly added assets are always present even when globalStore persists across HMR
+for (const a of MOCK_ASSETS) {
+  if (!store.assets.has(a.id)) {
+    store.assets.set(a.id, a);
+  }
+}
+
 const MOCK_LATENCY_MS = 150;
 const MOCK_REMIX_MS = 6000;
 const delay = (ms = MOCK_LATENCY_MS) => new Promise((r) => setTimeout(r, ms));

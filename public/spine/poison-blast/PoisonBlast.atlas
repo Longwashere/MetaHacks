@@ -1,0 +1,103 @@
+PoisonBlast.png
+pma: false
+size:2224,2224
+filter:Linear,Linear
+G1
+bounds:267,1640,162,156
+rotate: 90
+gd
+bounds:2122,1640,78,78
+gy
+bounds:0,1640,171,203
+offsets:8,13,186,227
+rotate: 90
+jd1
+bounds:1941,1640,109,117
+rotate: 90
+jd10
+bounds:0,637,493,454
+offsets:38,63,573,561
+rotate: 90
+jd11
+bounds:764,1194,328,176
+offsets:117,282,573,561
+rotate: 90
+jd2
+bounds:1531,1194,225,201
+offsets:165,109,573,561
+rotate: 90
+jd3
+bounds:1004,1194,312,258
+offsets:133,95,573,561
+rotate: 90
+jd4
+bounds:0,1194,441,382
+offsets:62,71,573,561
+jd5
+bounds:1173,0,538,455
+offsets:8,57,573,561
+rotate: 90
+jd6
+bounds:0,0,573,502
+offsets:1,30,573,561
+rotate: 90
+jd7
+bounds:566,0,543,555
+offsets:12,4,573,561
+jd8
+bounds:1692,0,510,460
+offsets:27,57,573,561
+rotate: 90
+jd9
+bounds:518,637,508,459
+offsets:31,60,573,561
+nianye0001
+bounds:0,1875,72,69
+offsets:43,25,164,209
+rotate: 90
+nianye0002
+bounds:902,1640,138,158
+offsets:9,9,164,209
+nianye0003
+bounds:487,1640,146,159
+offsets:5,12,164,209
+nianye0004
+bounds:1104,1640,150,157
+offsets:3,11,164,209
+nianye0005
+bounds:697,1640,141,159
+offsets:13,26,164,209
+nianye0006
+bounds:1318,1640,150,157
+offsets:9,42,164,209
+nianye0007
+bounds:1532,1640,152,144
+offsets:10,49,164,209
+rotate: 90
+nianye0008
+bounds:1740,1640,147,137
+offsets:14,68,164,215
+rotate: 90
+w1
+bounds:1326,1194,238,141
+offsets:1,0,239,141
+rotate: 90
+w2
+bounds:505,1194,344,195
+offsets:1,0,344,195
+rotate: 90
+w3
+bounds:1707,637,394,228
+offsets:1,0,395,228
+rotate: 90
+w4
+bounds:1406,637,420,237
+offsets:1,0,420,237
+rotate: 90
+w5
+bounds:1090,637,440,252
+rotate: 90
+yun
+bounds:1796,1194,204,223
+offsets:34,35,271,288
+rotate: 90

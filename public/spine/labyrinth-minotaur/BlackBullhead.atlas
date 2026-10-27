@@ -1,0 +1,32 @@
+BlackBullhead.png
+pma: false
+size:906,210
+filter:Linear,Linear
+01
+bounds:687,137,147,69
+02
+bounds:807,11,111,86
+rotate: 90
+03
+bounds:584,30,84,53
+04
+bounds:507,9,75,74
+offsets:1,1,75,74
+05
+bounds:669,12,44,48
+offsets:0,1,44,48
+rotate: 90
+06
+bounds:584,2,63,27
+07
+bounds:2,2,504,204
+08
+bounds:507,84,179,122
+09
+bounds:836,123,83,67
+rotate: 90
+10
+bounds:719,14,42,76
+rotate: 90
+11
+bounds:687,57,119,78

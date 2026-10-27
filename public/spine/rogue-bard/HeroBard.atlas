@@ -1,0 +1,264 @@
+HeroBard.png
+pma: false
+size:2736,2736
+filter:Linear,Linear
+color1/armL1
+bounds:897,1866,121,205
+rotate: 90
+color1/armL2
+bounds:658,1411,94,177
+color1/armL2_2
+bounds:1923,1411,58,159
+color1/armR1
+bounds:1551,1652,143,194
+rotate: 90
+color1/armR2
+bounds:816,1411,81,169
+color1/bellL
+bounds:1809,1652,140,577
+rotate: 90
+color1/bellR
+bounds:1157,0,128,564
+color1/beltC
+bounds:2415,1411,164,153
+color1/beltL
+bounds:1591,1116,27,187
+color1/beltR
+bounds:2215,1116,35,185
+color1/eyeClosed
+bounds:2524,2216,58,15
+offsets:1,1,59,15
+color2/eyeClosed
+bounds:2646,2216,58,15
+offsets:1,1,59,15
+color1/eyeOpen
+bounds:1842,2216,65,18
+color2/eyeOpen
+bounds:1971,2216,65,18
+color1/flapC
+bounds:1166,1866,113,341
+rotate: 90
+color1/flapL
+bounds:2450,1652,134,258
+rotate: 90
+color1/flapR
+bounds:0,1116,122,231
+color1/flute
+bounds:364,1116,24,211
+color1/fluteHolder
+bounds:1083,1652,93,145
+color1/flute_string
+bounds:1372,2216,27,162
+rotate: 90
+color1/footL
+bounds:846,1652,84,147
+color1/footR
+bounds:1571,1866,113,152
+rotate: 90
+color1/hairBack
+bounds:706,2216,55,155
+rotate: 90
+color1/hairL
+bounds:2313,1411,38,157
+color1/hairR
+bounds:1149,2216,35,159
+rotate: 90
+color1/handL1
+bounds:1390,2057,88,146
+rotate: 90
+color1/handL2
+bounds:1322,1411,94,164
+color1/handL3
+bounds:2033,2057,75,146
+rotate: 90
+color2/handL3
+bounds:1821,2057,75,148
+rotate: 90
+color1/handL4
+bounds:458,2057,93,147
+rotate: 90
+color2/handL4
+bounds:669,2057,93,146
+rotate: 90
+color1/handL5
+bounds:420,1652,149,147
+color2/handL5
+bounds:633,1652,149,147
+color1/handL6
+bounds:0,2216,64,68
+rotate: 90
+color2/handL6
+bounds:132,2216,64,68
+rotate: 90
+color1/handR
+bounds:2459,2057,69,153
+rotate: 90
+color1/handR2
+bounds:1600,2057,85,157
+rotate: 90
+color1/head
+bounds:1013,1116,180,193
+color2/head
+bounds:534,1116,209,204
+color1/headband
+bounds:2146,1411,103,157
+color1/legL1
+bounds:2385,0,111,336
+color1/legL2
+bounds:2041,0,102,342
+color1/legL2_2
+bounds:1751,726,211,251
+color1/legR1
+bounds:761,726,186,305
+color1/legR2
+bounds:0,1411,177,345
+rotate: 90
+color1/legR2_2
+bounds:2302,726,120,234
+color1/lute
+bounds:0,0,413,662
+color1/luteStrapBack
+bounds:1297,726,60,260
+color1/luteStrapFront
+bounds:592,726,105,307
+color1/mouthClenched
+bounds:2340,2216,29,18
+color1/mouthClosed
+bounds:1598,2216,27,10
+offsets:1,1,27,11
+rotate: 90
+color1/mouthOpen
+bounds:1672,2216,26,21
+rotate: 90
+color1/neck
+bounds:1135,2057,90,191
+rotate: 90
+color1/scarfBack
+bounds:1787,1866,105,66
+rotate: 90
+color1/scarfFront
+bounds:1775,1116,156,185
+color1/torso
+bounds:1257,1116,191,270
+rotate: 90
+color1/torsoStringL
+bounds:994,1652,25,146
+color1/torsoStringR
+bounds:2100,2216,18,56
+rotate: 90
+color2/armL1
+bounds:628,1866,122,205
+rotate: 90
+color2/armL2
+bounds:216,2057,93,178
+rotate: 90
+color2/armL2_2
+bounds:264,2216,61,159
+rotate: 90
+color2/armR1
+bounds:807,1116,142,194
+color2/armR2
+bounds:961,1411,79,168
+color2/bellL
+bounds:954,0,139,579
+color2/bellR
+bounds:0,1866,127,564
+rotate: 90
+color2/beltC
+bounds:1104,1411,164,154
+rotate: 90
+color2/beltL
+bounds:1682,1116,29,186
+color2/beltR
+bounds:2682,1116,32,184
+color2/flapC
+bounds:2207,0,114,341
+color2/flapL
+bounds:1552,726,135,258
+color2/flapR
+bounds:186,1116,114,231
+color2/flute
+bounds:452,1116,18,211
+color2/fluteHolder
+bounds:1396,1652,91,144
+color2/flute_string
+bounds:1640,1411,29,162
+color2/footL
+bounds:174,1652,91,149
+color2/footR
+bounds:0,1652,110,150
+color2/hairBack
+bounds:487,2216,57,155
+rotate: 90
+color2/hairL
+bounds:2045,1411,37,158
+color2/hairR
+bounds:925,2216,41,160
+rotate: 90
+color2/handL1
+bounds:1240,1652,92,145
+color2/handL2
+bounds:1480,1411,96,162
+color2/handR
+bounds:2243,2057,72,152
+rotate: 90
+color2/handR2
+bounds:0,2057,95,152
+rotate: 90
+color2/headband
+bounds:2047,1866,103,157
+rotate: 90
+color2/legL1
+bounds:2560,0,111,336
+color2/legL2
+bounds:2268,1866,102,342
+rotate: 90
+color2/legL2_2
+bounds:2026,726,212,250
+color2/legR1
+bounds:2314,1116,184,304
+rotate: 90
+color2/legR2
+bounds:1800,0,177,345
+color2/legR2_2
+bounds:2486,726,120,234
+color2/lute
+bounds:477,0,413,661
+color2/luteStrapBack
+bounds:1421,726,67,259
+color2/luteStrapFront
+bounds:416,726,112,307
+color2/mouthClenched
+bounds:2433,2216,27,18
+offsets:1,0,27,18
+color2/mouthClosed
+bounds:0,2344,27,10
+offsets:1,1,27,11
+color2/mouthOpen
+bounds:1757,2216,25,21
+rotate: 90
+color2/neck
+bounds:879,2057,90,192
+rotate: 90
+color2/scarfBack
+bounds:1917,1866,105,66
+rotate: 90
+color2/scarfFront
+bounds:1995,1116,156,185
+color2/torso
+bounds:1011,726,222,302
+color2/torsoStringL
+bounds:329,1652,27,148
+color2/torsoStringR
+bounds:2220,2216,18,56
+rotate: 90
+seasonal/christmas
+bounds:409,1411,185,177
+seasonal/halloween_horns
+bounds:1733,1411,126,161
+seasonal/halloween_pumpkingmask
+bounds:0,726,326,352
+offsets:0,1,326,353
+rotate: 90
+seasonal/halloween_tail
+bounds:1349,0,387,429

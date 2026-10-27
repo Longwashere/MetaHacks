@@ -1,0 +1,43 @@
+Mission_104_dragon.png
+pma: false
+size:1088,1088
+filter:Linear,Linear
+dragon_1
+bounds:399,0,398,277
+dragon_10
+bounds:0,805,145,163
+offsets:1,-7,146,163
+dragon_11
+bounds:193,805,99,158
+offsets:1,-7,99,159
+dragon_12
+bounds:340,805,156,213
+rotate: 90
+dragon_13
+bounds:601,805,147,145
+rotate: 90
+dragon_2
+bounds:987,805,75,97
+offsets:0,1,75,98
+rotate: 90
+dragon_3
+bounds:138,1016,60,54
+offsets:1,9,61,54
+rotate: 90
+dragon_4
+bounds:831,531,179,159
+rotate: 90
+dragon_5
+bounds:794,805,147,145
+rotate: 90
+dragon_6
+bounds:374,531,204,409
+rotate: 90
+dragon_7
+bounds:0,0,483,351
+rotate: 90
+dragon_8
+bounds:0,531,326,226
+dragon_9
+bounds:0,1016,90,69
+offsets:0,1,90,69

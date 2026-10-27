@@ -1,0 +1,48 @@
+Darkknight_monster05.png
+pma: false
+size:768,768
+filter:Linear,Linear
+L_arm
+bounds:638,206,54,100
+L_forearm
+bounds:542,309,84,150
+rotate: 90
+L_leg
+bounds:683,573,75,87
+L_lowerleg
+bounds:563,113,61,108
+rotate: 90
+L_wing
+bounds:3,362,180,397
+R_arm
+bounds:371,50,63,90
+rotate: 90
+R_forearm
+bounds:186,404,88,159
+rotate: 90
+R_leg
+bounds:542,396,96,187
+rotate: 90
+R_lowerleg
+bounds:563,177,72,129
+R_wing
+bounds:186,495,264,366
+rotate: 90
+body
+bounds:371,116,189,151
+eye
+bounds:683,522,75,48
+offsets:1,0,75,48
+eye2
+bounds:464,48,61,65
+offsets:0,0,62,65
+flame
+bounds:555,527,232,125
+offsets:1,0,234,125
+rotate: 90
+head
+bounds:3,18,365,341
+tail
+bounds:371,270,168,222
+tail2
+bounds:683,663,76,96

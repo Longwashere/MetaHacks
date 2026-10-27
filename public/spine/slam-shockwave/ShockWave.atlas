@@ -1,0 +1,225 @@
+ShockWave.png
+pma: false
+size:2992,2992
+filter:Linear,Linear
+G2
+bounds:1871,2090,162,156
+rotate: 90
+baozhaguang2
+bounds:2421,2090,239,126
+offsets:1,0,242,126
+di0022
+bounds:2359,0,510,190
+offsets:1,1,510,192
+rotate: 90
+diy0001
+bounds:1106,1658,335,267
+offsets:172,66,684,506
+rotate: 90
+diy0002
+bounds:1675,1192,376,474
+offsets:162,25,708,506
+rotate: 90
+diy0003
+bounds:2613,0,369,474
+offsets:155,26,684,506
+diy0004
+bounds:415,654,401,446
+offsets:138,32,697,506
+diy0005
+bounds:0,1192,450,402
+offsets:120,40,684,506
+diy0007
+bounds:0,654,474,351
+offsets:102,51,684,506
+rotate: 90
+diy0009
+bounds:1966,0,511,329
+offsets:83,57,684,506
+rotate: 90
+diy0011
+bounds:1618,0,533,284
+offsets:74,63,684,506
+rotate: 90
+diy0013
+bounds:1269,0,552,285
+offsets:65,62,684,506
+rotate: 90
+diy0015
+bounds:920,0,573,285
+offsets:55,62,684,506
+rotate: 90
+diy0017
+bounds:0,0,590,283
+offsets:45,64,684,506
+rotate: 90
+diy0019
+bounds:347,0,585,270
+offsets:48,75,684,506
+rotate: 90
+diy0021
+bounds:2542,1658,279,227
+offsets:180,97,684,506
+rotate: 90
+dyan0001
+bounds:821,2345,223,101
+offsets:64,20,344,156
+dyan0002
+bounds:2091,2090,266,135
+offsets:39,8,344,156
+dyan0003
+bounds:2069,1658,303,141
+offsets:20,5,344,156
+rotate: 90
+dyan0004
+bounds:1860,1658,318,145
+offsets:14,4,344,156
+rotate: 90
+dyan0005
+bounds:1649,1658,329,147
+offsets:7,5,344,156
+rotate: 90
+dyan0006
+bounds:1437,1658,333,148
+offsets:5,6,344,156
+rotate: 90
+dyan0008
+bounds:1108,2345,267,96
+offsets:27,17,344,156
+dyan0009
+bounds:2234,2345,37,34
+offsets:69,70,346,156
+dyan007
+bounds:424,2345,333,102
+offsets:8,14,344,156
+idyan0001
+bounds:0,2345,106,360
+offsets:45,7,195,392
+rotate: 90
+idyan0002
+bounds:1019,1192,136,390
+offsets:29,2,192,392
+idyan0003
+bounds:1219,1192,158,384
+offsets:19,5,192,392
+idyan0005
+bounds:1441,1192,170,382
+offsets:12,3,192,392
+idyan0006
+bounds:1435,2090,174,372
+offsets:9,4,192,392
+rotate: 90
+idyan0007
+bounds:0,1658,174,368
+offsets:6,5,192,392
+idyan0008
+bounds:700,2090,181,303
+offsets:10,18,201,392
+rotate: 90
+idyan0009
+bounds:1067,2090,180,304
+offsets:2,16,192,392
+rotate: 90
+idyan0010
+bounds:0,2090,191,298
+offsets:0,18,192,392
+rotate: 90
+idyan0011
+bounds:2274,1658,204,283
+offsets:3,20,210,392
+idyan0012
+bounds:362,2090,184,274
+offsets:2,21,192,392
+rotate: 90
+q
+bounds:681,0,175,580
+offsets:80,44,320,699
+qqy0001
+bounds:2213,1192,374,144
+offsets:31,8,437,174
+rotate: 90
+qqy0003
+bounds:2151,654,406,162
+offsets:9,5,437,174
+rotate: 90
+qqy0005
+bounds:2377,654,406,162
+offsets:9,5,437,174
+rotate: 90
+qqy0007
+bounds:1196,654,432,168
+offsets:1,4,437,174
+rotate: 90
+qqy0009
+bounds:1729,654,420,147
+offsets:8,8,437,174
+rotate: 90
+qqy0011
+bounds:1940,654,420,147
+offsets:8,8,437,174
+rotate: 90
+qqy0013
+bounds:514,1192,398,149
+offsets:21,8,437,174
+rotate: 90
+qqy0015
+bounds:2421,1192,369,150
+offsets:32,9,437,174
+rotate: 90
+qqy0017
+bounds:2635,1192,369,150
+offsets:32,9,437,174
+rotate: 90
+qqy0019
+bounds:238,1658,366,139
+offsets:33,11,437,174
+rotate: 90
+qqy0021
+bounds:441,1658,353,139
+offsets:40,11,437,174
+rotate: 90
+qqy0023
+bounds:644,1658,353,139
+offsets:40,11,437,174
+rotate: 90
+st1
+bounds:1554,2345,205,63
+st2
+bounds:1823,2345,51,62
+offsets:1,1,51,62
+st3
+bounds:2335,2345,29,34
+st4
+bounds:2428,2345,26,29
+st5
+bounds:2046,2345,27,38
+st6
+bounds:1439,2345,66,51
+offsets:1,0,66,51
+rotate: 90
+st7
+bounds:2137,2345,35,33
+offsets:3,1,36,34
+rotate: 90
+st8
+bounds:1938,2345,44,42
+offsets:1,0,44,42
+w1
+bounds:2833,1658,239,141
+offsets:1,0,239,141
+rotate: 90
+w2
+bounds:847,1658,343,195
+offsets:1,0,344,195
+rotate: 90
+w3
+bounds:727,1192,394,228
+offsets:1,0,395,228
+rotate: 90
+w4
+bounds:1428,654,420,237
+offsets:1,0,420,237
+rotate: 90
+w5
+bounds:880,654,440,252
+rotate: 90

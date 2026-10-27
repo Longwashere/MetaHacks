@@ -1,0 +1,104 @@
+BS_Cthulhu.png
+pma: false
+size:2562,1584
+filter:Linear,Linear
+chibang1
+bounds:1842,297,299,216
+chibang2
+bounds:2289,296,129,207
+rotate: 90
+chushou1
+bounds:1500,266,339,247
+chushou2
+bounds:3,1071,725,402
+chushou3
+bounds:2316,945,435,183
+rotate: 90
+chuxu01
+bounds:2144,278,142,235
+chuxu02
+bounds:1842,183,111,288
+rotate: 90
+chuxu03
+bounds:1991,36,144,190
+rotate: 90
+chuxu1
+bounds:2316,786,156,243
+rotate: 90
+chuxu2
+bounds:2280,662,121,254
+rotate: 90
+faguang
+bounds:1806,3,182,177
+offsets:32,25,237,216
+gongji
+bounds:3,1476,1692,105
+houxuanzhuan01
+bounds:3,243,825,275
+rotate: 90
+houxuanzhuan02
+bounds:731,1203,799,270
+offsets:1,0,800,270
+houxuanzhuan03
+bounds:3,3,767,236
+offsets:0,11,767,248
+houxuanzhuan04
+bounds:728,242,769,250
+offsets:1,1,770,251
+houxuanzhuan05
+bounds:281,275,793,244
+offsets:2,1,794,246
+rotate: 90
+houxuanzhuan06
+bounds:728,758,786,243
+offsets:0,1,786,246
+houxuanzhuan07
+bounds:1538,1137,775,243
+offsets:1,1,776,246
+qianxuanzhuan01
+bounds:528,267,801,197
+rotate: 90
+qianxuanzhuan02
+bounds:731,1004,804,196
+offsets:0,1,804,197
+qianxuanzhuan03
+bounds:1517,728,760,205
+offsets:1,1,761,206
+qianxuanzhuan04
+bounds:773,23,766,216
+offsets:1,0,767,216
+qianxuanzhuan05
+bounds:1698,1383,780,198
+qianxuanzhuan06
+bounds:1538,936,775,198
+offsets:1,0,776,198
+qianxuanzhuan07
+bounds:1499,516,753,209
+offsets:1,0,753,209
+shenzi
+bounds:2289,428,227,231
+tou
+bounds:1542,11,261,252
+youshangbi
+bounds:2451,14,107,130
+offsets:0,1,107,131
+youshou
+bounds:2133,183,135,92
+offsets:1,1,135,92
+youxiaobi
+bounds:2184,15,165,117
+offsets:1,0,165,117
+rotate: 90
+zhaohuanzhen
+bounds:728,495,768,260
+offsets:2,2,771,263
+zuoshangbi
+bounds:2304,9,117,144
+offsets:0,1,117,144
+rotate: 90
+zuoshou
+bounds:2424,147,104,146
+offsets:0,1,104,146
+zuoxiaobi
+bounds:2304,129,117,164
+offsets:1,0,117,164

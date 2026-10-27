@@ -1,0 +1,89 @@
+Demogorgon.png
+pma: false
+size:768,768
+filter:Linear,Linear
+Bang
+bounds:438,425,210,189
+Body
+bounds:438,617,267,148
+Cloak_right
+bounds:305,234,166,188
+Cranium_left
+bounds:305,132,97,99
+offsets:1,1,98,99
+Cranium_right
+bounds:474,323,98,99
+offsets:1,1,98,99
+Decorations
+bounds:708,657,51,108
+offsets:1,0,51,108
+Eyes
+bounds:144,129,158,50
+offsets:1,1,158,50
+Eyes2
+bounds:272,462,157,47
+offsets:1,0,158,47
+Eyes3
+bounds:3,36,168,83
+Finger_Left
+bounds:3,12,21,41
+rotate: 90
+Forearm_left
+bounds:174,3,51,38
+Forearm_right
+bounds:228,3,51,38
+Hair_B_right
+bounds:272,512,163,253
+Hair_right
+bounds:3,122,138,292
+Hand_left
+bounds:474,237,59,83
+Hand_right
+bounds:174,44,59,82
+Head
+bounds:3,417,266,348
+offsets:1,0,266,348
+Jewel1
+bounds:536,258,62,39
+offsets:1,0,62,39
+rotate: 90
+Jewel2
+bounds:708,617,37,51
+offsets:1,0,38,51
+rotate: 90
+Jewel3
+bounds:696,563,38,51
+offsets:1,1,38,51
+Jewel4
+bounds:578,288,61,39
+offsets:1,1,62,39
+Knickknackery
+bounds:651,378,236,42
+rotate: 90
+Lap
+bounds:405,128,56,103
+Mouth
+bounds:578,273,42,12
+Mouth2
+bounds:575,381,73,41
+offsets:1,0,74,41
+Pendant_left
+bounds:272,425,34,36
+offsets:1,1,35,36
+rotate: 90
+Pendant_right
+bounds:311,425,34,36
+offsets:1,1,35,36
+rotate: 90
+Trousers
+bounds:144,182,232,158
+rotate: 90
+UpperArm_left
+bounds:236,78,61,48
+offsets:1,0,62,48
+UpperArm_right
+bounds:575,330,67,48
+offsets:1,0,68,48
+finger_right
+bounds:236,54,21,40
+rotate: 90

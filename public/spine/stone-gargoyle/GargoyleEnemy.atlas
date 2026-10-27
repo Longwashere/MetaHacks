@@ -1,0 +1,35 @@
+GargoyleEnemy.png
+pma: false
+size:768,384
+filter:Linear,Linear
+body
+bounds:3,33,207,138
+eye_l
+bounds:3,3,27,32
+rotate: 90
+eye_r
+bounds:708,143,43,35
+rotate: 90
+hand_attack
+bounds:308,99,102,98
+hand_l
+bounds:516,119,78,98
+rotate: 90
+hand_push
+bounds:413,105,92,100
+rotate: 90
+hand_r
+bounds:213,68,92,103
+head top
+bounds:3,174,240,207
+jaw
+bounds:648,189,192,101
+rotate: 90
+leg_l
+bounds:308,20,78,76
+leg_r
+bounds:617,101,88,85
+wing_l
+bounds:246,200,198,181
+wing_r
+bounds:447,200,198,181

@@ -1,0 +1,75 @@
+Unit_Spine_BirdMageSpe1Skin1.png
+pma: false
+size:3072,384
+filter:Linear,Linear
+Lhand
+bounds:621,69,107,71
+Lhand2
+bounds:477,57,83,141
+rotate: 90
+Ltui
+bounds:821,75,54,65
+Ltui2
+bounds:731,69,87,71
+offsets:1,0,87,71
+Rhand
+bounds:1512,284,74,97
+offsets:1,1,74,98
+Rhand2
+bounds:338,15,102,136
+offsets:0,1,102,137
+rotate: 90
+Rtui
+bounds:477,6,48,71
+rotate: 90
+Rtui2
+bounds:675,3,63,104
+offsets:0,1,63,104
+rotate: 90
+body
+bounds:1107,23,147,207
+rotate: 90
+sw
+bounds:551,8,46,64
+offsets:1,1,47,65
+rotate: 90
+tou
+bounds:1317,3,192,207
+rotate: 90
+ty
+bounds:3,32,332,85
+offsets:1,1,332,86
+wq
+bounds:426,143,238,440
+offsets:1,1,239,440
+rotate: 90
+wq2
+bounds:782,5,70,61
+offsets:1,1,71,63
+yao
+bounds:1512,206,75,74
+offsets:1,0,75,74
+rotate: 90
+zs
+bounds:618,5,54,49
+offsets:0,1,54,50
+zs2
+bounds:1272,198,183,237
+offsets:0,1,183,237
+rotate: 90
+zs3
+bounds:3,120,261,420
+offsets:0,1,261,420
+rotate: 90
+zs4
+bounds:878,27,143,226
+offsets:0,1,143,227
+rotate: 90
+zs5
+bounds:869,173,208,400
+offsets:1,1,209,401
+rotate: 90
+zs6
+bounds:3,8,21,51
+offsets:0,1,21,51
+rotate: 90

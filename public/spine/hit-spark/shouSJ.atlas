@@ -1,0 +1,42 @@
+shouSJ.png
+pma: false
+size:1568,1568
+filter:Linear,Linear
+bao1
+bounds:513,0,556,344
+offsets:5,4,564,350
+bao2
+bounds:0,936,707,231
+offsets:4,5,714,239
+bao3
+bounds:0,0,449,491
+offsets:5,4,458,498
+bao4
+bounds:771,936,392,226
+offsets:5,4,401,234
+bao5
+bounds:217,1231,96,998
+offsets:6,16,103,1017
+rotate: 90
+bao_quan
+bounds:1133,0,319,318
+offsets:2,2,323,321
+pu1
+bounds:1279,1231,74,75
+offsets:4,4,81,82
+pu2
+bounds:0,1231,153,171
+offsets:4,5,159,180
+pu3
+bounds:456,555,231,294
+offsets:1,4,239,302
+pu4
+bounds:1227,936,213,234
+offsets:4,4,221,240
+rotate: 90
+pu5
+bounds:0,555,392,317
+offsets:4,3,398,323
+zi
+bounds:751,555,462,261
+offsets:0,1,462,261

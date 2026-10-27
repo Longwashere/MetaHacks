@@ -1,0 +1,52 @@
+orc_warrior.png
+pma: false
+size:992,992
+filter:Linear,Linear
+ARM_L
+bounds:664,363,117,155
+rotate: 90
+ARM_L2
+bounds:364,0,428,285
+ARM_R
+bounds:753,591,82,126
+rotate: 90
+ARM_R2
+bounds:390,363,156,226
+rotate: 90
+Body
+bounds:0,0,315,316
+rotate: 90
+SH
+bounds:184,591,98,106
+offsets:0,0,98,90
+SH_AC
+bounds:867,363,111,111
+eye_dead
+bounds:820,745,71,28
+offsets:0,1,71,29
+eye_hit
+bounds:571,745,76,33
+offsets:1,1,77,33
+eye_idle
+bounds:695,745,77,31
+hair
+bounds:330,591,98,144
+rotate: 90
+hair2
+bounds:338,745,53,62
+offsets:0,0,37,30
+head
+bounds:0,591,136,106
+head_2
+bounds:0,745,111,81
+legL
+bounds:159,745,73,131
+rotate: 90
+leg_R
+bounds:522,591,84,183
+rotate: 90
+moutj_BACK
+bounds:439,745,84,48
+skirt
+bounds:0,363,342,180
+offsets:0,0,342,164

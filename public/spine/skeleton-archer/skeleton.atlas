@@ -1,0 +1,62 @@
+skeleton.png
+pma: false
+size:992,992
+filter:Linear,Linear
+body
+bounds:277,0,188,351
+rotate: 90
+eye
+bounds:623,764,87,55
+offsets:1,0,87,55
+eye_2
+bounds:0,764,105,64
+offsets:1,1,105,64
+head
+bounds:0,0,240,229
+offsets:1,8,240,229
+rotate: 90
+l_arm
+bounds:555,471,96,200
+rotate: 90
+l_hand
+bounds:765,628,83,115
+offsets:0,8,83,115
+rotate: 90
+l_leg
+bounds:261,288,120,258
+rotate: 90
+l_shoulder
+bounds:518,628,83,199
+offsets:0,1,83,200
+rotate: 90
+l_thigh
+bounds:330,471,108,177
+rotate: 90
+pelvis
+bounds:676,0,177,167
+offsets:1,0,177,167
+r_arm
+bounds:0,288,135,213
+offsets:2,1,137,213
+rotate: 90
+r_hand
+bounds:803,471,93,126
+offsets:0,9,93,126
+rotate: 90
+r_leg
+bounds:0,471,109,282
+rotate: 90
+r_shoulder
+bounds:153,764,63,203
+offsets:0,2,63,203
+rotate: 90
+r_shoulder_armor
+bounds:567,288,120,150
+rotate: 90
+r_thigh
+bounds:404,764,57,171
+offsets:0,2,57,171
+rotate: 90
+weapon
+bounds:0,628,470,88
+offsets:1,-8,470,88

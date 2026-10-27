@@ -1,0 +1,153 @@
+StoneGolem.png
+pma: false
+size:2112,2112
+filter:Linear,Linear
+AL
+bounds:1820,1121,159,198
+offsets:1,0,159,198
+AL2
+bounds:0,1400,159,198
+offsets:1,0,159,198
+AL3
+bounds:0,1121,183,231
+offsets:1,1,183,231
+AL4
+bounds:1676,809,156,236
+offsets:0,1,156,236
+AR
+bounds:731,1121,164,223
+offsets:1,1,164,224
+AR2
+bounds:656,1400,174,207
+rotate: 90
+AR3
+bounds:503,1121,180,228
+AR4
+bounds:1448,809,180,239
+Body
+bounds:754,420,316,270
+offsets:1,0,317,270
+rotate: 90
+Body2
+bounds:0,420,341,327
+offsets:1,0,341,327
+rotate: 90
+Body3
+bounds:1549,0,341,339
+offsets:1,0,341,339
+rotate: 90
+Body4
+bounds:805,0,304,356
+offsets:1,1,305,356
+arm
+bounds:911,1400,174,174
+offsets:1,8,174,174
+rotate: 90
+arm2
+bounds:442,1400,177,166
+offsets:1,1,177,167
+rotate: 90
+arm3
+bounds:207,1400,187,193
+offsets:1,1,188,194
+arm4
+bounds:1133,1400,174,161
+rotate: 90
+hammer
+bounds:231,1121,228,224
+offsets:1,0,228,224
+rotate: 90
+hammer2
+bounds:923,809,246,255
+offsets:0,1,246,255
+hammer3
+bounds:1591,420,254,267
+offsets:1,1,254,267
+hammer4
+bounds:0,809,246,264
+hand
+bounds:1599,1121,199,173
+offsets:1,9,200,174
+rotate: 90
+hand2
+bounds:1392,1121,200,159
+offsets:1,0,200,159
+rotate: 90
+hand3
+bounds:1176,1121,201,168
+rotate: 90
+hand4
+bounds:943,1121,210,185
+rotate: 90
+legL
+bounds:1819,1400,115,128
+offsets:9,-7,115,129
+legL2
+bounds:191,1646,107,130
+offsets:0,8,107,130
+rotate: 90
+legL3
+bounds:0,1646,108,143
+offsets:0,9,108,144
+rotate: 90
+legL4
+bounds:1514,1400,113,166
+offsets:0,-8,113,166
+legR
+bounds:1675,1400,96,132
+offsets:0,-7,96,132
+legR2
+bounds:575,1646,99,153
+offsets:0,9,99,153
+rotate: 90
+legR3
+bounds:369,1646,104,158
+offsets:0,9,104,159
+rotate: 90
+legR4
+bounds:1342,1400,124,174
+offsets:1,-7,125,174
+mouth
+bounds:507,809,263,160
+offsets:1,1,263,161
+rotate: 90
+mouth2
+bounds:715,809,256,160
+offsets:1,1,257,161
+rotate: 90
+mouth3
+bounds:294,809,263,165
+offsets:1,0,263,165
+rotate: 90
+mouth4
+bounds:1072,420,268,166
+offsets:1,1,269,167
+rotate: 90
+summon1
+bounds:375,420,339,331
+offsets:0,1,339,332
+rotate: 90
+summon2
+bounds:1157,0,344,346
+offsets:1,1,344,347
+summon3
+bounds:398,0,365,359
+rotate: 90
+summon4
+bounds:0,0,350,372
+offsets:1,0,350,372
+top
+bounds:1217,809,240,183
+offsets:1,0,240,183
+rotate: 90
+top2
+bounds:1893,420,266,218
+offsets:1,0,266,218
+rotate: 90
+top3
+bounds:1286,420,267,257
+rotate: 90
+top4
+bounds:1880,809,235,225
+offsets:1,0,236,225
+rotate: 90

@@ -1,0 +1,104 @@
+skeleton_worrior.png
+pma: false
+size:768,768
+filter:Linear,Linear
+arm_L1
+bounds:272,89,46,139
+offsets:1,2,47,140
+rotate: 90
+arm_L2
+bounds:272,138,110,103
+rotate: 90
+arm_R1
+bounds:414,92,45,128
+offsets:0,1,45,128
+rotate: 90
+arm_R2
+bounds:290,9,77,97
+rotate: 90
+belt
+bounds:413,362,124,40
+offsets:2,1,125,41
+rotate: 90
+body
+bounds:291,353,119,124
+cap
+bounds:378,177,132,86
+cap acc F
+bounds:192,480,120,135
+cap acc_B
+bounds:3,81,165,134
+rotate: 90
+chest_L
+bounds:140,87,129,159
+chest_R
+bounds:308,266,55,133
+rotate: 90
+chest_R_B
+bounds:390,29,57,113
+rotate: 90
+elbo_L
+bounds:291,324,39,26
+offsets:1,1,39,26
+eye_L1
+bounds:327,629,10,30
+offsets:1,2,11,30
+rotate: 90
+eye_L2
+bounds:360,621,15,18
+offsets:1,0,15,18
+eye_R1
+bounds:3,3,8,23
+offsets:0,1,8,23
+rotate: 90
+eye_R2
+bounds:378,623,14,16
+offsets:1,1,14,17
+eyeback_L
+bounds:444,267,38,50
+eyeback_R
+bounds:378,140,34,45
+rotate: 90
+hand_L
+bounds:513,254,63,62
+offsets:1,0,63,62
+rotate: 90
+hand_R1
+bounds:513,186,56,65
+offsets:1,0,56,65
+hand_R2
+bounds:545,129,52,54
+offsets:1,0,53,54
+head
+bounds:192,618,132,147
+knee_L
+bounds:426,144,30,29
+rotate: 90
+knee_R
+bounds:333,326,24,29
+rotate: 90
+leg_L1
+bounds:444,320,39,108
+offsets:0,13,39,122
+rotate: 90
+leg_L2
+bounds:3,14,64,174
+rotate: 90
+leg_R1
+bounds:192,251,69,113
+offsets:4,1,74,113
+rotate: 90
+leg_R2
+bounds:192,323,96,154
+neck
+bounds:506,15,72,74
+offsets:0,1,72,77
+skirt_C
+bounds:327,642,98,123
+skirt_L
+bounds:315,489,96,126
+skirt_R
+bounds:180,6,78,107
+rotate: 90
+sward
+bounds:3,249,186,516
