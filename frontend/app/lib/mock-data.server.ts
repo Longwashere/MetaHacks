@@ -1486,7 +1486,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 4130,
     saves: 1370,
     thumbnailUrl: null,
-    files: customRig("ember-serpent", "EmberSerpent", { premultipliedAlpha: false }),
+    files: customRig("ember-serpent", "EmberSerpent", { skin: "023", premultipliedAlpha: false }),
     tint: null,
   },
   {
@@ -1532,7 +1532,7 @@ export const MOCK_ASSETS: SpineAsset[] = [
     downloads: 6890,
     saves: 2450,
     thumbnailUrl: null,
-    files: customRig("fire-burst", "FireBurstVFX", { premultipliedAlpha: false }),
+    files: customRig("fire-burst", "FireBurstVFX", { skin: "HuoYan", premultipliedAlpha: false }),
     tint: null,
   },
   {

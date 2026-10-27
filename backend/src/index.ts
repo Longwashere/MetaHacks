@@ -1,9 +1,13 @@
 import express from "express";
 import { PORT, REMIX_OUTPUT_DIR } from "./lib/config.js";
 import { remixesRouter } from "./routes/remixes.js";
+import { skeletonsRouter } from "./routes/skeletons.js";
 import { remixesV2Router } from "./v2/routes/remixes.js";
 
 const app = express();
+
+// Mounted before the global JSON parser: it has its own, larger body limit for skeleton files.
+app.use("/skeletons", skeletonsRouter);
 
 app.use(express.json());
 

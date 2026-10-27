@@ -7,6 +7,7 @@ import { Label } from "~/components/ui/label";
 import { Slider } from "~/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Toggle } from "~/components/ui/toggle";
+import type { SpineTweakBinding } from "~/lib/spine-tweaks";
 import type { SpineAsset, SpineViewMode } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
@@ -25,6 +26,8 @@ interface AssetPlayerProps {
   /** When true, renders bone name tags on the skeleton rig. */
   showLabels?: boolean;
   onShowLabelsChange?: (show: boolean) => void;
+  /** Live rig edits from a TweakPanel. */
+  tweaks?: SpineTweakBinding;
   className?: string;
 }
 
@@ -48,6 +51,7 @@ export function AssetPlayer({
   onBoneColorChange,
   showLabels: controlledShowLabels,
   onShowLabelsChange,
+  tweaks,
   className,
 }: AssetPlayerProps) {
   const [internalViewMode, setInternalViewMode] = useState<SpineViewMode>("skin");
@@ -175,6 +179,7 @@ export function AssetPlayer({
         hideSkin={hideSkin}
         boneColor={boneColor}
         showLabels={bonesActive && showLabels}
+        tweaks={tweaks}
         className="border-b"
       />
       <div className="flex flex-col gap-4 p-4">

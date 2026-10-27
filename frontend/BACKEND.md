@@ -30,6 +30,7 @@ Each function in `api.server.ts` has a `BACKEND:` comment with the endpoint it s
 | `saveToLibrary(userId, assetId)` | `PUT /me/library/:assetId` | `void`. Should be idempotent. |
 | `removeFromLibrary(userId, assetId)` | `DELETE /me/library/:assetId` | `void`. Should be idempotent. |
 | `createRemixJob(userId, input, apiVersion)` | `POST /v2/remixes` or `POST /v1/remixes` (JSON `RemixInput` + `base: { name, atlasUrl, premultipliedAlpha }`) | **Live:** calls the backend at `BACKEND_URL` (default `http://localhost:4000`). Returns `RemixJob`, or `null` if the base rig doesn't exist or has no files |
+| `saveRemixSkeleton(userId, assetId, skeleton, skin)` | `POST /skeletons` (JSON `{ skeleton }`, up to 8 MB) | **Live:** stores the skeleton JSON the remix page baked the tweak panel's edits into, and returns `{ skeletonUrl }`. The mock then points the remix's `files.skeletonUrl` (and `files.skin`, for a chosen or combined skin) at it. Returns the updated `SpineAsset`, or `null` if the asset isn't one of the user's remixes |
 | `getRemixJob(userId, jobId)` | `GET /{v1,v2}/remixes/:id`, using the job's version | **Live:** polls the backend while the job runs. `RemixJob \| null` |
 
 ## Remix flow

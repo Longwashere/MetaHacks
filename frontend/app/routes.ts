@@ -20,5 +20,6 @@ export default [
   route("robots.txt", "routes/robots[.]txt.ts"),
   route("assets/:assetId/download", "routes/asset-download.ts"),
   route("api/library", "routes/api.library.ts"),
+  route("api/remix-skeleton", "routes/api.remix-skeleton.ts"),
   route("api/theme", "routes/api.theme.ts"),
 ] satisfies RouteConfig;

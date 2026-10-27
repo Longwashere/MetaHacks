@@ -1,21 +1,25 @@
 import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Palette, Search, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Form,
   Link,
   data,
   redirect,
+  useFetcher,
   useNavigation,
   useRevalidator,
   useSearchParams,
 } from "react-router";
 import type { Route } from "./+types/remix";
+import type { action as saveSkeletonAction } from "./api.remix-skeleton";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
 import { RigPicker } from "~/components/RigPicker";
 import { SaveButton } from "~/components/SaveButton";
 import { SpinePreview } from "~/components/SpinePreview";
 import { SpriteSheet } from "~/components/SpriteSheet";
+import { TweakPanel } from "~/components/TweakPanel";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -53,6 +57,8 @@ import {
 } from "~/lib/api.server";
 import { getCurrentUser } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
+import { hasSavableTweaks } from "~/lib/spine-tweak-bake";
+import { DEFAULT_TWEAKS, type RigInfo, type SpineTweakBinding, type SpineTweaks, type TweakExporter } from "~/lib/spine-tweaks";
 import { getSiteUrl } from "~/lib/site.server";
 import {
   REMIX_API_VERSIONS,
@@ -189,6 +195,9 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData?.errors ?? {};
   const { revalidate } = useRevalidator();
+  const tweak = useTweakSession(base?.id ?? null);
+  const savedRemix = job?.status === "succeeded" ? job.asset : null;
+  const tweakPanel = { ...tweak.panel, save: useSaveTweaks(savedRemix?.id ?? null, tweak) };
 
   // Poll the job while it's in progress. BACKEND: could be replaced by SSE/WebSocket push.
   const active = job?.status === "queued" || job?.status === "running";
@@ -298,8 +307,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                   asset={base}
                   animation={anim ?? base.animations[0]?.name ?? "idle"}
                   animationHref={(name) => withParams({ anim: name })}
+                  tweaks={tweak.binding}
                 />
                 <p className="text-center text-sm text-muted-foreground">Previewing the original rig. Your remix will appear here.</p>
+                <TweakPanel {...tweakPanel} />
               </>
             ) : job.status === "failed" ? (
               <Alert variant="destructive">
@@ -316,6 +327,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                   asset={job.asset}
                   animation={anim ?? job.asset.animations[0]?.name ?? "idle"}
                   animationHref={(name) => withParams({ anim: name })}
+                  tweaks={tweak.binding}
                 />
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="mr-auto">
@@ -332,6 +344,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                     </Link>
                   </Button>
                 </div>
+                <TweakPanel {...tweakPanel} />
               </>
             ) : (
               <Card className="h-full">
@@ -390,6 +403,113 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
       )}
     </div>
   );
+}
+
+interface TweakSession {
+  key: string | null;
+  tweaks: SpineTweaks;
+  rig: RigInfo | null;
+  part: string | null;
+  bone: string | null;
+  picking: boolean;
+  exporter: TweakExporter | null;
+}
+
+/**
+ * Tweak state for the previewed rig. It carries over from the original to the finished remix
+ * (same skeleton) and starts fresh when another rig is chosen.
+ */
+function useTweakSession(key: string | null) {
+  const fresh: TweakSession = { key, tweaks: DEFAULT_TWEAKS, rig: null, part: null, bone: null, picking: false, exporter: null };
+  const [session, setSession] = useState(fresh);
+  let current = session;
+  if (session.key !== key) {
+    current = fresh;
+    setSession(fresh);
+  }
+  const update = (patch: Partial<TweakSession>) => setSession((s) => ({ ...s, ...patch }));
+
+  const binding: SpineTweakBinding = {
+    tweaks: current.tweaks,
+    selectedPart: current.part,
+    picking: current.picking,
+    onPickPart: (part) => update({ part }),
+    onRigInfo: (rig) => update({ rig }),
+    onExporter: (exporter) => update({ exporter }),
+  };
+  const panel = {
+    tweaks: current.tweaks,
+    onChange: (tweaks: SpineTweaks) => update({ tweaks }),
+    rig: current.rig,
+    selectedPart: current.part,
+    onSelectPart: (part: string | null) => update({ part }),
+    picking: current.picking,
+    onPickingChange: (picking: boolean) => update({ picking }),
+    selectedBone: current.bone,
+    onSelectBone: (bone: string | null) => update({ bone }),
+  };
+  return {
+    binding,
+    panel,
+    tweaks: current.tweaks,
+    exporter: current.exporter,
+    /** Clears the edits after they've been saved into the rig. Selection and Pick mode stay, so editing can go on. */
+    clear: () => update({ tweaks: DEFAULT_TWEAKS }),
+  };
+}
+
+/**
+ * Save for the tweak panel: bakes the tweaks into the skeleton JSON in the browser (the live rig
+ * knows the setup pose the bake needs), then stores it as the remix's skeleton. Only a finished
+ * remix can be saved; the original rig belongs to someone else.
+ */
+function useSaveTweaks(remixId: string | null, tweak: ReturnType<typeof useTweakSession>) {
+  const fetcher = useFetcher<typeof saveSkeletonAction>();
+  const [exporting, setExporting] = useState(false);
+  const { clear } = tweak;
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (fetcher.data.ok) {
+      // The saved skeleton now carries the edits, so drop them from the live preview.
+      clear();
+      toast.success("Saved. The remix's download now includes your edits.");
+    } else {
+      toast.error(fetcher.data.error);
+    }
+    // Runs once per finished save; `clear` changes identity every render, so it's left out.
+  }, [fetcher.state, fetcher.data]);
+
+  const disabledReason = !remixId
+    ? "Live in your browser, no model calls. Run a remix to save edits into its skeleton file."
+    : !tweak.exporter
+      ? "Loading the rig…"
+      : !tweak.exporter.canExport
+        ? "This rig's skeleton is a binary .skel file, so edits can't be saved into it."
+        : null;
+
+  const onSave = async () => {
+    if (!remixId || !tweak.exporter) return;
+    if (!hasSavableTweaks(tweak.tweaks)) {
+      toast("Nothing to save: only Look, Rig and Parts edits are written to the file.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const { skeleton, skin } = await tweak.exporter.exportSkeleton(tweak.tweaks);
+      fetcher.submit(JSON.stringify({ assetId: remixId, skeleton, skin }), {
+        method: "post",
+        action: "/api/remix-skeleton",
+        encType: "text/plain",
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save the edits.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return { onSave, pending: exporting || fetcher.state !== "idle", disabledReason };
 }
 
 // Milestones mirror the progress values the backend reports (backend/src/lib/remix.ts).

@@ -261,6 +261,35 @@ export async function getRemixJob(userId: string, jobId: string): Promise<RemixJ
   return publicJob(job);
 }
 
+/**
+ * BACKEND: POST /skeletons  body = { skeleton } → { skeletonUrl }
+ * Replaces a remix's skeleton with one the user edited on the remix page. Only the user who made
+ * the remix can do this. Returns the updated asset, or null if it isn't theirs.
+ */
+export async function saveRemixSkeleton(
+  userId: string,
+  assetId: string,
+  skeleton: object,
+  skin: string | null,
+): Promise<SpineAsset | null> {
+  const job = [...store.jobs.values()].find((j) => j.userId === userId && j.asset?.id === assetId);
+  const asset = job?.asset;
+  if (!job || !asset?.files) return null;
+
+  const res = await fetch(`${BACKEND_URL}/skeletons`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ skeleton }),
+  });
+  if (!res.ok) throw new Error(`POST /skeletons failed (${res.status}): ${await res.text()}`);
+  const { skeletonUrl } = (await res.json()) as { skeletonUrl: string };
+
+  const updated: SpineAsset = { ...asset, files: { ...asset.files, skeletonUrl, skin: skin ?? asset.files.skin } };
+  job.asset = updated;
+  store.assets.set(updated.id, updated);
+  return updated;
+}
+
 function publicJob({ userId: _userId, ...job }: RemixJob & { userId: string }): RemixJob {
   return job;
 }

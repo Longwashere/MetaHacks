@@ -125,6 +125,7 @@ Add the entry in the same task, not later.
 
 ### Open
 
+- **RogueBard preview is broken.** It shows "Preview unavailable" with `Animation bounds are invalid: idle_aggressive`, even though its default skin has attachments. Not yet investigated. (2026-10-27)
 - **Dev-server reloads kill remix jobs.** `tsx watch` restarts the backend on every file save, and jobs only live in memory, so a running remix is lost, wasting its credits. Its folder ends up with only `prompts.json`. Don't edit backend files while a remix is running, or tell the user their run was lost. (2026-10-27)
 - **Keyed mode is untested in a full run.** The despill fix for keyed mode (outline not kept) was only checked offline on saved model output. Still to see: gaps at joints, parts cut off at their region rectangle, and art close to the key colour turning transparent. (2026-10-27)
 - **Spine viewer `dispose` crash.** A failed skeleton download makes the Spine runtime throw `Cannot read properties of null (reading 'dispose')`. The cause was found, but the fix (fetch the rig files ourselves, fall back to the placeholder) was never applied. (2026-10-26)
@@ -132,6 +133,19 @@ Add the entry in the same task, not later.
 - **An API key appeared in plain text in a chat session.** It's stored in `backend/.env` (gitignored), but rotate it before the repo goes public. (2026-10-27)
 
 ### Log
+
+### 2026-10-27 — Some rigs never rendered: empty default skin
+- **What happened:** EmberSerpent and FireBurstVFX showed "Preview unavailable" in the viewer and on the remix page. This only came to light while testing the new tweak panel, because EmberSerpent is one of only two rigs with physics.
+- **Cost:** one investigation; it also hid these rigs from every demo.
+- **Cause:** their `default` skin has no attachments, and `files.skin` was null, so the player measured empty bounds and threw `Animation bounds are invalid`.
+- **Fix / status:** `skin: "023"` and `skin: "HuoYan"` in `mock-data.server.ts`. RogueBard fails with the same error for a different reason (still open).
+- **Lesson:** when adding a rig with several skins, check that its `default` skin isn't empty and set `files.skin` if it is.
+
+### 2026-10-27 — `git stash` during a test killed the running dev servers
+- **What happened:** an agent ran `git stash` / `git stash pop` to compare against `master` in a browser, and both dev servers (`npm run dev`) stopped and had to be restarted.
+- **Cost:** the user's dev session; any remix job running at the time would have been lost (jobs live in memory).
+- **Fix / status:** restarted. Compare against `master` in a separate worktree instead.
+- **Lesson:** don't swap the working tree under a running dev server; use `git worktree add` for before/after checks.
 
 ### 2026-10-27 — Background colour still visible after the fix
 - **What happened:** after the first keyed-mode fix, a run still showed a dark-teal outline around every part.

@@ -2,6 +2,7 @@ import { Bone, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { SpinePlaceholder } from "~/components/SpinePlaceholder";
 import { SpineRuntime, type SpineRuntimeStatus } from "~/components/SpineRuntime";
+import type { SpineTweakBinding } from "~/lib/spine-tweaks";
 import type { AssetAccent, PreviewableAsset } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
@@ -26,6 +27,8 @@ export interface SpinePreviewProps {
   boneColor?: string;
   /** When true, display floating bone name tags on the skeleton rig. */
   showLabels?: boolean;
+  /** Live rig edits; only applied when the real runtime renders. */
+  tweaks?: SpineTweakBinding;
   className?: string;
 }
 
@@ -42,6 +45,7 @@ export function SpinePreview({
   hideSkin = false,
   boneColor,
   showLabels = false,
+  tweaks,
   className,
 }: SpinePreviewProps) {
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
@@ -74,6 +78,7 @@ export function SpinePreview({
             boneColor={boneColor}
             showLabels={showLabels}
             tint={asset.tint}
+            tweaks={tweaks}
             onStatusChange={setStatus}
           />
           {status !== "ready" && <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />}

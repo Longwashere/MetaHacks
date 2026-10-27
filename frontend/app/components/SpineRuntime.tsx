@@ -1,7 +1,10 @@
 import "@esotericsoftware/spine-player/dist/spine-player.css";
 import type { SpinePlayer, SpinePlayerConfig } from "@esotericsoftware/spine-player";
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useInView } from "~/hooks/use-in-view";
+import { bakeTweaks } from "~/lib/spine-tweak-bake";
+import { TweakController } from "~/lib/spine-tweak-controller";
+import { DEFAULT_TWEAKS, type SpineTweakBinding } from "~/lib/spine-tweaks";
 import type { SpineAssetFiles } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
@@ -22,6 +25,8 @@ interface SpineRuntimeProps {
   showLabels?: boolean;
   /** Hex color multiplied over the textures (mock remixes). */
   tint: string | null;
+  /** Live rig edits from the tweak panel. */
+  tweaks?: SpineTweakBinding;
   onStatusChange?: (status: SpineRuntimeStatus) => void;
   className?: string;
 }
@@ -55,12 +60,14 @@ export function SpineRuntime({
   boneColor,
   showLabels = false,
   tint,
+  tweaks,
   onStatusChange,
   className,
 }: SpineRuntimeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<SpinePlayer | null>(null);
+  const controllerRef = useRef<TweakController | null>(null);
   const tempVec = useRef<{ set: (x: number, y: number, z: number) => void; x: number; y: number } | null>(null);
 
   // The player reads config.debug every frame, so mutating this object toggles debug drawing.
@@ -75,12 +82,12 @@ export function SpineRuntime({
     hulls: false,
   });
   // Lets the (async) callbacks see the latest props without re-creating the player.
-  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels });
+  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks });
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
   const inView = useInView(containerRef);
 
   useEffect(() => {
-    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels };
+    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks };
   });
 
   useEffect(() => {
@@ -94,7 +101,8 @@ export function SpineRuntime({
     let cancelled = false;
     setStatus("loading");
 
-    import("@esotericsoftware/spine-player").then(({ SpinePlayer, Vector3 }) => {
+    import("@esotericsoftware/spine-player").then((spine) => {
+      const { SpinePlayer, Vector3, Physics } = spine;
       if (cancelled) return;
       tempVec.current = new Vector3();
 
@@ -112,6 +120,11 @@ export function SpineRuntime({
         preserveDrawingBuffer: false,
         debug: debugRef.current,
         viewport: { padLeft: "8%", padRight: "8%", padTop: "8%", padBottom: "8%", transitionTime: 0.25 },
+        updateWorldTransform: (player) => {
+          if (controllerRef.current) controllerRef.current.pose(Physics.update);
+          else player.skeleton?.updateWorldTransform(Physics.update);
+        },
+        update: () => controllerRef.current?.frame(),
         draw: (player) => {
           const overlay = overlayCanvasRef.current;
           if (!overlay) return;
@@ -136,7 +149,8 @@ export function SpineRuntime({
           ctx.save();
           ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-          if (!latest.current.showLabels) {
+          const selectedPart = latest.current.tweaks?.selectedPart ?? null;
+          if (!latest.current.showLabels && !selectedPart) {
             ctx.restore();
             return;
           }
@@ -150,6 +164,30 @@ export function SpineRuntime({
           }
 
           ctx.scale(dpr, dpr);
+
+          const outline = selectedPart ? controllerRef.current?.outline(selectedPart) : null;
+          if (outline && outline.length >= 6) {
+            ctx.beginPath();
+            for (let i = 0; i < outline.length; i += 2) {
+              vec.set(outline[i], outline[i + 1], 0);
+              (camera as unknown as { worldToScreen: (v: unknown, w: number, h: number) => void }).worldToScreen(vec, displayW, displayH);
+              if (i === 0) ctx.moveTo(vec.x, displayH - vec.y);
+              else ctx.lineTo(vec.x, displayH - vec.y);
+            }
+            ctx.closePath();
+            ctx.setLineDash([4, 3]);
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = "#f8fafc";
+            ctx.stroke();
+            ctx.lineDashOffset = 3.5;
+            ctx.strokeStyle = "#0f172a";
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+          if (!latest.current.showLabels) {
+            ctx.restore();
+            return;
+          }
 
           const currentBoneColor = latest.current.boneColor || "#ef4444";
           const bones = skeleton.bones;
@@ -229,7 +267,7 @@ export function SpineRuntime({
           } else if (tint) {
             player.skeleton?.color.setFromString(tint);
           }
-          if (!playing) player.pause();
+          if (!playing || latest.current.tweaks?.tweaks.scrub != null) player.pause();
 
           // Configure skeleton debug renderer line color and width
           const sdr = (player as unknown as { sceneRenderer?: { skeletonDebugRenderer?: { boneWidth: number; boneLineColor: { set: (r: number, g: number, b: number, a: number) => void } } } }).sceneRenderer?.skeletonDebugRenderer;
@@ -238,17 +276,18 @@ export function SpineRuntime({
             applyBoneLineColor(sdr, latest.current.boneColor);
           }
 
-          // Intercept drawSkeleton to dynamically skip drawing skin textures/meshes when hideSkin is true
-          const sr = (player as unknown as { sceneRenderer?: { drawSkeleton: (...args: unknown[]) => void; _origDrawSkeleton?: (...args: unknown[]) => void } }).sceneRenderer;
-          if (sr && !sr._origDrawSkeleton) {
-            sr._origDrawSkeleton = sr.drawSkeleton.bind(sr);
-            sr.drawSkeleton = function (...args: unknown[]) {
-              if (latest.current.hideSkin) {
-                return;
-              }
-              return sr._origDrawSkeleton?.apply(this, args);
-            };
-          }
+          const controller = new TweakController(spine, player, files.atlasUrl, latest.current.tweaks?.tweaks ?? DEFAULT_TWEAKS);
+          controller.hideSkin = () => latest.current.hideSkin;
+          controllerRef.current = controller;
+          latest.current.tweaks?.onRigInfo(controller.info());
+          latest.current.tweaks?.onExporter?.({
+            canExport: !files.skeletonUrl.toLowerCase().endsWith(".skel"),
+            exportSkeleton: async (values) => {
+              const res = await fetch(files.skeletonUrl);
+              if (!res.ok) throw new Error(`Couldn't load the skeleton file (${res.status}).`);
+              return bakeTweaks(await res.json(), values, controller.setupPose(values));
+            },
+          });
 
           setStatus("ready");
         },
@@ -268,6 +307,8 @@ export function SpineRuntime({
       playerRef.current?.dispose();
       gl?.getExtension("WEBGL_lose_context")?.loseContext();
       playerRef.current = null;
+      if (controllerRef.current) latest.current.tweaks?.onExporter?.(null);
+      controllerRef.current = null;
       setStatus("idle");
     };
   }, [inView, files.skeletonUrl, files.atlasUrl, files.skin, files.premultipliedAlpha]);
@@ -277,14 +318,26 @@ export function SpineRuntime({
     const player = playerRef.current;
     if (status !== "ready" || !player?.skeleton?.data.findAnimation(animation)) return;
     player.setAnimation(animation, loop);
+    controllerRef.current?.onAnimationChanged();
   }, [status, animation, loop]);
 
+  const holding = tweaks?.tweaks.scrub != null;
   useEffect(() => {
     const player = playerRef.current;
     if (status !== "ready" || !player) return;
-    if (playing) player.play();
+    if (playing && !holding) player.play();
     else player.pause();
-  }, [status, playing]);
+  }, [status, playing, holding]);
+
+  const tweakValues = tweaks?.tweaks;
+  useEffect(() => {
+    const debug = tweakValues?.debug ?? DEFAULT_TWEAKS.debug;
+    debugRef.current.meshes = debug.meshes;
+    debugRef.current.regions = debug.regions;
+    debugRef.current.bounds = debug.bounds;
+    debugRef.current.clipping = debug.clipping;
+    if (status === "ready" && tweakValues) controllerRef.current?.sync(tweakValues);
+  }, [status, tweakValues]);
 
   useEffect(() => {
     if (playerRef.current) playerRef.current.speed = speed;
@@ -313,11 +366,21 @@ export function SpineRuntime({
     }
   }, [status, tint, hideSkin]);
 
+  const picking = Boolean(tweaks?.picking) && status === "ready";
+  const pickAt = (e: MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const part = controllerRef.current?.pick(e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height) ?? null;
+    tweaks?.onPickPart(part);
+  };
+
   return (
+    // The pick layer is a pointer shortcut; the tweak panel's part list is the keyboard path.
     <div
       ref={containerRef}
+      onClick={picking ? pickAt : undefined}
       className={cn(
         "absolute inset-0 transition-opacity duration-300",
+        picking && "cursor-crosshair",
         // The player injects its own DOM here; make it fill the frame and drop its default background.
         "[&_.spine-player]:size-full [&_.spine-player]:bg-transparent!",
         status === "ready" ? "opacity-100" : "opacity-0",
@@ -329,7 +392,7 @@ export function SpineRuntime({
         aria-hidden
         className={cn(
           "pointer-events-none absolute inset-0 z-10 size-full transition-opacity duration-200",
-          showLabels ? "opacity-100" : "opacity-0",
+          showLabels || tweaks?.selectedPart ? "opacity-100" : "opacity-0",
         )}
       />
     </div>
