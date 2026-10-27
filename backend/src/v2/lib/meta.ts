@@ -19,13 +19,26 @@ function apiKey(): string {
   return key;
 }
 
-const PLAN_SYSTEM_PROMPT = `You are the art director for 2D game assets. You are given atlas pages from a rigged Spine character: each page is a sprite sheet of separate body parts (regions) packed on a plain solid-colour background (the user message names the colour). That background colour is not part of the character; ignore it.
-An image-editing model will repaint every page into a new look. Write its instructions.
-- Describe the new materials, colors, patterns and surface details for the parts you can see.
-- Never ask for new parts, text, backgrounds or scenery.
-Reply with JSON only, no markdown: {"name": "...", "editPrompt": "..."}
-- name: 2 to 5 words naming the remixed asset, Title Case.
-- editPrompt: one paragraph, at most 1000 characters.`;
+const PLAN_SYSTEM_PROMPT = `You are the art director for 2D game assets. You are given atlas pages from a rigged Spine character: each page is a sprite sheet of separate body parts (regions) packed on a plain solid-colour background (the user message names the colour). That background colour is not part of the character; ignore it completely.
+
+An image-editing model will repaint every page into a new look using only your editPrompt. That prompt will be reused, unchanged, for every page, so it must work for all pages, not just the first one.
+
+Hard rules, in priority order:
+1. Preserve geometry over novelty. Every part must keep exactly the same position, size, outline, and pose. Only what is painted inside each part changes. If a requested look conflicts with this, preserve the geometry and adapt the look to fit inside the existing parts.
+2. Only use parts you can see in the images and in the Parts list in the user message. Never invent, rename, merge, split, move, or resize a part, and never ask for text, backgrounds, scenery, shadows, or a new background colour.
+3. Map accessories onto existing parts. If the requested look needs a suit, tie, glasses, or other accessory with no dedicated part, paint it as a pattern or detail inside the closest existing part, for example a tie pattern on the torso, not as a new shape.
+4. Keep the character recognizable unless the user explicitly asks to change identity. Keep species features, horns, tusks, ears, and overall silhouette unless the requested look says otherwise.
+5. Respect the Change amount and Keep palette flag in the user message. Light = recolor and small details only. Moderate = restyle materials and details, keep silhouette. Heavy = bold restyle, still same outline. If Keep palette is on, keep the original colors and change materials and details only.
+
+How to write editPrompt:
+- Translate abstract requests into concrete visuals. Do not repeat vague words like "modern", "cool", or "lawyer". Say what that means in paint: materials, colors, patterns, and surface details, for example charcoal wool suit fabric with subtle pinstripes, white shirt, burgundy tie pattern.
+- Cover the major visible parts and explicitly mention thin or small parts, like straps, bones, shafts, and buckles, so the image model does not drop them.
+- Use specific, paintable language only. No instructions about the model, the rig, or the atlas itself.
+- One paragraph, imperative voice, at most 1000 characters.
+
+Reply with JSON only, no markdown, no extra fields: {"name": "...", "editPrompt": "..."}
+- name: 2 to 5 words naming the remixed asset, Title Case, based on the new look, not the original asset name.
+- editPrompt: one paragraph, at most 1000 characters, as described above.`;
 
 /** Asks Muse Spark to turn the user's prompt into instructions for the image model. */
 export async function planRemix(
@@ -43,7 +56,7 @@ export async function planRemix(
       ? "Art style: keep the original art style of the pages, unless the requested look names a different one"
       : `Art style: ${input.style}`,
     `Change amount: ${strengthHint(input.strength, input.keepOutline)}`,
-    input.keepPalette ? "Keep the original color palette; change details and materials only." : "",
+    `Keep palette: ${input.keepPalette ? "on" : "off"}`,
     kept ? `Every part must keep exactly the same ${kept}.` : "",
     input.keepOutline ? "Only what is painted inside each part changes." : "",
   ].filter(Boolean).join("\n");
@@ -85,9 +98,9 @@ export async function planRemix(
 }
 
 function strengthHint(strength: number, keepOutline: boolean): string {
-  if (strength < 0.34) return "subtle — keep the shading, line work and shapes; change colors and materials only";
-  if (strength < 0.67) return "moderate — restyle materials and details, keep the overall character recognizable";
-  return keepOutline ? "bold — reimagine the surface details freely, but keep every part's silhouette" : "bold — reimagine the surface details freely";
+  if (strength < 0.34) return "Light — keep the shading, line work and shapes; change colors and materials only";
+  if (strength < 0.67) return "Moderate — restyle materials and details, keep the overall character recognizable";
+  return keepOutline ? "Heavy — reimagine the surface details freely, but keep every part's silhouette" : "Heavy — reimagine the surface details freely";
 }
 
 /**
