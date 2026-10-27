@@ -1,8 +1,9 @@
-import { Download, Maximize2, Minimize2 } from "lucide-react";
-import { useState } from "react";
+import { Download, Maximize2, Minimize2, Tags } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import { type AtlasPage, parseAtlas } from "~/lib/atlas";
 import type { SpineAsset } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
@@ -18,8 +19,23 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
   const [pageIndex, setPageIndex] = useState(0);
   const [actualSize, setActualSize] = useState(false);
   const [size, setSize] = useState<{ url: string; w: number; h: number } | null>(null);
+  const [showLabels, setShowLabels] = useState(true);
+  const [atlas, setAtlas] = useState<{ url: string; pages: AtlasPage[] } | null>(null);
 
   const source = available.find((s) => s.label === sourceLabel) ?? available[0];
+  const atlasUrl = source?.asset.files?.atlasUrl;
+
+  // Region names and rects come from the .atlas file; remix atlases are served by the backend (with CORS).
+  useEffect(() => {
+    if (!atlasUrl) return;
+    const controller = new AbortController();
+    fetch(atlasUrl, { signal: controller.signal })
+      .then((res) => (res.ok ? res.text() : Promise.reject(new Error(`${res.status}`))))
+      .then((text) => setAtlas({ url: atlasUrl, pages: parseAtlas(text) }))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [atlasUrl]);
+
   if (!source?.asset.files) return null;
 
   const pages = source.asset.files.textureUrls;
@@ -27,6 +43,12 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
   const url = pages[page];
   const fileName = decodeURIComponent(url.split("/").pop()?.split("?")[0] ?? "texture.png");
   const dims = size?.url === url ? size : null;
+  const atlasPages = atlas && atlas.url === atlasUrl ? atlas.pages : [];
+  // Match the page by file name; fall back to its position in the atlas.
+  const atlasPage = atlasPages.find((p) => p.name === fileName) ?? atlasPages[page];
+  const pageW = atlasPage?.width ?? dims?.w;
+  const pageH = atlasPage?.height ?? dims?.h;
+  const regions = showLabels && atlasPage && pageW && pageH ? atlasPage.regions : [];
 
   return (
     <Card className={className}>
@@ -36,8 +58,19 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
           {fileName}
           {dims && ` · ${dims.w}×${dims.h}px`}
           {pages.length > 1 && ` · page ${page + 1} of ${pages.length}`}
+          {atlasPage && ` · ${atlasPage.regions.length} regions`}
         </CardDescription>
         <CardAction className="flex items-center gap-2">
+          <Button
+            variant={showLabels ? "secondary" : "outline"}
+            size="icon"
+            onClick={() => setShowLabels((v) => !v)}
+            aria-label={showLabels ? "Hide region labels" : "Show region labels"}
+            aria-pressed={showLabels}
+            disabled={!atlasPage}
+          >
+            <Tags />
+          </Button>
           <Button
             variant="outline"
             size="icon"
@@ -88,13 +121,38 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
             "bg-[repeating-conic-gradient(var(--muted)_0%_25%,var(--background)_0%_50%)] bg-size-[16px_16px]",
           )}
         >
-          <img
-            key={url}
-            src={url}
-            alt={`${source.asset.name} texture atlas${pages.length > 1 ? `, page ${page + 1}` : ""}`}
-            onLoad={(e) => setSize({ url, w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-            className={cn("block", actualSize ? "max-w-none" : "mx-auto h-auto max-w-full")}
-          />
+          <div className={cn("relative", actualSize ? "w-max" : "mx-auto w-fit")}>
+            <img
+              key={url}
+              src={url}
+              alt={`${source.asset.name} texture atlas${pages.length > 1 ? `, page ${page + 1}` : ""}`}
+              onLoad={(e) => setSize({ url, w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+              className={cn("block", actualSize ? "max-w-none" : "h-auto max-w-full")}
+            />
+            {pageW && pageH && regions.length > 0 && (
+              // Atlas coordinates are page pixels from the top-left, so percentages keep the
+              // boxes aligned at any zoom.
+              <div className="absolute inset-0" aria-hidden>
+                {regions.map((r, i) => (
+                  <div
+                    key={`${r.name}:${i}`}
+                    title={r.rotate ? `${r.name} (rotated ${r.rotate}°)` : r.name}
+                    className="group absolute border border-primary/60 hover:z-10 hover:border-primary hover:bg-primary/15"
+                    style={{
+                      left: `${(r.x / pageW) * 100}%`,
+                      top: `${(r.y / pageH) * 100}%`,
+                      width: `${(r.width / pageW) * 100}%`,
+                      height: `${(r.height / pageH) * 100}%`,
+                    }}
+                  >
+                    <span className="block max-w-full truncate bg-background/80 px-0.5 text-[10px] leading-tight text-foreground group-hover:max-w-none group-hover:w-max group-hover:bg-primary group-hover:text-primary-foreground">
+                      {r.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>
