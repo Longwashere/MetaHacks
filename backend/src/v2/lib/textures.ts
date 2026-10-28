@@ -191,7 +191,7 @@ export async function fitToPage(
     .removeAlpha()
     .raw()
     .toBuffer();
-  const aligned = alignToPage(rgb, page, input.background);
+  const aligned = alignToPage(rgb, page, input.background, keyedRects);
   let alpha: Uint8Array;
   if (keyedRects) {
     alpha = keyOut(aligned, page.width, page.height, input.background, keyedRects);
@@ -216,17 +216,41 @@ export async function fitToPage(
 const ALIGN_MAX_SCALE = 0.08;
 const ALIGN_MAX_SHIFT = 0.05;
 const ALIGN_SCALE_STEP = 0.002;
+/** In reshape mode, a part locates the drift only if its painted area is within this factor of the original… */
+const ALIGN_SHAPE_TOLERANCE = 1.25;
+/** …and both the original and the repainted part have at least this many pixels. */
+const ALIGN_MIN_PART_PIXELS = 30;
+/** Part centres must spread at least this share of the page along an axis to measure a stretch on it. */
+const ALIGN_MIN_SPREAD = 0.1;
+
+interface AxisFit {
+  scale: number;
+  offset: number;
+}
 
 /**
- * The model tends to stretch or shift its output a little, so repainted parts land
- * beside the original outlines and the background shows through along one edge.
- * Finds the per-axis scale and offset that best line up the model's parts with the
- * page's opaque pixels (matching row and column coverage profiles) and resamples
- * the repainted image to undo it.
+ * The model tends to stretch or shift its output a little (about 2% vertically on most
+ * runs), so repainted parts land beside the original outlines. Finds the per-axis scale
+ * and offset that undo it and resamples the repainted image.
+ *
+ * With `rects` null (outline kept), the parts keep their shapes, so the fit matches the
+ * model's row and column coverage to the page's opaque pixels. With `rects` (reshape mode)
+ * the model is meant to change shapes, and a grown part (ears, a hat) would drag a coverage
+ * fit into stretching the whole page and pushing other parts out of their regions. There the
+ * fit uses the centres of the parts that kept roughly their size, one vote each, and leaves
+ * the image alone when too few qualify.
  */
-function alignToPage(rgb: Buffer, page: PageImage, background: Background): Buffer {
+function alignToPage(rgb: Buffer, page: PageImage, background: Background, rects: PageRect[] | null): Buffer {
+  const isBg = backgroundMask(rgb, page.width, page.height, background);
+  const fit = rects ? fitFromPartCentres(isBg, page, rects) : fitFromCoverage(isBg, page);
+  if (!fit) return rgb;
+  const { xs, ys } = fit;
+  if (ys.scale === 1 && ys.offset === 0 && xs.scale === 1 && xs.offset === 0) return rgb;
+  return resample(rgb, page.width, page.height, xs, ys);
+}
+
+function fitFromCoverage(isBg: Uint8Array, page: PageImage): { xs: AxisFit; ys: AxisFit } {
   const { width, height } = page;
-  const isBg = backgroundMask(rgb, width, height, background);
   const genRows = new Float64Array(height), genCols = new Float64Array(width);
   const pageRows = new Float64Array(height), pageCols = new Float64Array(width);
   for (let y = 0; y < height; y++) {
@@ -242,11 +266,65 @@ function alignToPage(rgb: Buffer, page: PageImage, background: Background): Buff
       }
     }
   }
-  const ys = fitAxis(pageRows, genRows);
-  const xs = fitAxis(pageCols, genCols);
-  if (ys.scale === 1 && ys.offset === 0 && xs.scale === 1 && xs.offset === 0) return rgb;
+  return { xs: fitAxis(pageCols, genCols), ys: fitAxis(pageRows, genRows) };
+}
 
-  // Bilinear resample: page pixel (x, y) comes from repainted pixel (x * sx + tx, y * sy + ty).
+function fitFromPartCentres(isBg: Uint8Array, page: PageImage, rects: PageRect[]): { xs: AxisFit; ys: AxisFit } | null {
+  const { width, height } = page;
+  const parts: { px: number; py: number; gx: number; gy: number }[] = [];
+  for (const r of rects) {
+    let ax = 0, ay = 0, an = 0, gx = 0, gy = 0, gn = 0;
+    for (let y = Math.max(r.y, 0); y < Math.min(r.y + r.height, height); y++) {
+      for (let x = Math.max(r.x, 0); x < Math.min(r.x + r.width, width); x++) {
+        const p = y * width + x;
+        if (page.rgba[p * 4 + 3] >= 128) {
+          ax += x;
+          ay += y;
+          an++;
+        }
+        if (!isBg[p]) {
+          gx += x;
+          gy += y;
+          gn++;
+        }
+      }
+    }
+    if (an < ALIGN_MIN_PART_PIXELS || gn < ALIGN_MIN_PART_PIXELS) continue;
+    // A reshaped part's centre moves with its new shape, not with the drift.
+    const ratio = gn / an;
+    if (ratio > ALIGN_SHAPE_TOLERANCE || ratio < 1 / ALIGN_SHAPE_TOLERANCE) continue;
+    parts.push({ px: ax / an, py: ay / an, gx: gx / gn, gy: gy / gn });
+  }
+  if (parts.length < 2) return null;
+  return {
+    xs: fitLine(parts.map((p) => p.px), parts.map((p) => p.gx), width),
+    ys: fitLine(parts.map((p) => p.py), parts.map((p) => p.gy), height),
+  };
+}
+
+/**
+ * Least-squares `generated ≈ page * scale + offset` over part centres. Measures only a shift
+ * when the parts sit too close together along this axis to tell a stretch apart, and makes no
+ * change when the result moves anything further than the model plausibly drifts.
+ */
+function fitLine(page: number[], generated: number[], size: number): AxisFit {
+  const n = page.length;
+  const meanPage = page.reduce((a, b) => a + b, 0) / n;
+  const meanGen = generated.reduce((a, b) => a + b, 0) / n;
+  let sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sxx += (page[i] - meanPage) ** 2;
+    sxy += (page[i] - meanPage) * (generated[i] - meanGen);
+  }
+  const scale = Math.sqrt(sxx / n) >= size * ALIGN_MIN_SPREAD ? sxy / sxx : 1;
+  const offset = meanGen - scale * meanPage;
+  const largestMove = Math.max(Math.abs(offset), Math.abs((scale - 1) * (size - 1) + offset));
+  if (Math.abs(scale - 1) > ALIGN_MAX_SCALE || largestMove > size * ALIGN_MAX_SHIFT) return { scale: 1, offset: 0 };
+  return { scale, offset };
+}
+
+/** Bilinear resample: page pixel (x, y) comes from repainted pixel (x * xs.scale + xs.offset, y * ys.scale + ys.offset). */
+function resample(rgb: Buffer, width: number, height: number, xs: AxisFit, ys: AxisFit): Buffer {
   const out = Buffer.alloc(rgb.length);
   for (let y = 0; y < height; y++) {
     const fy = Math.min(Math.max(y * ys.scale + ys.offset, 0), height - 1);
@@ -268,7 +346,7 @@ function alignToPage(rgb: Buffer, page: PageImage, background: Background): Buff
  * Finds `scale` and `offset` so that `generated[i * scale + offset]` best matches
  * `target[i]`, by brute force over small stretches and shifts.
  */
-function fitAxis(target: Float64Array, generated: Float64Array): { scale: number; offset: number } {
+function fitAxis(target: Float64Array, generated: Float64Array): AxisFit {
   const n = target.length;
   const maxShift = Math.round(n * ALIGN_MAX_SHIFT);
   const maxStep = Math.round(ALIGN_MAX_SCALE / ALIGN_SCALE_STEP);

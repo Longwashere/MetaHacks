@@ -134,6 +134,13 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — v2 reshape remixes had parts cut off at their region edges
+- **What happened:** on newer v2 remixes (slime dog, squire, peashooter, assassin) eyes, arms and the mouth were cut in half in the final atlas page, though Muse Image's raw output had them whole and in place.
+- **Cost:** four remixes with damaged textures (credits), and diagnosis time.
+- **Cause:** `alignToPage` undoes the model's real drift (about 2% vertical stretch, 1–3 px sideways) by matching row and column coverage to the original page. In reshape mode (keep outline off) the model deliberately grows parts (ears, a hat, a hood: body area 1.4–1.7×), which dragged the fit to 4–8% stretches and shifts of up to 41 px. That pushed correctly placed parts out of their regions, and the region clip cut them.
+- **Workaround / status:** fixed for v2. In reshape mode the drift is now fitted from the centres of parts that kept roughly their size (±25%), one vote per part, and no correction is made when fewer than two qualify (`backend/src/v2/lib/textures.ts`). Re-running it on the saved outputs of all seven v2 remixes: the broken ones keep far more of each part (squire's worst part 0% → 82%), and the earlier, correctly aligned ones are unchanged. Keep-outline mode still uses the coverage fit. Already-saved remixes keep their damaged pages unless rebuilt.
+- **Lesson:** an alignment that matches old silhouettes is only valid when silhouettes are meant to stay. Log the fitted scale/offset per job so a fit stuck at its limits is visible.
+
 ### 2026-10-28 — Remix textures from R2 failed to load in the viewer
 - **What happened:** the first two remixes stored in R2 finished and were saved, but the viewer showed "Couldn't load image" for their texture pages.
 - **Cost:** two remix results that looked broken; time spent diagnosing.
