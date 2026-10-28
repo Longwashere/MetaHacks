@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { aiFetch } from "./ai-fetch.js";
 import { getAssetRow } from "./assets.js";
-import { ANIMATION_LOG_DIR, META_API_BASE_URL, MUSE_MODEL, MUSE_TIMEOUT_MS } from "./config.js";
+import { ANIMATE_REASONING_EFFORT, ANIMATION_LOG_DIR, META_API_BASE_URL, MUSE_MODEL, MUSE_TIMEOUT_MS } from "./config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "./db.js";
 import * as spine from "@esotericsoftware/spine-core";
 import { FX_PREFIX, applyFx, coreBones, describeSlots, readFx, readSlots, stubLoader, type Fx } from "./animate-fx.js";
@@ -426,6 +426,7 @@ async function callMuse(step: "plan" | "keys", system: string, request: string, 
     headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
     body: JSON.stringify({
       model: MUSE_MODEL,
+      reasoning_effort: ANIMATE_REASONING_EFFORT,
       // Long keyframe replies sometimes had stray words in the middle of the JSON.
       ...(step === "keys" ? { response_format: { type: "json_object" } } : {}),
       messages: [
