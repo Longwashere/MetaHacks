@@ -1,6 +1,6 @@
 import path from "node:path";
 import sharp from "sharp";
-import { type AtlasPage, type PageRect, isSafePageName, parseAtlas } from "./atlas.js";
+import { type AtlasPage, type PageRect, isSafePageName, parseAtlas, uvToPage } from "./atlas.js";
 import { type PartLayout, layoutParts } from "../../lib/layout.js";
 import { ContentPolicyError, planPartFix, repaintPage } from "./meta.js";
 import { type RemixProgress, fetchBaseFile, withProgress } from "./remix.js";
@@ -22,6 +22,13 @@ const PAGE_EXPECTED_MS = 10_000;
 const MIN_ATTACHED_FIT = 0.85;
 /** Smallest shrink a part may need to fit its box; below this the model drew it far too big. */
 const MIN_PART_SCALE = 0.5;
+/** Margin kept clear inside each part's box and outline, as a share of the box's shorter side, so soft edges aren't cut. */
+const FIT_INSET = 0.02;
+/**
+ * A mesh outline is only trusted when it holds at least this share of the original part's opaque
+ * pixels; otherwise the atlas and skeleton may not match, and the part fits its box alone.
+ */
+const MIN_OUTLINE_COVER = 0.85;
 const LAYOUT_RETRY_NOTE =
   "A previous attempt drew the parts too big or away from where they are. Draw each new part over the old one, centred on it and no bigger than it, and nowhere else.";
 
@@ -40,6 +47,11 @@ export interface PartFixRequest extends PartFixInput {
    * shows only what's inside its outline, so the model is asked to keep to it.
    */
   keepOutline: boolean;
+  /**
+   * Outlines the game clips parts to, by region, as mesh UV pairs: for parts drawn by a mesh that
+   * can't be boxed (see lib/mesh.ts). The repainted part is shrunk to fit inside.
+   */
+  outlines: Record<string, number[]>;
   /** The rig it was remixed from, to start from the original parts; null when it's gone. */
   original: { atlasUrl: string; premultipliedAlpha: boolean } | null;
 }
@@ -120,6 +132,7 @@ export async function runPartFix(
     const rects = selected[i].map((j) => page.rects[j]);
     const sourceImage = sources?.[i] ?? remixImages[i];
     const modelInput = await toModelInput(sourceImage, IMAGE_MAX_SIDE, background, centreLayout(layoutParts(rects, sourceImage)));
+    const outlines = await placementOutlines(input.outlines, page, selected[i], modelInput.layout, sourceImage);
     const from = 0.1 + (0.8 * step) / touched.length;
     const to = 0.1 + (0.8 * (step + 1)) / touched.length;
     const onPage = touched.length > 1 ? ` on page ${step + 1} of ${touched.length}` : "";
@@ -166,7 +179,7 @@ export async function runPartFix(
         const check = async (image: Buffer, attempt: number) => {
           const fit = await attachedFit(image, modelInput);
           // A part drawn bigger than its box (an axe for a sword) is shrunk to fit, not cut off.
-          const { image: shrunk, scales } = await shrinkPartsToBoxes(image, modelInput);
+          const { image: shrunk, scales } = await shrinkPartsToBoxes(image, modelInput, { inset: FIT_INSET, outlines });
           layoutChecks.push({ page: page.name, attempt, attached: Math.round(fit * 100) / 100, scales });
           await writeLog();
           return fit >= MIN_ATTACHED_FIT && Math.min(...scales) >= MIN_PART_SCALE ? { generated: image, fitted: shrunk } : null;
@@ -186,7 +199,8 @@ export async function runPartFix(
     await putFile(folder, `${path.parse(page.name).name}.generated.png`, generated);
 
     // Parts take the model's new silhouettes, keyed out within their own regions.
-    const fixed = await fitToPage(fitted, modelInput, sourceImage, input.remix.premultipliedAlpha, rects);
+    // Already placed by shrinkPartsToBoxes, so no drift correction.
+    const fixed = await fitToPage(fitted, modelInput, sourceImage, input.remix.premultipliedAlpha, rects, false);
     out[i] = await replaceRegions(remixFiles[i], fixed, rects);
   }
 
@@ -266,6 +280,50 @@ function buildPrompt(input: PartFixRequest, plan: string | null, count: number, 
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+/**
+ * For each placement in the square, the outline its part must fit inside (fractions of the
+ * square), or null for its box alone. Each mesh outline is mapped from UVs to the page and then
+ * into the square, and kept only when it holds most of the original part (MIN_OUTLINE_COVER).
+ */
+async function placementOutlines(
+  outlines: Record<string, number[]>,
+  page: AtlasPage,
+  chosen: number[],
+  layout: PartLayout,
+  image: PageImage,
+): Promise<(number[] | null)[]> {
+  const out: (number[] | null)[] = layout.placements.map(() => null);
+  for (const [k, j] of chosen.entries()) {
+    const uvs = outlines[page.regions[j]];
+    const p = layout.placements[layout.regionPlacement[k]];
+    if (!uvs || !p) continue;
+    const onPage: number[] = [];
+    for (let n = 0; n + 1 < uvs.length; n += 2) onPage.push(...uvToPage(page.rects[j], page.frames[j], uvs[n], uvs[n + 1]));
+    if ((await outlineCover(onPage, page.rects[j], image)) < MIN_OUTLINE_COVER) continue;
+    out[layout.regionPlacement[k]] = onPage.map((v, n) =>
+      n % 2 === 0 ? p.x + ((v - p.src.x) / p.src.width) * p.width : p.y + ((v - p.src.y) / p.src.height) * p.height,
+    );
+  }
+  return out;
+}
+
+/** Share of the opaque pixels in `rect` that lie inside the polygon `points` (page pixels). */
+async function outlineCover(points: number[], rect: PageRect, image: PageImage): Promise<number> {
+  const coords = [];
+  for (let n = 0; n + 1 < points.length; n += 2) coords.push(`${points[n] - rect.x},${points[n + 1] - rect.y}`);
+  const svg = `<svg width="${rect.width}" height="${rect.height}" xmlns="http://www.w3.org/2000/svg"><polygon points="${coords.join(" ")}" fill="#fff"/></svg>`;
+  const alpha = await sharp(Buffer.from(svg)).ensureAlpha().extractChannel(3).raw().toBuffer();
+  let opaque = 0, inside = 0;
+  for (let y = 0; y < rect.height; y++) {
+    for (let x = 0; x < rect.width; x++) {
+      if (image.rgba[((rect.y + y) * image.width + rect.x + x) * 4 + 3] < 128) continue;
+      opaque++;
+      if (alpha[y * rect.width + x] >= 128) inside++;
+    }
+  }
+  return opaque === 0 ? 0 : inside / opaque;
 }
 
 /**

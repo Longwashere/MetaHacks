@@ -60,7 +60,7 @@ Add the entry in the same task, not later.
 - **Evidence (verified, one run):** `POST /images/edits`, `muse-image-1.0`, 1536×1536, one part (the original skull) centred on cyan. The raw output (`SkeletonWarrior.generated.png`) already has the straight cut, so our steps didn't cause it (the shrink was 0.987). The input has no visible box: every pixel around the part's box is pure cyan, alpha 255. The cut still lies within 6 px of the box's right edge, as the model drew the head larger and further right than the skull. Separately, the head is a mesh weighted to several bones, so it can't be boxed, and 3.2% of the new head falls outside its outline and is hidden in the game. Run in R2 under `remixes/2026-10-28T09-43-30-563Z_job_62c62f80/`.
 - **Cost:** one part fix and the user's time.
 - **Cause:** not known. Inferred: the model keeps to the original part's frame even when it draws a bigger part.
-- **Workaround / status:** open. Options: ask for every part whole with background all around it, detect straight cuts in the output and paint again, and have Spark plan within the original silhouette for meshes that can't be boxed.
+- **Workaround / status:** partly addressed. Our side now keeps the whole part visible: parts are fitted with a 2% margin inside their box, and inside the mesh outline when the mesh can't be boxed (`shrinkPartsToBoxes`, `uvToPage`). Replaying this run: 0% of the head is hidden by the mesh (was 2.7%), at 79% of its size. The model's own straight cut is still open. Options: ask for every part whole with background all around it, or detect straight cuts and paint again.
 - **Lesson:** a part can come back cropped even when the checks pass. Look at the raw output, not only the layout scores.
 
 

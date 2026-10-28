@@ -188,11 +188,14 @@ export async function fitToPage(
   page: PageImage,
   premultipliedAlpha: boolean,
   keyedRects: PageRect[] | null,
+  /** False when the parts were already placed (part fixes fit each part to its box themselves). */
+  align = true,
 ): Promise<Buffer> {
   const { side, layout } = input;
   const square = await sharp(generated).resize(side, side, { fit: "fill" }).removeAlpha().raw().toBuffer();
-  const original = await layoutPage(page, layout, side);
-  const alignedSquare = alignToPage(square, original, input.background, keyedRects && layout.placements.map((p) => toPixels(p, side)));
+  const alignedSquare = align
+    ? alignToPage(square, await layoutPage(page, layout, side), input.background, keyedRects && layout.placements.map((p) => toPixels(p, side)))
+    : square;
   const aligned = await unpackSquare(alignedSquare, side, layout, page, input.background);
   let alpha: Uint8Array;
   if (keyedRects) {
@@ -221,15 +224,40 @@ const SHRINK_MIN_BLOB = 64;
 /** Rings of background-masked pixels around a part that move with it: the model's outlines blend into the key colour there. */
 const SHRINK_EDGE = 3;
 
+/** Where shrinkPartsToBoxes must fit each part. */
+export interface FitTargets {
+  /** Margin kept clear inside each box (and outline), as a share of the box's shorter side, so soft edges aren't cut. */
+  inset: number;
+  /**
+   * Per placement, an outline the part must also fit inside, as [x0, y0, x1, y1, ...] in fractions
+   * of the square, or null for the box alone. Used for meshes the game clips to their outline.
+   */
+  outlines?: (number[] | null)[];
+}
+
+/** Smallest scale tried when fitting a part inside an outline; the caller rejects anything this small. */
+const SHRINK_MIN_SCALE = 0.3;
 /**
- * Shrinks parts the model painted bigger than their boxes (an axe in a sword's box) so all of
- * each part fits, rather than being cut off at the box's edge when it's copied back. Each
- * connected blob of paint belongs to the box most of it lies in, so an axe blade reaching into
- * a neighbour's box stays with the axe (see partOwners); a part that spills out of its box is
- * scaled down evenly about the box's centre until it fits. Returns the square as a PNG,
- * and the scale applied to each placement (1 when it already fit).
+ * Share of a part's pixels allowed outside its outline (the game hides them), so a leaf tip or
+ * stray stroke doesn't shrink the whole part.
  */
-export async function shrinkPartsToBoxes(generated: Buffer, input: ModelInput): Promise<{ image: Buffer; scales: number[] }> {
+const OUTLINE_SPILL = 0.01;
+
+/**
+ * Shrinks parts the model painted bigger than their target (an axe in a sword's box) so every
+ * pixel fits, rather than being cut off when it's copied back. Each connected blob of paint
+ * belongs to the box most of it lies in, so an axe blade reaching into a neighbour's box stays
+ * with the axe (see partOwners); paint touching no box is left out. The target is the box less
+ * `inset`, and, where `outlines` gives one, also the inside of that outline, of which up to
+ * OUTLINE_SPILL may be missed. A part already inside its target is left alone; otherwise it's
+ * scaled down evenly, by the largest factor that fits, and centred in the target.
+ * Returns the square as a PNG, and the scale applied to each placement (1 when it already fit).
+ */
+export async function shrinkPartsToBoxes(
+  generated: Buffer,
+  input: ModelInput,
+  targets: FitTargets = { inset: 0 },
+): Promise<{ image: Buffer; scales: number[] }> {
   const { side, layout, background } = input;
   const rgb = await sharp(generated).resize(side, side, { fit: "fill" }).removeAlpha().raw().toBuffer();
   const source = Buffer.from(rgb);
@@ -237,13 +265,15 @@ export async function shrinkPartsToBoxes(generated: Buffer, input: ModelInput): 
   const isBg = backgroundMask(rgb, side, side, background);
   const boxes = layout.placements.map((p) => toPixels(p, side));
 
-  const owner = partOwners(isBg, side, boxes);
+  const owner = partOwners(isBg, side, boxes, false);
 
   const scales = boxes.map(() => 1);
   for (const [i, b] of boxes.entries()) {
+    const pixels: number[] = [];
     let x0 = side, x1 = -1, y0 = side, y1 = -1;
     for (let p = 0; p < owner.length; p++) {
       if (owner[p] !== i) continue;
+      pixels.push(p);
       const x = p % side, y = (p - x) / side;
       x0 = Math.min(x0, x);
       x1 = Math.max(x1, x);
@@ -252,8 +282,53 @@ export async function shrinkPartsToBoxes(generated: Buffer, input: ModelInput): 
     }
     if (x1 < 0) continue;
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
-    if (x0 >= b.x && y0 >= b.y && x1 < b.x + b.width && y1 < b.y + b.height) continue;
-    const scale = Math.min(b.width / w, b.height / h, 1);
+    const margin = Math.round(targets.inset * Math.min(b.width, b.height));
+    const inner = { x: b.x + margin, y: b.y + margin, width: b.width - 2 * margin, height: b.height - 2 * margin };
+    if (inner.width < 2 || inner.height < 2) continue;
+    const outline = targets.outlines?.[i];
+    const mask = outline ? await outlineMask(outline, side, inner, margin) : null;
+    const inside = (x: number, y: number) =>
+      mask ? x >= 0 && y >= 0 && x < side && y < side && mask[y * side + x] === 1 : x >= inner.x && y >= inner.y && x < inner.x + inner.width && y < inner.y + inner.height;
+    const missed = (s: number, at: (p: number) => [number, number]) => {
+      let out = 0;
+      for (let k = 0; k < pixels.length; k += 2) {
+        const [x, y] = at(pixels[k]);
+        if (!inside(Math.round(cx + (x - cx) * s), Math.round(cy + (y - cy) * s))) out++;
+      }
+      return out / Math.ceil(pixels.length / 2);
+    };
+    // Allowed outside the target as it is: none for the box, OUTLINE_SPILL for an outline.
+    const allowed = mask ? OUTLINE_SPILL : 0;
+    let cx = 0, cy = 0;
+    if (missed(1, (p) => [p % side, Math.floor(p / side)]) <= allowed) continue;
+
+    let scale = Math.min(inner.width / w, inner.height / h, 1);
+    // Centred in the box, or on the middle of the outline's area.
+    cx = inner.x + inner.width / 2;
+    cy = inner.y + inner.height / 2;
+    if (mask) {
+      let sx = 0, sy = 0, n = 0;
+      for (let p = 0; p < mask.length; p++) {
+        if (!mask[p]) continue;
+        sx += p % side;
+        sy += Math.floor(p / side);
+        n++;
+      }
+      if (n === 0) continue;
+      [cx, cy] = [sx / n, sy / n];
+      const px = (x0 + x1) / 2, py = (y0 + y1) / 2;
+      // Each pixel moved so the part's middle lands on (cx, cy), then scaled about it.
+      const fits = (s: number) => missed(s, (p) => [cx + (p % side) - px, cy + Math.floor(p / side) - py]) <= allowed;
+      if (!fits(scale)) {
+        let lo = SHRINK_MIN_SCALE, hi = scale;
+        for (let step = 0; step < 12; step++) {
+          const mid = (lo + hi) / 2;
+          if (fits(mid)) lo = mid;
+          else hi = mid;
+        }
+        scale = lo;
+      }
+    }
     scales[i] = Math.round(scale * 1000) / 1000;
 
     // The part on its own: its pixels within the extent, everything else background.
@@ -266,19 +341,53 @@ export async function shrinkPartsToBoxes(generated: Buffer, input: ModelInput): 
         else crop.set(key, o);
       }
     }
-    const nw = Math.max(1, Math.min(b.width, Math.floor(w * scale)));
-    const nh = Math.max(1, Math.min(b.height, Math.floor(h * scale)));
+    const nw = Math.max(1, Math.min(inner.width, Math.floor(w * scale)));
+    const nh = Math.max(1, Math.min(inner.height, Math.floor(h * scale)));
     const small = await sharp(crop, { raw: { width: w, height: h, channels: 3 } }).resize(nw, nh, { fit: "fill" }).raw().toBuffer();
 
-    for (let p = 0; p < owner.length; p++) if (owner[p] === i) rgb.set(key, p * 3);
-    const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
-    const nx = Math.min(Math.max(Math.round(cx + (x0 - cx) * scale), b.x), b.x + b.width - nw);
-    const ny = Math.min(Math.max(Math.round(cy + (y0 - cy) * scale), b.y), b.y + b.height - nh);
+    for (const p of pixels) rgb.set(key, p * 3);
+    const nx = Math.min(Math.max(Math.round(cx - nw / 2), inner.x), inner.x + inner.width - nw);
+    const ny = Math.min(Math.max(Math.round(cy - nh / 2), inner.y), inner.y + inner.height - nh);
     for (let y = 0; y < nh; y++) small.copy(rgb, ((ny + y) * side + nx) * 3, y * nw * 3, (y + 1) * nw * 3);
   }
 
   const image = await sharp(rgb, { raw: { width: side, height: side, channels: 3 } }).png().toBuffer();
   return { image, scales };
+}
+
+/**
+ * 1 where a pixel of the square lies inside both `outline` (fractions of the square) and the
+ * `inner` box, eroded by `margin` pixels so the part keeps clear of the outline's edge.
+ */
+async function outlineMask(outline: number[], side: number, inner: PageRect, margin: number): Promise<Uint8Array> {
+  const points = [];
+  for (let k = 0; k + 1 < outline.length; k += 2) points.push(`${outline[k] * side},${outline[k + 1] * side}`);
+  const svg = `<svg width="${side}" height="${side}" xmlns="http://www.w3.org/2000/svg"><polygon points="${points.join(" ")}" fill="#fff"/></svg>`;
+  const alpha = await sharp(Buffer.from(svg)).ensureAlpha().extractChannel(3).raw().toBuffer();
+  let mask = new Uint8Array(side * side);
+  for (let y = inner.y; y < inner.y + inner.height; y++) {
+    for (let x = inner.x; x < inner.x + inner.width; x++) mask[y * side + x] = alpha[y * side + x] >= 128 ? 1 : 0;
+  }
+  // Erode by `margin` along rows, then columns (a square erosion).
+  for (const [step, count, stride] of [[1, side, side], [side, side, 1]] as const) {
+    const out = new Uint8Array(side * side);
+    for (let line = 0; line < count; line++) {
+      const base = line * stride;
+      let run = 0;
+      const runs = new Int32Array(side);
+      for (let k = 0; k < side; k++) {
+        run = mask[base + k * step] ? run + 1 : 0;
+        runs[k] = run;
+      }
+      // A pixel survives when the run through it reaches `margin` pixels past it on both sides.
+      for (let k = side - 1, after = 0; k >= 0; k--) {
+        after = mask[base + k * step] ? after + 1 : 0;
+        if (runs[k] > margin && after > margin) out[base + k * step] = 1;
+      }
+    }
+    mask = out;
+  }
+  return mask;
 }
 
 /**

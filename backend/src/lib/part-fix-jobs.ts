@@ -3,7 +3,7 @@ import { getAssetRow } from "./assets.js";
 import { REMIX_JOB_TIMEOUT_MS } from "./config.js";
 import { ASSET_COLUMNS, REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
 import { newRemixJobId } from "./jobs.js";
-import { boxMeshes, checkMeshes } from "./mesh.js";
+import { boxMeshes, checkMeshes, meshOutlines } from "./mesh.js";
 import { allowanceError } from "./remix-jobs.js";
 import { objectUrl, putFile } from "./storage.js";
 import { PART_FIX_SOURCES, type PartFixInput, type RemixStatus } from "./types.js";
@@ -98,12 +98,14 @@ async function runJob(id: string, job: LiveFix, asset: AssetRow, original: Asset
   const deadline = AbortSignal.timeout(REMIX_JOB_TIMEOUT_MS);
   let error: string | null = null;
   try {
-    const meshChecks = checkMeshes(await loadSkeleton(asset.files.skeleton, deadline), input.regions);
+    const startSkeleton = await loadSkeleton(asset.files.skeleton, deadline);
+    const meshChecks = checkMeshes(startSkeleton, input.regions);
     const result = await runPartFix(
       id,
       {
         ...input,
         keepOutline: meshChecks.some((c) => c.reason !== null),
+        outlines: meshOutlines(startSkeleton, input.regions),
         remix: { atlasUrl: objectUrl(asset.files.atlas), premultipliedAlpha: asset.files.premultipliedAlpha, prompt: asset.prompt, editPrompt, style: asset.style },
         original: original?.files ? { atlasUrl: objectUrl(original.files.atlas), premultipliedAlpha: original.files.premultipliedAlpha } : null,
       },

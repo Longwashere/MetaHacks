@@ -11,6 +11,8 @@ export interface MeshCheck {
   slot: string;
   attachment: string;
   reason: MeshReason | null;
+  /** The mesh's outline as UV pairs (fractions of the region's image, 0–1 from the top-left). */
+  hull: number[];
 }
 
 const QUAD_UVS = [0, 0, 1, 0, 1, 1, 0, 1];
@@ -24,6 +26,19 @@ type Json = Record<string, unknown>;
 /** The mesh attachments in a Spine 4.x skeleton JSON that draw any of `regions`. */
 export function checkMeshes(skeleton: unknown, regions: string[]): MeshCheck[] {
   return meshEntries(skeleton, regions).map(({ check }) => check);
+}
+
+/**
+ * For each of `regions` drawn by a mesh that can't be boxed, the outline the game clips it to, as
+ * UV pairs. Parts there must fit inside it. When several such meshes draw one region, the first
+ * is used.
+ */
+export function meshOutlines(skeleton: unknown, regions: string[]): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const check of checkMeshes(skeleton, regions)) {
+    if (check.reason && check.hull.length >= 6 && !(check.region in out)) out[check.region] = check.hull;
+  }
+  return out;
 }
 
 /** Swaps every rigid mesh that draws one of `regions` for a box over its region. Returns the regions boxed. */
@@ -77,7 +92,8 @@ function meshEntries(skeleton: unknown, regions: string[]): { check: MeshCheck; 
                 : quadFromMesh(uvs, vertices)
                   ? null
                   : "distorted";
-        out.push({ check: { region, slot, attachment: name, reason }, att });
+        const hull = typeof att.hull === "number" ? uvs.slice(0, att.hull * 2) : [];
+        out.push({ check: { region, slot, attachment: name, reason, hull }, att });
       }
     }
   }
