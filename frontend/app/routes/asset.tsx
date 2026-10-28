@@ -1,5 +1,5 @@
-import { ChevronRight, Download, FileJson, GitFork, Repeat, Wand2 } from "lucide-react";
-import { Link, data, href, isRouteErrorResponse, useSearchParams } from "react-router";
+import { ChevronRight, Copy, Download, FileJson, GitFork, Loader2, Pencil, Repeat, Wand2 } from "lucide-react";
+import { Form, Link, data, href, isRouteErrorResponse, redirect, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/asset";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
@@ -10,8 +10,8 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Separator } from "~/components/ui/separator";
-import { getAsset, getSavedAssetIds, listRelatedAssets, listRemixesOf } from "~/lib/api.server";
-import { getSession } from "~/lib/auth.server";
+import { copyRemix, getAsset, getSavedAssetIds, listRelatedAssets, listRemixesOf } from "~/lib/api.server";
+import { getSession, requireSession } from "~/lib/auth.server";
 import { formatCount, formatDate } from "~/lib/format";
 import {
   SITE_NAME,
@@ -39,6 +39,14 @@ export async function loader({ request, params, context }: Route.LoaderArgs) {
     : undefined;
   if (params.animation && !animation) throw data("Animation not found", { status: 404 });
 
+  // The owner of a remix goes straight to its workspace (sprite sheet, tweaks, part fixes).
+  // ?public=1 and the per-animation pages keep the public page reachable for them.
+  const isOwner = session !== null && asset.author.id === session.user.id;
+  const editable = isOwner && asset.remixOf !== null && asset.files !== null;
+  if (editable && !params.animation && !new URL(request.url).searchParams.has("public")) {
+    throw redirect(`/remix?${new URLSearchParams({ asset: asset.id })}`);
+  }
+
   const [related, remixes] = asset.visibility === "public"
     ? await Promise.all([listRelatedAssets(asset), listRemixesOf(asset.id)])
     : [[], []];
@@ -49,9 +57,18 @@ export async function loader({ request, params, context }: Route.LoaderArgs) {
     remixes,
     savedIds,
     // Remixes are authored by their owner's user id; official rigs never match. Admins can moderate any asset.
-    canManage: session !== null && (asset.author.id === session.user.id || session.user.isAdmin),
+    canManage: isOwner || session?.user.isAdmin === true,
+    editable,
     siteUrl: getSiteUrl(request),
   };
+}
+
+/** "Make a copy": the signed-in user's own copy of someone else's remix, opened in the workspace. */
+export async function action({ request, params, context }: Route.ActionArgs) {
+  const session = requireSession(context, request);
+  const result = await copyRemix(session, params.assetId);
+  if (!result.ok) return data({ copyError: result.error }, { status: 400 });
+  throw redirect(`/remix?${new URLSearchParams({ asset: result.asset.id })}`);
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -81,8 +98,10 @@ export function meta({ loaderData }: Route.MetaArgs) {
   });
 }
 
-export default function AssetPage({ loaderData }: Route.ComponentProps) {
-  const { asset, animation, related, remixes, savedIds, canManage } = loaderData;
+export default function AssetPage({ loaderData, actionData }: Route.ComponentProps) {
+  const { asset, animation, related, remixes, savedIds, canManage, editable } = loaderData;
+  const navigation = useNavigation();
+  const copying = navigation.state !== "idle" && navigation.formData?.get("intent") === "copy";
   const saved = savedIds.includes(asset.id);
   const [searchParams, setSearchParams] = useSearchParams();
   const viewParam = searchParams.get("view");
@@ -148,6 +167,7 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
   const buildAnimationUrl = (name: string) => {
     const base = assetPath(asset, name);
     const q = new URLSearchParams();
+    if (editable) q.set("public", "1");
     if (viewMode !== "skin") q.set("view", viewMode);
     if (boneColor.toLowerCase() !== "#ef4444") q.set("boneColor", boneColor.replace("#", ""));
     if (showLabels) q.set("labels", "1");
@@ -172,7 +192,7 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
             <ChevronRight className="size-3.5" aria-hidden />
             <li>
               {animation ? (
-                <Link to={assetPath(asset)} className="hover:text-foreground">{asset.name}</Link>
+                <Link to={editable ? `${assetPath(asset)}?public=1` : assetPath(asset)} className="hover:text-foreground">{asset.name}</Link>
               ) : (
                 <span aria-current="page" className="text-foreground">{asset.name}</span>
               )}
@@ -213,6 +233,13 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
                 ) : (
                   <Badge variant="outline">Original rig</Badge>
                 )}
+                {asset.copyOf && (
+                  <Badge variant="outline" asChild>
+                    <Link to={assetPath(asset.copyOf)}>
+                      <Copy /> Copy of {asset.copyOf.name}
+                    </Link>
+                  </Badge>
+                )}
                 {asset.visibility === "private" && <Badge variant="outline">Private</Badge>}
               </div>
               <h1 className="text-3xl font-bold tracking-tight">
@@ -228,9 +255,24 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button asChild>
+              {editable ? (
+                <Button asChild>
+                  <Link to={`/remix?${new URLSearchParams({ asset: asset.id })}`} rel="nofollow">
+                    <Pencil /> Open in editor
+                  </Link>
+                </Button>
+              ) : asset.remixOf && asset.files ? (
+                // Someone else's remix: a free copy to work on, rather than a paid repaint.
+                <Form method="post">
+                  <input type="hidden" name="intent" value="copy" />
+                  <Button type="submit" disabled={copying}>
+                    {copying ? <Loader2 className="animate-spin" /> : <Copy />} Make a copy
+                  </Button>
+                </Form>
+              ) : null}
+              <Button asChild variant={asset.remixOf && asset.files ? "outline" : "default"}>
                 <Link to={`/remix?${new URLSearchParams({ base: asset.id })}`} rel="nofollow">
-                  <Wand2 /> Remix this rig
+                  <Wand2 /> {asset.remixOf && asset.files ? "Repaint with a new prompt" : "Remix this rig"}
                 </Link>
               </Button>
               <SaveButton assetId={asset.id} assetName={asset.name} saved={saved} />
@@ -242,6 +284,7 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
                 </Link>
               </Button>
             </div>
+            {actionData?.copyError && <p className="-mt-3 text-sm text-destructive">{actionData.copyError}</p>}
 
             <Card className="gap-4">
               <CardHeader>

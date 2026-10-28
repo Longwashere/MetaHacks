@@ -217,6 +217,13 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Couldn't apply or test the asset-copies migration
+- **What happened:** Remix copies need two new `assets` columns. The migration was written, but nothing in the dev environment can apply DDL to the hosted Supabase project, so the copy flow and the `?asset=` workspace couldn't be run end to end.
+- **Cost:** End-to-end check left to the user; a manual step before deploy.
+- **Cause:** Only `SUPABASE_URL` + service-role key are configured (REST only); no Postgres connection string or CLI.
+- **Workaround / status:** fixed. `SUPABASE_DB_URL` is now in `backend/.env` and agents apply migrations with a small `pg` script. The dashboard's direct host (`db.<ref>.supabase.co`) is IPv6-only and timed out from the dev machine; the **session pooler** (`postgres.<ref>@aws-0-us-east-1.pooler.supabase.com:5432`) works. Finding the setting also cost the user a detour: the connection string is now under the dashboard's top-bar **Connect** button, not Settings → Database.
+- **Lesson:** Check `information_schema` / a `select` of new columns over REST before claiming a schema change is live. Use the pooler URL, not the direct host.
+
 ### 2026-10-28 — v2 reshape remixes had parts cut off at their region edges
 - **What happened:** on newer v2 remixes (slime dog, squire, peashooter, assassin) eyes, arms and the mouth were cut in half in the final atlas page, though Muse Image's raw output had them whole and in place.
 - **Cost:** four remixes with damaged textures (credits), and diagnosis time.

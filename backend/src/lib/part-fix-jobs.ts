@@ -53,7 +53,7 @@ export async function startPartFix(userId: string, assetId: string, input: PartF
     return { ok: false, status: 409, error: "Another fix on this remix is still running. Wait for it to finish." };
   }
 
-  const [original, editPrompt] = await Promise.all([asset.remix_of ? getAssetRow(asset.remix_of, userId) : null, remixEditPrompt(asset.id)]);
+  const [original, editPrompt] = await Promise.all([asset.remix_of ? getAssetRow(asset.remix_of, userId) : null, remixEditPrompt(asset)]);
   const id = newRemixJobId();
   check(
     await db().from("remix_jobs").insert({
@@ -76,20 +76,40 @@ export async function startPartFix(userId: string, assetId: string, input: PartF
   return { ok: true, job: view };
 }
 
-/** Muse's edit prompt from the job that made the remix, which names its materials and colours. */
-async function remixEditPrompt(assetId: string): Promise<string | null> {
-  const rows = check(
-    await db()
-      .from("remix_jobs")
-      .select("edit_prompt, input")
-      .eq("asset_id", assetId)
-      .eq("status", "succeeded")
-      .order("created_at", { ascending: true })
-      .limit(10)
-      .overrideTypes<Pick<RemixJobRow, "edit_prompt" | "input">[], { merge: false }>(),
-  );
-  // Part fixes on this remix share its asset_id; the remix job is the one without a kind.
-  return rows?.find((r) => r.input.kind === undefined && r.edit_prompt)?.edit_prompt ?? null;
+/** How many copies of copies remixEditPrompt follows back to the remix that ran a model. */
+const MAX_COPY_HOPS = 5;
+
+/**
+ * Muse's edit prompt from the job that made the remix, which names its materials and colours.
+ * A copy has no job of its own, so this follows copy_of back to the remix it came from.
+ */
+async function remixEditPrompt(asset: Pick<AssetRow, "id" | "copy_of">): Promise<string | null> {
+  let current: Pick<AssetRow, "id" | "copy_of"> | null = asset;
+  for (let hop = 0; current && hop <= MAX_COPY_HOPS; hop++) {
+    const rows = check(
+      await db()
+        .from("remix_jobs")
+        .select("edit_prompt, input")
+        .eq("asset_id", current.id)
+        .eq("status", "succeeded")
+        .order("created_at", { ascending: true })
+        .limit(10)
+        .overrideTypes<Pick<RemixJobRow, "edit_prompt" | "input">[], { merge: false }>(),
+    );
+    // Part fixes on this remix share its asset_id; the remix job is the one without a kind.
+    const prompt = rows?.find((r) => r.input.kind === undefined && r.edit_prompt)?.edit_prompt;
+    if (prompt) return prompt;
+    if (!current.copy_of) return null;
+    current = check(
+      await db()
+        .from("assets")
+        .select("id, copy_of")
+        .eq("id", current.copy_of)
+        .maybeSingle()
+        .overrideTypes<Pick<AssetRow, "id" | "copy_of"> | null, { merge: false }>(),
+    );
+  }
+  return null;
 }
 
 async function runJob(id: string, job: LiveFix, asset: AssetRow, original: AssetRow | null, editPrompt: string | null, input: PartFixInput) {

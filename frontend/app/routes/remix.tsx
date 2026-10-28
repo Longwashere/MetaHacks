@@ -86,7 +86,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
       "Pick a rigged, animated Spine2D character or prop and re-texture it from a prompt. Bones, slots and every animation are kept — only the look changes.",
     canonical: `${loaderData.siteUrl}/remix`,
     // Only the bare tool page is indexable; selected rigs and jobs are per-user state.
-    index: !loaderData.base && !loaderData.job && !loaderData.rq,
+    index: !loaderData.base && !loaderData.job && !loaderData.remix && !loaderData.rq,
   });
 }
 
@@ -102,9 +102,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const source: PickerSource = params.get("src") === "library" ? "library" : "all";
 
   const job = jobId && session ? await getRemixJob(session, jobId) : null;
-  const baseId = params.get("base") ?? job?.base.id ?? null;
+  // A finished remix is opened by asset from here on, like any remix the user owns.
+  if (job?.status === "succeeded" && job.asset) throw redirect(`/remix?${remixParams(job.asset.id, params.get("anim"))}`);
 
-  const [base, savedIds, myRemixes, pickerRigs, account, fix] = await Promise.all([
+  // ?asset=<remixId>: the workspace for one of the user's remixes (or copies), without its job.
+  const remix = await loadOwnRemix(params.get("asset"), session);
+  const baseId = remix?.remixOf?.id ?? params.get("base") ?? job?.base.id ?? null;
+
+  const [loadedBase, savedIds, myRemixes, pickerRigs, account, fix] = await Promise.all([
     baseId ? getAsset(baseId, session) : null,
     getSavedAssetIds(session),
     session ? getMyRemixes(session) : [],
@@ -117,21 +122,37 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     session ? getAccount(session) : null,
     fixId && session ? getPartFix(session, fixId) : null,
   ]);
+  // The rig a remix was made from can be gone or private (a copy of someone's remix of their own
+  // private remix). The remix then stands in for it, so the workspace still opens.
+  const base = loadedBase ?? remix;
 
   return {
     base,
+    remix,
     job,
     fix,
     anim: params.get("anim"),
     rq,
     source,
     pickerRigs: source === "library" && rq ? filterRigs(pickerRigs, rq) : pickerRigs,
-    recent: myRemixes.filter((a) => a.id !== job?.asset?.id).slice(0, 4),
+    recent: myRemixes.filter((a) => a.id !== remix?.id).slice(0, 4),
     savedIds,
     signedIn: session !== null,
     usage: account && { ...account.usage, plan: account.plan },
     siteUrl: getSiteUrl(request),
   };
+}
+
+const remixParams = (assetId: string, anim: string | null) => new URLSearchParams({ asset: assetId, ...(anim ? { anim } : {}) });
+
+/** The remix named by ?asset=, if the viewer owns it; anyone else is sent to its public page. */
+async function loadOwnRemix(assetId: string | null, session: Session | null): Promise<SpineAsset | null> {
+  if (!assetId) return null;
+  if (!session) throw redirect(`/assets/${encodeURIComponent(assetId)}`);
+  const asset = await getAsset(assetId, session);
+  if (!asset) throw redirect("/remix");
+  if (asset.author.id !== session.user.id || !asset.remixOf || !asset.files) throw redirect(`${assetPath(asset)}?public=1`);
+  return asset;
 }
 
 function filterRigs(rigs: SpineAsset[], q: string) {
@@ -226,8 +247,7 @@ async function fixParts(session: Session, form: FormData) {
   const result = await createPartFix(session, assetId, { regions, prompt, source });
   if (!result.ok) return data({ fixError: result.error }, { status: 400 });
 
-  const next = new URLSearchParams({ base: String(form.get("base") ?? ""), job: String(form.get("job") ?? ""), fix: result.job.id });
-  throw redirect(`/remix?${next}`);
+  throw redirect(`/remix?${new URLSearchParams({ asset: assetId, fix: result.job.id })}`);
 }
 
 /** Optional prompt constraints; all off by default so the model can reshape parts. */
@@ -245,16 +265,16 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, job, fix, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
+  const { base, remix, job, fix, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
   const { revalidate } = useRevalidator();
   const tweak = useTweakSession(base?.id ?? null);
-  // A finished part fix carries the remix as it saved it. The loader reads the remix job first, so
-  // on the poll where the fix finishes, job.asset can still have the files from before the fix.
-  const fixedRemix = fix?.status === "succeeded" && fix.asset?.id === job?.asset?.id ? fix.asset : null;
-  const savedRemix = job?.status === "succeeded" ? (fixedRemix ?? job.asset) : null;
+  // A finished part fix carries the remix as it saved it. The loader reads the remix first, so on
+  // the poll where the fix finishes, the remix can still have the files from before the fix.
+  const fixedRemix = fix?.status === "succeeded" && fix.asset?.id === remix?.id ? fix.asset : null;
+  const savedRemix = remix && (fixedRemix ?? remix);
   const previewAnimation = anim ?? (savedRemix ?? base)?.animations[0]?.name ?? "idle";
   const tweakPanel = {
     ...tweak.panel,
@@ -401,7 +421,31 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
 
             {/* Sticks while the tweak panel scrolls, so the rig stays beside the controls. */}
             <section aria-label="Result" aria-live="polite" className="flex flex-col gap-4 lg:sticky lg:top-20 lg:self-start">
-              {!job ? (
+              {savedRemix ? (
+                <>
+                  <AssetPlayer
+                    asset={savedRemix}
+                    animation={anim ?? savedRemix.animations[0]?.name ?? "idle"}
+                    animationHref={(name) => withParams({ anim: name })}
+                    tweaks={playerTweaks}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="mr-auto">
+                      <h2 className="text-lg font-semibold">{savedRemix.name}</h2>
+                      <p className="text-xs text-muted-foreground">
+                        {savedRemix.copyOf ? `Copy of ${savedRemix.copyOf.name}` : `Remix of ${savedRemix.remixOf?.name ?? base.name}`}
+                      </p>
+                    </div>
+                    <SaveButton assetId={savedRemix.id} assetName={savedRemix.name} saved={savedIds.includes(savedRemix.id)} />
+                    <VisibilityToggle assetId={savedRemix.id} assetName={savedRemix.name} visibility={savedRemix.visibility} />
+                    <Button asChild variant="outline">
+                      <Link to={`${assetPath(savedRemix)}?public=1`}>
+                        <ExternalLink /> View public page
+                      </Link>
+                    </Button>
+                  </div>
+                </>
+              ) : !job ? (
                 <>
                   <AssetPlayer
                     asset={base}
@@ -420,31 +464,6 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                     <ExpandedPrompt job={job} />
                   </AlertDescription>
                 </Alert>
-              ) : savedRemix ? (
-                <>
-                  <AssetPlayer
-                    asset={savedRemix}
-                    animation={anim ?? savedRemix.animations[0]?.name ?? "idle"}
-                    animationHref={(name) => withParams({ anim: name })}
-                    tweaks={playerTweaks}
-                  />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="mr-auto">
-                      <h2 className="text-lg font-semibold">{savedRemix.name}</h2>
-                      <p className="text-xs text-muted-foreground">
-                        Remix of {base.name} · API {job.apiVersion}
-                        {job.promptStatus === "reworded" && " · prompt re-worded for content policy"}
-                      </p>
-                    </div>
-                    <SaveButton assetId={savedRemix.id} assetName={savedRemix.name} saved={savedIds.includes(savedRemix.id)} />
-                    <VisibilityToggle assetId={savedRemix.id} assetName={savedRemix.name} visibility={savedRemix.visibility} />
-                    <Button asChild variant="outline">
-                      <Link to={assetPath(savedRemix)}>
-                        <ExternalLink /> Open
-                      </Link>
-                    </Button>
-                  </div>
-                </>
               ) : (
                 <Card className="h-full">
                   <CardHeader>
@@ -483,7 +502,6 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
             key={`${base.id}:${savedRemix?.id ?? ""}`}
             base={base}
             remix={savedRemix}
-            jobId={job?.id ?? null}
             fix={fix?.assetId === savedRemix?.id ? fix : null}
             error={fixError}
             usage={usage}
@@ -513,14 +531,12 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
 function PartFixSection({
   base,
   remix,
-  jobId,
   fix,
   error,
   usage,
 }: {
   base: SpineAsset;
   remix: SpineAsset | null;
-  jobId: string | null;
   fix: PartFixJob | null;
   error: string | null;
   usage: RemixUsage | null;
@@ -560,8 +576,6 @@ function PartFixSection({
             <Form method="post" preventScrollReset className="flex flex-col gap-5">
               <input type="hidden" name="intent" value="fix-parts" />
               <input type="hidden" name="assetId" value={remix.id} />
-              <input type="hidden" name="base" value={base.id} />
-              <input type="hidden" name="job" value={jobId ?? ""} />
               {selected.map((r) => (
                 <input key={r} type="hidden" name="region" value={r} />
               ))}
@@ -653,7 +667,8 @@ function PartFixSection({
 
       <SpriteSheet
         className="lg:col-span-2"
-        sources={[...(remix ? [{ label: "Remix", asset: remix }] : []), { label: "Original", asset: base }]}
+        // When the original rig is gone, the remix stands in as the base: show it once.
+        sources={[...(remix ? [{ label: "Remix", asset: remix }] : []), ...(base.id === remix?.id ? [] : [{ label: "Original", asset: base }])]}
         selection={remix ? { selected, onToggle, disabled: fixing } : undefined}
         // After a part fix, reloads the remix's files in case the sheet still shows the old pages.
         refresh={

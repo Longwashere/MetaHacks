@@ -176,6 +176,24 @@ export async function createRemixJob(
   }
 }
 
+/**
+ * POST /me/remixes/:assetId/copy — the user's own private copy of someone else's remix, to tweak
+ * and fix parts on. Free. Returns their existing copy (or the remix itself, if it's theirs) when
+ * there is one.
+ */
+export async function copyRemix(
+  session: Session,
+  assetId: string,
+): Promise<{ ok: true; asset: SpineAsset } | { ok: false; error: string }> {
+  try {
+    const asset = await backend<SpineAsset>(`/me/remixes/${id(assetId)}/copy`, { session, method: "POST" });
+    return { ok: true, asset };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status === 401 || error.status >= 500) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't copy the remix.") };
+  }
+}
+
 /** GET /me/remix-jobs/:id — null if it isn't the user's. */
 export async function getRemixJob(session: Session, jobId: string): Promise<RemixJob | null> {
   return backendOrNull<RemixJob>(`/me/remix-jobs/${id(jobId)}`, { session });

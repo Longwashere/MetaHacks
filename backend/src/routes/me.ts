@@ -4,6 +4,7 @@ import { getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
+import { copyRemix } from "../lib/copies.js";
 import { getPartFixView, startPartFix } from "../lib/part-fix-jobs.js";
 import { getAccount } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
@@ -113,6 +114,19 @@ meRouter.patch("/remixes/:assetId", json, async (req, res) => {
       .overrideTypes<AssetRow, { merge: false }>(),
   );
   res.json(toSpineAsset(row));
+});
+
+/**
+ * POST /me/remixes/:assetId/copy → 201 SpineAsset (new copy), 200 SpineAsset (the user's own remix
+ * or their existing copy of it), 400/404 { error }. Free: no model runs. See lib/copies.ts.
+ */
+meRouter.post("/remixes/:assetId/copy", async (req, res) => {
+  const result = await copyRemix(userIdOf(res), req.params.assetId, isAdminOf(res));
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.status(result.created ? 201 : 200).json(result.asset);
 });
 
 /**
