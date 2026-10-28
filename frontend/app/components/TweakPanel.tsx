@@ -1,4 +1,4 @@
-import { Crosshair, EyeOff, FlipHorizontal2, Loader2, RotateCcw, Save, SlidersHorizontal, Wind, X } from "lucide-react";
+import { Crosshair, EyeOff, FlipHorizontal2, Loader2, RotateCcw, Save, SlidersHorizontal, Sparkles, Wind, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -37,6 +37,8 @@ interface TweakPanelProps {
   onSelectBone: (bone: string | null) => void;
   /** Writes the tweaks into the remix's skeleton file. */
   save: { onSave: () => void; pending: boolean; disabledReason: string | null };
+  /** Muse lines up parts the image model shifted. `stage` is what's running, or null when idle. */
+  autoTweak: { onRun: () => void; stage: string | null; disabledReason: string | null; notes: string | null };
   className?: string;
 }
 
@@ -62,6 +64,7 @@ export function TweakPanel({
   selectedBone,
   onSelectBone,
   save,
+  autoTweak,
   className,
 }: TweakPanelProps) {
   const set = (patch: Partial<SpineTweaks>) => onChange({ ...tweaks, ...patch });
@@ -295,6 +298,23 @@ export function TweakPanel({
             <p className="text-sm text-muted-foreground">Loading the rig…</p>
           ) : (
             <>
+              <Section
+                title="Auto-tweak"
+                action={
+                  <Button size="sm" onClick={autoTweak.onRun} disabled={autoTweak.stage !== null || autoTweak.disabledReason !== null}>
+                    {autoTweak.stage ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                    {autoTweak.stage ? "Working…" : "Line up parts"}
+                  </Button>
+                }
+              >
+                <p className="-mt-2 text-xs text-muted-foreground" aria-live="polite">
+                  {autoTweak.stage ??
+                    autoTweak.disabledReason ??
+                    "Compares the remix with the original at a few paused poses, measures parts that drifted, and has Muse decide which fixes to keep. Review the result, then Save."}
+                </p>
+                {autoTweak.notes && !autoTweak.stage && <p className="text-xs">{autoTweak.notes}</p>}
+              </Section>
+
               <div className="flex flex-col gap-2">
                 <Label htmlFor="tw-part">Part</Label>
                 <div className="flex gap-2">

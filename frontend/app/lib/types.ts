@@ -144,3 +144,41 @@ export interface AssetQuery {
   category?: AssetCategory;
   sort?: SortOption;
 }
+
+/**
+ * How a part's pixels compare with the original's: `measured` has a fix, `aligned` already
+ * matches, `reshaped` changed silhouette (so a measurement would undo the new look), and
+ * `unmeasured` couldn't be compared (no setup-pose attachment or too few pixels).
+ */
+export type AutoTweakStatus = "measured" | "aligned" | "reshaped" | "unmeasured";
+
+/** A part transform as Muse sees it: moves are % of the rig's size, +x right and +y up on screen; rotate is degrees counter-clockwise. */
+export interface AutoTweakTransform {
+  x: number;
+  y: number;
+  scale: number;
+  rotate: number;
+}
+
+/** One part sent for review. `id` is the number tagged on the snapshots. */
+export interface AutoTweakPart {
+  id: number;
+  name: string;
+  status: AutoTweakStatus;
+  measured: AutoTweakTransform | null;
+  /** The user's own tweak on this part, or null for none. */
+  current: AutoTweakTransform | null;
+}
+
+/** Body of POST /me/remixes/:assetId/auto-tweak. Images are JPEG/PNG data URLs, one per pose. */
+export interface AutoTweakInput {
+  animation: string;
+  images: string[];
+  parts: AutoTweakPart[];
+}
+
+/** Muse's verdict: the final transform for each part it changes. Parts it leaves out stay as they are. */
+export interface AutoTweakReview {
+  changes: (AutoTweakTransform & { part: string; reason: string })[];
+  notes: string;
+}

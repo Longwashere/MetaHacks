@@ -34,6 +34,11 @@ export const ASSET_BASE_URL = url("ASSET_BASE_URL", "http://localhost:5173");
 export const PUBLIC_URL = url("PUBLIC_URL", `http://localhost:${PORT}`);
 /** Where generated atlases and textures are written when R2 isn't configured. */
 export const REMIX_OUTPUT_DIR = path.resolve(process.env.REMIX_OUTPUT_DIR || "data/remixes");
+/**
+ * Where each auto-tweak run's snapshots, request and Muse reply are saved. Always local, never R2:
+ * the snapshots can show private remixes.
+ */
+export const AUTO_TWEAK_LOG_DIR = path.resolve(process.env.AUTO_TWEAK_LOG_DIR || "data/auto-tweaks");
 
 /** Cloudflare R2 bucket for generated files. Used only when every R2_* variable is set. */
 export const R2 = (() => {

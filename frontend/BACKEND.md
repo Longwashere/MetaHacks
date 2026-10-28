@@ -28,6 +28,7 @@ Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `pr
 | `getMyRemixes(session)` | `GET /me/remixes` | The user's own `SpineAsset[]`, newest first |
 | `setRemixVisibility(session, assetId, visibility)` | `PATCH /me/remixes/:assetId` (JSON `{ visibility }`) | Updated `SpineAsset`, or `null` if it isn't the user's |
 | `saveRemixSkeleton(session, assetId, skeleton, skin)` | `POST /me/remixes/:assetId/skeleton` (JSON `{ skeleton, skin }`, up to 8 MB) | Updated `SpineAsset` pointing at the stored skeleton, or `null` if it isn't the user's |
+| `autoTweakRemix(session, assetId, input)` | `POST /me/remixes/:assetId/auto-tweak` (JSON `AutoTweakInput`, up to 12 MB) | `AutoTweakReview` (one Muse Spark call, nothing stored); `{ ok: false, error }` on 400/404/502. See **Auto-tweak** below. |
 | `createRemixJob(session, input, apiVersion)` | `POST /me/remix-jobs` (JSON `RemixInput` + `apiVersion`) | `202` `RemixJob`; `400 { errors }`; `402 { error }` when the monthly allowance is used up |
 | `getRemixJob(session, jobId)` | `GET /me/remix-jobs/:id` | `RemixJob \| null` |
 | `getAccount(session)` | `GET /me` | `Account`: profile, plan, subscription and `usage: { used, limit, resetsAt }` |
@@ -55,6 +56,17 @@ The backend will need the base rig's atlas regions (slot attachments and their U
 If a remix takes longer than a minute or so, consider server-sent events (SSE) or a WebSocket instead of polling. You can add an SSE resource route and replace the `useEffect` polling in `remix.tsx`.
 
 **Who can remix what:** users can remix any public rig or any of their own remixes, including other remixes. Signing in is required, and each remix counts toward the monthly allowance. If some rigs shouldn't be remixable (licensing, premium content), add a flag such as `remixable: boolean` to `SpineAsset`. Filter on it in the picker, hide the "Remix this rig" button, and reject it in `createRemixJob`.
+
+## Auto-tweak
+
+The tweak panel's **Line up parts** button (Parts tab, finished remixes only) fixes parts the image model shifted or resized:
+
+1. In the browser, `app/lib/spine-auto-tweak.ts` loads the original and the remix into hidden, same-sized players, paused at 0% and 50% of the selected animation. They share a skeleton, so the framing is identical.
+2. For each part it compares the opaque pixels of its atlas region in both rigs (centre and spread), maps them through the attachment's UVs into world space, and turns the difference into a `dx`/`dy`/`scale`/`rotation` part tweak. Rotation comes from the direction of the pixels' long axis, so it's only measured on clearly elongated parts (limbs, weapons) and turns of 2–45°. Parts whose painted area changed by more than 25% count as `reshaped` and get no measured fix, since that would undo the new look. In keep-outline remixes the alpha is reused, so nothing measures and Muse's eye does the work.
+3. It sends one image per pose (`ORIGINAL | REMIX NOW | REMIX + MEASURED FIXES`, parts numbered, measured ones in orange) and the part list to the backend. Muse Spark returns the final transform for the parts it changes, in screen terms; the backend keeps only known parts and clamps every value.
+4. The page applies them as live tweaks; the user reviews and saves as usual. If the review fails, the measured fixes are applied on their own.
+
+Every run, including failed ones, is saved locally (never to R2, since snapshots can show private remixes) to `backend/data/auto-tweaks/<time>_<assetId>/`: `pose-N.jpg` (the images Muse saw), `system-prompt.txt`, and `reply.json` (the text request, the part list, Muse's HTTP status and full raw response, and the validated review or error the endpoint returned, plus timing). Set `AUTO_TWEAK_LOG_DIR` to change the folder.
 
 ## Asset files
 

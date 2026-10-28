@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import express, { Router } from "express";
 import { getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
+import { AiTimeoutError } from "../lib/ai-fetch.js";
+import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { getAccount } from "../lib/billing.js";
+import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
 import { putFile } from "../lib/storage.js";
@@ -10,6 +13,8 @@ import { parseRemixInput, parseSkeleton } from "../lib/validate.js";
 
 /** Large rigs export several hundred KB of JSON; leave headroom without accepting anything huge. */
 const MAX_SKELETON_BYTES = "8mb";
+/** Auto-tweak posts a few snapshot images as data URLs. */
+const MAX_AUTO_TWEAK_BYTES = "12mb";
 
 // Everything scoped to the signed-in user. Mounted before the global JSON parser so the skeleton
 // route can use its own, larger body limit.
@@ -139,6 +144,29 @@ meRouter.post("/remixes/:assetId/skeleton", express.json({ limit: MAX_SKELETON_B
       .overrideTypes<AssetRow, { merge: false }>(),
   );
   res.json(toSpineAsset(row));
+});
+
+/**
+ * POST /me/remixes/:assetId/auto-tweak  body = AutoTweakInput → AutoTweakReview
+ * One Muse Spark call that reviews the measured part fixes against snapshots of the original
+ * and the remix. Nothing is stored: the page applies the result as live tweaks.
+ */
+meRouter.post("/remixes/:assetId/auto-tweak", express.json({ limit: MAX_AUTO_TWEAK_BYTES }), async (req, res) => {
+  const input = parseAutoTweakInput(req.body);
+  if (!input) {
+    res.status(400).json({ error: "Expected { animation, images, parts } with 1–4 snapshot images." });
+    return;
+  }
+  if (!(await ownedAsset(userIdOf(res), req.params.assetId))) {
+    res.status(404).json({ error: "You can only auto-tweak your own remixes." });
+    return;
+  }
+  try {
+    res.json(await reviewAutoTweak(req.params.assetId, input, AbortSignal.timeout(MUSE_TIMEOUT_MS)));
+  } catch (error) {
+    console.error("Auto-tweak review failed", error);
+    res.status(502).json({ error: error instanceof Error && !(error instanceof AiTimeoutError) ? error.message : "Muse took too long to review the rig. Try again." });
+  }
 });
 
 // ---------------------------------------------------------------------------

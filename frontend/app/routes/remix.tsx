@@ -13,6 +13,7 @@ import {
   useSearchParams,
 } from "react-router";
 import type { Route } from "./+types/remix";
+import type { action as autoTweakAction } from "./api.auto-tweak";
 import type { action as saveSkeletonAction } from "./api.remix-skeleton";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
@@ -60,6 +61,7 @@ import {
 } from "~/lib/api.server";
 import { getSession, requireSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
+import type { AutoTweakCapture } from "~/lib/spine-auto-tweak";
 import { hasSavableTweaks } from "~/lib/spine-tweak-bake";
 import { DEFAULT_TWEAKS, type RigInfo, type SpineTweakBinding, type SpineTweaks, type TweakExporter } from "~/lib/spine-tweaks";
 import { getSiteUrl } from "~/lib/site.server";
@@ -211,7 +213,12 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   const { revalidate } = useRevalidator();
   const tweak = useTweakSession(base?.id ?? null);
   const savedRemix = job?.status === "succeeded" ? job.asset : null;
-  const tweakPanel = { ...tweak.panel, save: useSaveTweaks(savedRemix?.id ?? null, tweak) };
+  const previewAnimation = anim ?? (savedRemix ?? base)?.animations[0]?.name ?? "idle";
+  const tweakPanel = {
+    ...tweak.panel,
+    save: useSaveTweaks(savedRemix?.id ?? null, tweak),
+    autoTweak: useAutoTweak(base, savedRemix, previewAnimation, tweak),
+  };
   // Tweaks need a rig on screen: the original before a remix, or the finished remix.
   const canTweak = !job || savedRemix !== null;
   const [panelTab, setPanelTab] = useState<"generate" | "tweak">("generate");
@@ -560,6 +567,77 @@ function useSaveTweaks(remixId: string | null, tweak: ReturnType<typeof useTweak
   };
 
   return { onSave, pending: exporting || fetcher.state !== "idle", disabledReason };
+}
+
+/**
+ * Auto-tweak for the tweak panel: renders and measures the original and the remix in the
+ * browser (lib/spine-auto-tweak), has Muse review the measured fixes, and applies its answer as
+ * live part tweaks. If the review fails, the measured fixes are applied on their own.
+ */
+function useAutoTweak(
+  base: SpineAsset | null,
+  remix: SpineAsset | null,
+  animation: string,
+  tweak: ReturnType<typeof useTweakSession>,
+) {
+  const fetcher = useFetcher<typeof autoTweakAction>();
+  const [capture, setCapture] = useState<AutoTweakCapture | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [notes, setNotes] = useState<string | null>(null);
+  const { tweaks } = tweak;
+  const { onChange } = tweak.panel;
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data || !capture) return;
+    if (fetcher.data.ok) {
+      const { review } = fetcher.data;
+      onChange(capture.apply(tweaks, review));
+      const count = review.changes.length;
+      setNotes(review.notes || null);
+      toast.success(count === 0 ? "Muse found nothing to fix." : `Muse adjusted ${count} part${count === 1 ? "" : "s"}. Save to keep it.`);
+    } else if (capture.measuredCount > 0) {
+      onChange(capture.measured(tweaks));
+      setNotes(null);
+      toast.warning(`${fetcher.data.error} Applied the ${capture.measuredCount} measured fix${capture.measuredCount === 1 ? "" : "es"} without Muse's review.`);
+    } else {
+      toast.error(fetcher.data.error);
+    }
+    setCapture(null);
+    // Runs once per finished review; `onChange` and `tweaks` are read at that moment on purpose.
+  }, [fetcher.state, fetcher.data]);
+
+  const disabledReason = !remix?.files
+    ? "Run a remix first: auto-tweak compares it with the original rig."
+    : !base?.files
+      ? "The original rig has no files to compare with."
+      : null;
+
+  const onRun = async () => {
+    if (!remix?.files || !base?.files) return;
+    setCapturing(true);
+    setNotes(null);
+    try {
+      // Loaded on demand: it pulls in the Spine runtime and only runs in the browser.
+      const { captureAutoTweak } = await import("~/lib/spine-auto-tweak");
+      const result = await captureAutoTweak({ original: base.files, remix: remix.files, animation, tweaks });
+      setCapture(result);
+      fetcher.submit(
+        JSON.stringify({ assetId: remix.id, animation, images: result.images, parts: result.parts }),
+        { method: "post", action: "/api/auto-tweak", encType: "text/plain" },
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't snapshot the rigs.");
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  const stage = capturing
+    ? "Snapshotting and measuring both rigs…"
+    : fetcher.state !== "idle"
+      ? "Muse is reviewing the fixes…"
+      : null;
+  return { onRun, stage, disabledReason, notes };
 }
 
 // Milestones mirror the progress values the backend reports (backend/src/lib/remix.ts).

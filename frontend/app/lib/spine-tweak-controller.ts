@@ -46,7 +46,7 @@ export class TweakController {
   private readonly skeleton: Skeleton;
   private readonly baseSkin: Skin | null;
   /** Largest side of the rig's bounds, so offsets and forces scale with the rig. */
-  private readonly rigSize: number;
+  readonly rigSize: number;
   private readonly boneSetup = new Map<BoneData, { rotation: number; scaleX: number; scaleY: number }>();
   private readonly colors = new Map<string, Color>();
   private readonly darkColors: Color[] = [];

@@ -3,7 +3,7 @@
 // token the backend verifies. See BACKEND.md for the endpoint contract.
 
 import type { Session } from "~/lib/auth.server";
-import type { AssetQuery, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AssetQuery, AutoTweakInput, AutoTweakReview, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -197,6 +197,24 @@ export async function saveRemixSkeleton(
     method: "POST",
     body: { skeleton, skin },
   });
+}
+
+/**
+ * POST /me/remixes/:assetId/auto-tweak — Muse reviews the measured part fixes. Nothing is stored.
+ * Resolves to `{ ok: false, error }` for the user's own mistakes and model failures.
+ */
+export async function autoTweakRemix(
+  session: Session,
+  assetId: string,
+  input: AutoTweakInput,
+): Promise<{ ok: true; review: AutoTweakReview } | { ok: false; error: string }> {
+  try {
+    const review = await backend<AutoTweakReview>(`/me/remixes/${id(assetId)}/auto-tweak`, { session, method: "POST", body: input });
+    return { ok: true, review };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status === 401 || (error.status >= 500 && error.status !== 502)) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't auto-tweak the remix.") };
+  }
 }
 
 // ---------------------------------------------------------------------------

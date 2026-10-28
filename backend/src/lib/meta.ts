@@ -13,7 +13,7 @@ export interface RemixPlan {
   editPrompt: string;
 }
 
-function apiKey(): string {
+export function apiKey(): string {
   const key = process.env.META_API_KEY || process.env.MODEL_API_KEY;
   if (!key) throw new Error("The remix service isn't configured yet.");
   return key;
@@ -210,11 +210,11 @@ export async function rewordForContentPolicy(editPrompt: string, signal: AbortSi
 }
 
 /** Logs a prompt sent to (or plan returned by) the Meta API. Images are never logged. */
-function logPrompt(label: string, text: string) {
+export function logPrompt(label: string, text: string) {
   console.log(`[meta] ${label}:\n${text}\n`);
 }
 
-function getPath(value: unknown, path: (string | number)[]): unknown {
+export function getPath(value: unknown, path: (string | number)[]): unknown {
   let current = value;
   for (const key of path) {
     if (typeof current !== "object" || current === null) return undefined;
