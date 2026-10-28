@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Globe, Loader2, Lock, Paintbrush, Palette, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Paintbrush, Palette, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -182,8 +182,8 @@ export async function action({ request, context }: Route.ActionArgs) {
   const keepSize = form.get("keepSize") === "on";
   const keepOutline = form.get("keepOutline") === "on";
   const apiVersion = form.get("apiVersion");
-  // Private unless the user chose public.
-  const visibility = form.get("visibility") === "public" ? "public" : "private";
+  // Every remix is public for now.
+  const visibility = "public";
 
   if (!baseAssetId) errors.base = "Choose a rig to remix.";
   if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters.";
@@ -1176,26 +1176,6 @@ function RemixForm({
         </div>
       </fieldset>
       <FieldError id="base-error" message={errors.base} />
-
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="visibility">Who can see it</Label>
-        <Select name="visibility" defaultValue="private">
-          <SelectTrigger id="visibility" className="w-full" aria-describedby="visibility-hint">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="private">
-              <Lock /> Private — only you
-            </SelectItem>
-            <SelectItem value="public">
-              <Globe /> Public — shown in Explore, anyone can remix it
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <p id="visibility-hint" className="text-xs text-muted-foreground">
-          You can change this later from the remix or your library.
-        </p>
-      </div>
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="apiVersion">Remix API</Label>

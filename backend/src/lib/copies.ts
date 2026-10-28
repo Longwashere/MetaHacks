@@ -8,7 +8,7 @@ export type CopyRemixResult =
   | { ok: false; status: 400 | 404; error: string };
 
 /**
- * Gives the user their own private copy of a remix so they can tweak it and fix its parts.
+ * Gives the user their own copy of a remix so they can tweak it and fix its parts.
  * No model runs, so it doesn't count toward the monthly allowance. The copy shares the source's
  * storage keys: every save writes a new folder, so later edits on either side never touch the other.
  * It keeps the source's remix_of, so part fixes still start from the original rig, and copy_of
@@ -54,7 +54,8 @@ export async function copyRemix(userId: string, sourceId: string, isAdmin: boole
         remix_of_name: source.remix_of_name,
         copy_of: source.id,
         copy_of_name: source.name,
-        visibility: "private",
+        // Every remix is public for now.
+        visibility: "public",
         spine_version: source.spine_version,
         bone_count: source.bone_count,
         slot_count: source.slot_count,

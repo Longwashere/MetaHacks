@@ -11,7 +11,7 @@ export function parseRemixInput(body: unknown): { input: RemixInput } | { errors
 
   const baseAssetId = typeof b.baseAssetId === "string" ? b.baseAssetId.trim() : "";
   const prompt = typeof b.prompt === "string" ? b.prompt.trim() : "";
-  const { style, strength, keepPalette, keepPosition, keepSize, keepOutline, visibility } = b;
+  const { style, strength, keepPalette, keepPosition, keepSize, keepOutline } = b;
 
   if (!baseAssetId || baseAssetId.length > 200) errors.base = "Choose a rig to remix.";
   if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters.";
@@ -32,8 +32,8 @@ export function parseRemixInput(body: unknown): { input: RemixInput } | { errors
       keepPosition: keepPosition === true,
       keepSize: keepSize === true,
       keepOutline: keepOutline === true,
-      // Private unless the user chose public.
-      visibility: visibility === "public" ? "public" : "private",
+      // Every remix is public for now.
+      visibility: "public",
     },
   };
 }
