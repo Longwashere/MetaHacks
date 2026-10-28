@@ -1,5 +1,5 @@
-import { Crosshair, EyeOff, FlipHorizontal2, Loader2, RotateCcw, Save, SlidersHorizontal, Sparkles, Wind, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { Crosshair, EyeOff, FlipHorizontal2, Loader2, RotateCcw, Save, SlidersHorizontal, Sparkles, Undo2, Wind, X } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
@@ -38,8 +38,33 @@ interface TweakPanelProps {
   /** Writes the tweaks into the remix's skeleton file. */
   save: { onSave: () => void; pending: boolean; disabledReason: string | null };
   /** Muse lines up parts the image model shifted. `stage` is what's running, or null when idle. */
-  autoTweak: { onRun: () => void; stage: string | null; disabledReason: string | null; notes: string | null };
+  autoTweak: {
+    onRun: () => void;
+    stage: string | null;
+    disabledReason: string | null;
+    /** What the last run changed, or null before the first run. */
+    result: AutoTweakResult | null;
+    /** Puts back the parts the last run changed. */
+    onUndo: () => void;
+  };
   className?: string;
+}
+
+/** One part an auto-tweak run changed. */
+export interface AutoTweakPartChange {
+  part: string;
+  before: PartTweak;
+  after: PartTweak;
+  /** `measured`: the pixel measurement's fix, which Muse kept. `muse`: Muse's own value. */
+  source: "measured" | "muse";
+  reason: string;
+}
+
+export interface AutoTweakResult {
+  changes: AutoTweakPartChange[];
+  notes: string | null;
+  /** True when Muse's review failed and only the measured fixes were applied. */
+  measuredOnly: boolean;
 }
 
 const BLEND_LABELS: Record<TweakBlendMode, string> = {
@@ -67,6 +92,7 @@ export function TweakPanel({
   autoTweak,
   className,
 }: TweakPanelProps) {
+  const [tab, setTab] = useState("look");
   const set = (patch: Partial<SpineTweaks>) => onChange({ ...tweaks, ...patch });
 
   const setPart = (name: string, patch: Partial<PartTweak> | null) => {
@@ -122,7 +148,15 @@ export function TweakPanel({
         </div>
       </div>
 
-      <Tabs defaultValue="look" className="gap-0">
+      <AutoTweakBox
+        {...autoTweak}
+        onShowPart={(name) => {
+          onSelectPart(name);
+          setTab("parts");
+        }}
+      />
+
+      <Tabs value={tab} onValueChange={setTab} className="gap-0">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="look">Look</TabsTrigger>
           <TabsTrigger value="motion">Motion</TabsTrigger>
@@ -298,23 +332,6 @@ export function TweakPanel({
             <p className="text-sm text-muted-foreground">Loading the rig…</p>
           ) : (
             <>
-              <Section
-                title="Auto-tweak"
-                action={
-                  <Button size="sm" onClick={autoTweak.onRun} disabled={autoTweak.stage !== null || autoTweak.disabledReason !== null}>
-                    {autoTweak.stage ? <Loader2 className="animate-spin" /> : <Sparkles />}
-                    {autoTweak.stage ? "Working…" : "Line up parts"}
-                  </Button>
-                }
-              >
-                <p className="-mt-2 text-xs text-muted-foreground" aria-live="polite">
-                  {autoTweak.stage ??
-                    autoTweak.disabledReason ??
-                    "Compares the remix with the original at a few paused poses, measures parts that drifted, and has Muse decide which fixes to keep. Review the result, then Save."}
-                </p>
-                {autoTweak.notes && !autoTweak.stage && <p className="text-xs">{autoTweak.notes}</p>}
-              </Section>
-
               <div className="flex flex-col gap-2">
                 <Label htmlFor="tw-part">Part</Label>
                 <div className="flex gap-2">
@@ -448,6 +465,102 @@ export function TweakPanel({
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/** The part transform fields auto-tweak sets, formatted like their sliders. */
+const CHANGE_FIELDS = [
+  { key: "dx", label: "Offset X", format: (p: PartTweak) => `${p.dx.toFixed(2)}%` },
+  { key: "dy", label: "Offset Y", format: (p: PartTweak) => `${p.dy.toFixed(2)}%` },
+  { key: "scale", label: "Scale", format: (p: PartTweak) => `${Math.round(p.scale * 100)}%` },
+  { key: "rotation", label: "Rotate", format: (p: PartTweak) => `${p.rotation}°` },
+] as const;
+
+function AutoTweakBox({
+  onRun,
+  stage,
+  disabledReason,
+  result,
+  onUndo,
+  onShowPart,
+}: TweakPanelProps["autoTweak"] & { onShowPart: (part: string) => void }) {
+  const count = result?.changes.length ?? 0;
+  // The list sits above every tab, so it can be put away; a new run shows its own list again.
+  const [hidden, setHidden] = useState<AutoTweakResult | null>(null);
+  return (
+    <Section
+      title="Auto-tweak"
+      action={
+        <Button size="sm" onClick={onRun} disabled={stage !== null || disabledReason !== null}>
+          {stage ? <Loader2 className="animate-spin" /> : <Sparkles />}
+          {stage ? "Working…" : "Line up parts"}
+        </Button>
+      }
+    >
+      <p className="-mt-2 text-xs text-muted-foreground" aria-live="polite">
+        {stage ??
+          disabledReason ??
+          "Compares the remix with the original at a few paused poses, measures parts that drifted, and has Muse decide which fixes to keep. Changes show on the preview right away; Save keeps them."}
+      </p>
+
+      {result && !stage && hidden !== result && (
+        <div className="flex flex-col gap-3 border-t pt-3" aria-live="polite">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium">
+              {count === 0
+                ? "Nothing changed: every part already lines up."
+                : `Changed ${count} part${count === 1 ? "" : "s"}${result.measuredOnly ? " (measured fixes only)" : ""}`}
+            </p>
+            <div className="flex shrink-0 items-center">
+              {count > 0 && (
+                <Button variant="ghost" size="sm" onClick={onUndo}>
+                  <Undo2 /> Undo
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" className="size-8" onClick={() => setHidden(result)} aria-label="Hide the change list">
+                <X />
+              </Button>
+            </div>
+          </div>
+          {result.measuredOnly && (
+            <p className="text-xs text-muted-foreground">Muse's review failed, so these are the pixel measurements without its check.</p>
+          )}
+          {result.notes && <p className="text-xs text-muted-foreground">Muse: “{result.notes}”</p>}
+          {count > 0 && (
+            <ul className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
+              {result.changes.map((change) => (
+                <li key={change.part} className="flex flex-col gap-1 rounded-md bg-muted/50 px-2.5 py-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      className="cursor-pointer font-medium underline-offset-4 hover:underline"
+                      onClick={() => onShowPart(change.part)}
+                      title="Open this part in the Parts tab"
+                    >
+                      {change.part}
+                    </button>
+                    <Badge variant={change.source === "measured" ? "secondary" : "outline"}>
+                      {change.source === "measured" ? "Measured" : "Muse's call"}
+                    </Badge>
+                  </div>
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
+                    {CHANGE_FIELDS.filter((f) => change.before[f.key] !== change.after[f.key]).map((f) => (
+                      <div key={f.key} className="contents">
+                        <dt className="text-muted-foreground">{f.label}</dt>
+                        <dd>
+                          {f.format(change.before)} → <span className="font-medium">{f.format(change.after)}</span>
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {change.reason && <p className="text-muted-foreground">{change.reason}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 

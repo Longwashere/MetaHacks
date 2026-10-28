@@ -53,6 +53,15 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Muse Spark takes ~47 s to review two snapshot images
+- **What happened:** the first auto-tweak test waited 47 s for Muse Spark's review, so the user would watch "Muse is reviewing the fixes…" for most of a minute. Snapshotting and measuring in the browser took about 0.5 s.
+- **Evidence (verified):** `POST /chat/completions`, `muse-spark-1.3`, a ~2.4 KB system prompt, a text part listing 16 parts, and two 1200×426 JPEG data URLs (`image_url`). `200` after 46.9 s with a valid JSON reply. Run saved in `backend/data/auto-tweaks/2026-10-28T05-32-35-885Z_test_skeleton-archer-orc/` (local only).
+- **Cost:** user waiting time on every click; one call's credits for the test.
+- **Cause:** not known; one sample. The reply also accepted all 9 measured fixes unchanged, so this run didn't show Muse adding anything beyond the measurement.
+- **Workaround / status:** open. Try smaller images or one pose, and time a few more runs before deciding.
+- **Ask for Meta:** publish typical latency for vision requests by image size, or offer a faster vision tier for short structured replies.
+- **Lesson:** time model calls in the run log (`durationMs` in `reply.json`) so latency shows up without guessing.
+
 ### 2026-10-27 — Muse Image sometimes rejects remix prompts under its content policy
 - **What happened:** every now and then a remix failed with "The image model declined this prompt", and the user had to reword it themselves and spend another run.
 - **Evidence (reported by the user; request not captured here):** `POST /images/edits`, `muse-image-1.0`; the error body contains `content_policy_violation`. The rejected prompt is Muse Spark's own `editPrompt`, so our own model writes prompts the image model refuses.

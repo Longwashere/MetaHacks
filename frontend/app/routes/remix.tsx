@@ -22,7 +22,7 @@ import { SaveButton } from "~/components/SaveButton";
 import { VisibilityToggle } from "~/components/VisibilityToggle";
 import { SpinePreview } from "~/components/SpinePreview";
 import { SpriteSheet } from "~/components/SpriteSheet";
-import { TweakPanel } from "~/components/TweakPanel";
+import { type AutoTweakPartChange, type AutoTweakResult, TweakPanel } from "~/components/TweakPanel";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -63,7 +63,7 @@ import { getSession, requireSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
 import type { AutoTweakCapture } from "~/lib/spine-auto-tweak";
 import { hasSavableTweaks } from "~/lib/spine-tweak-bake";
-import { DEFAULT_TWEAKS, type RigInfo, type SpineTweakBinding, type SpineTweaks, type TweakExporter } from "~/lib/spine-tweaks";
+import { DEFAULT_PART, DEFAULT_TWEAKS, isDefaultPart, type RigInfo, type SpineTweakBinding, type SpineTweaks, type TweakExporter } from "~/lib/spine-tweaks";
 import { getSiteUrl } from "~/lib/site.server";
 import {
   REMIX_API_VERSIONS,
@@ -572,7 +572,8 @@ function useSaveTweaks(remixId: string | null, tweak: ReturnType<typeof useTweak
 /**
  * Auto-tweak for the tweak panel: renders and measures the original and the remix in the
  * browser (lib/spine-auto-tweak), has Muse review the measured fixes, and applies its answer as
- * live part tweaks. If the review fails, the measured fixes are applied on their own.
+ * live part tweaks. If the review fails, the measured fixes are applied on their own. The result
+ * lists every part it changed, before and after, so the user can check it or undo it.
  */
 function useAutoTweak(
   base: SpineAsset | null,
@@ -583,28 +584,53 @@ function useAutoTweak(
   const fetcher = useFetcher<typeof autoTweakAction>();
   const [capture, setCapture] = useState<AutoTweakCapture | null>(null);
   const [capturing, setCapturing] = useState(false);
-  const [notes, setNotes] = useState<string | null>(null);
+  const [result, setResult] = useState<AutoTweakResult | null>(null);
   const { tweaks } = tweak;
   const { onChange } = tweak.panel;
 
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data || !capture) return;
-    if (fetcher.data.ok) {
-      const { review } = fetcher.data;
-      onChange(capture.apply(tweaks, review));
-      const count = review.changes.length;
-      setNotes(review.notes || null);
-      toast.success(count === 0 ? "Muse found nothing to fix." : `Muse adjusted ${count} part${count === 1 ? "" : "s"}. Save to keep it.`);
-    } else if (capture.measuredCount > 0) {
-      onChange(capture.measured(tweaks));
-      setNotes(null);
-      toast.warning(`${fetcher.data.error} Applied the ${capture.measuredCount} measured fix${capture.measuredCount === 1 ? "" : "es"} without Muse's review.`);
-    } else {
+    const reviewed = fetcher.data.ok;
+    if (!reviewed && capture.measuredCount === 0) {
       toast.error(fetcher.data.error);
+    } else {
+      const review = fetcher.data.ok ? fetcher.data.review : null;
+      const next = review ? capture.apply(tweaks, review) : capture.measured(tweaks);
+      const reasons = new Map(review?.changes.map((c) => [c.part, c.reason]));
+      const measured = new Map(capture.parts.flatMap((p) => (p.measured ? [[p.name, p.measured] as const] : [])));
+      const changes = partChanges(tweaks.parts, next.parts).map((c): AutoTweakPartChange => {
+        const fix = measured.get(c.part);
+        const change = review?.changes.find((r) => r.part === c.part);
+        // Muse kept the measurement when it sent back the same numbers.
+        const kept = !change || (fix !== undefined && (["x", "y", "scale", "rotate"] as const).every((k) => Math.abs(change[k] - fix[k]) < 0.01));
+        return { ...c, source: kept ? "measured" : "muse", reason: reasons.get(c.part) ?? (review ? "" : "Measured drift from the original.") };
+      });
+      onChange(next);
+      setResult({ changes, notes: review?.notes || null, measuredOnly: !review });
+      if (fetcher.data.ok) {
+        const count = changes.length;
+        toast.success(count === 0 ? "Muse found nothing to fix." : `Changed ${count} part${count === 1 ? "" : "s"}. See the list in the panel.`);
+      } else {
+        toast.warning(`${fetcher.data.error} Applied the measured fixes without Muse's review.`);
+      }
     }
     setCapture(null);
     // Runs once per finished review; `onChange` and `tweaks` are read at that moment on purpose.
   }, [fetcher.state, fetcher.data]);
+
+  /** Restores the transform the run changed on each part, leaving any later colour or blend edits. */
+  const onUndo = () => {
+    if (!result) return;
+    let parts = tweaks.parts;
+    for (const { part, before } of result.changes) {
+      const { [part]: current, ...rest } = parts;
+      const restored = { ...(current ?? DEFAULT_PART), dx: before.dx, dy: before.dy, scale: before.scale, rotation: before.rotation };
+      parts = isDefaultPart(restored) ? rest : { ...rest, [part]: restored };
+    }
+    onChange({ ...tweaks, parts });
+    setResult(null);
+    toast("Undid the auto-tweak.");
+  };
 
   const disabledReason = !remix?.files
     ? "Run a remix first: auto-tweak compares it with the original rig."
@@ -615,7 +641,7 @@ function useAutoTweak(
   const onRun = async () => {
     if (!remix?.files || !base?.files) return;
     setCapturing(true);
-    setNotes(null);
+    setResult(null);
     try {
       // Loaded on demand: it pulls in the Spine runtime and only runs in the browser.
       const { captureAutoTweak } = await import("~/lib/spine-auto-tweak");
@@ -637,7 +663,18 @@ function useAutoTweak(
     : fetcher.state !== "idle"
       ? "Muse is reviewing the fixes…"
       : null;
-  return { onRun, stage, disabledReason, notes };
+  return { onRun, stage, disabledReason, result, onUndo };
+}
+
+/** Parts whose offset, scale or rotation differ between two part maps. */
+function partChanges(before: SpineTweaks["parts"], after: SpineTweaks["parts"]) {
+  const names = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...names].flatMap((part) => {
+    const b = before[part] ?? DEFAULT_PART;
+    const a = after[part] ?? DEFAULT_PART;
+    const same = b.dx === a.dx && b.dy === a.dy && b.scale === a.scale && b.rotation === a.rotation;
+    return same ? [] : [{ part, before: b, after: a }];
+  });
 }
 
 // Milestones mirror the progress values the backend reports (backend/src/lib/remix.ts).
