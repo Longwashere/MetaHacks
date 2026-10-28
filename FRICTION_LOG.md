@@ -55,12 +55,27 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Style changes on "auto" were weak; Spark knew a reference but didn't use it while planning
+- **What happened:** "same orc but in an anime art style like black clover style" (`job_5f05df7b`) came back as generic flat cartoon, and "as a watercolor painting" looked like the original with paler colours. Muse Image copies the input's fine texture, and Muse Spark described named references as their genre's generic look.
+- **Evidence (verified, 19 `muse-image-1.0` runs plus ~30 `muse-spark-1.3` calls, Orc Berserker, local harness, not stored):**
+  - Asked inside the remix plan, Spark described Black Clover as "bold clean black outlines… smooth clean digital finish with no grain", even with the reference named first. Asked about the reference on its own, it answered "thick, rough… dense cross-hatching… harsh, chunky blocks of black".
+  - Style descriptions that mention paper, mist or speed lines get painted onto the background: a watercolor run washed every part's box pale cyan, so nothing could be keyed out (`insideBoxes` 0.88, so it passed the layout check). A Black Clover run drew speed lines around the axe.
+- **Cost:** 19 test image runs (one of them an accidental duplicate) plus the user's two weak remixes.
+- **Workaround / status:** fixed in `backend/src/v2/lib/meta.ts`, `remix.ts` and `textures.ts`.
+  - Spark's plan now names the style `reference`.
+  - A separate text-only Spark call (`describeStyle`) describes the reference on its own, covering surfaces only: no paper or effects, and in colour unless the medium has none.
+  - That description leads the image prompt, which also says the background stays flat.
+  - For style changes, Muse Image gets the parts' texture smoothed by a median filter (silhouettes and colours kept), which works as the strength control the API lacks.
+  - Results: strong for ukiyo-e, 16-bit pixel art, stained glass, claymation, charcoal, Hollow Knight and Black Clover. Watercolor improved but is still the weakest. Non-style remixes are unchanged (control run: no reference, no smoothing).
+- **Ask for Meta:** an edit-strength parameter on `/images/edits`, so we don't have to degrade the input to get a restyle.
+- **Lesson:** ask Spark about a reference in isolation. In a planning prompt it describes the contrast with the input, not the reference.
+
 ### 2026-10-28 — Muse Image kept the original rendering when asked for a painterly style
 - **What happened:** "same orc but give it to me in painterly art style" (`job_72ff8499`, Orc Berserker, style `painterly`, strength 0.6) came back looking like the original: the same crisp dark outlines and fine noisy texture, with only small colour changes (fur, axe grip, tuft) and slight softening. No brush strokes.
 - **Evidence (verified, one run):** `POST /images/edits`, `muse-image-1.0`, one 1536×1536 page on cyan. The prompt opened "Paint in loose painterly style with soft broken outlines, thick oil-brush blending…" and ended "keep painterly blending throughout". The rest listed every part's materials as they already were, then our suffix added only `Art style: painterly.` The original is already a detailed hand-painted texture. Output in R2 under `remixes/2026-10-28T12-17-03-853Z_job_72ff8499/`.
 - **Cost:** one remix (Spark plan + one image call) that didn't deliver the asked-for style.
 - **Cause (inferred):** Muse Image holds on to the input's rendering unless told plainly to replace it, and there's no strength parameter to push it (see Open). A style close to the input's, plus a prompt mostly describing the parts as they are, read as "keep it".
-- **Workaround / status:** changed, untested. Each preset style now has a concrete paint description (`STYLE_LOOKS` in `backend/src/v2/lib/meta.ts`). The image prompt names it and says to replace the current line work, shading and texture. Spark is told an explicit style is the main change at any strength, to name what goes, and to describe parts in the new style's terms. Needs a rerun to confirm.
+- **Workaround / status:** fixed, tested with 19 image runs across 10 styles (see the 2026-10-28 style-test entry above).
 - **Ask for Meta:** an edit-strength or style-strength parameter on `/images/edits`, so a style change doesn't depend on wording.
 - **Lesson:** name the rendering to drop, not just the style to add.
 

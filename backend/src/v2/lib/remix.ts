@@ -1,7 +1,16 @@
 import path from "node:path";
 import { type AtlasPage, isSafePageName, parseAtlas } from "./atlas.js";
 import { type PartLayout, layoutParts } from "../../lib/layout.js";
-import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy, styleInstruction } from "./meta.js";
+import {
+  ContentPolicyError,
+  STYLE_LOOKS,
+  describeStyle,
+  keptPartProperties,
+  planRemix,
+  repaintPage,
+  rewordForContentPolicy,
+  styleInstruction,
+} from "./meta.js";
 import { putFile } from "../../lib/storage.js";
 import { decodePage, fitToPage, layoutFit, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
@@ -25,6 +34,12 @@ const PLAN_EXPECTED_MS = 6_000;
 const PAGE_EXPECTED_MS = 10_000;
 /** A page whose painted pixels fall less inside the parts' boxes than this was rearranged by the model (see layoutFit). */
 const MIN_LAYOUT_FIT = 0.85;
+/**
+ * For a style change, how much of the parts' painted texture is smoothed away before Muse Image
+ * sees them (see softenTexture), by change amount: a median window as a share of the page's longer
+ * side. At 0.007 a 1000px page loses its grit and fur strands but keeps faces, tusks and edges.
+ */
+const STYLE_SOFTEN = { light: 0.004, moderate: 0.007, heavy: 0.01 };
 const LAYOUT_RETRY_NOTE =
   "A previous attempt moved, enlarged and duplicated parts. Repaint each part exactly where it is in the input image, at the same size, and nowhere else.";
 
@@ -70,21 +85,22 @@ export async function runRemix(
       .map(async (img, i) => (await toModelInput(img, PLAN_MAX_SIDE, background, layouts[i])).dataUrl),
   );
   const parts = describeParts(pages.slice(0, PLAN_MAX_PAGES), layouts);
-  const plan = await withProgress(onProgress, 0.1, 0.2, "Planning the new look", PLAN_EXPECTED_MS, () =>
-    planRemix(
-      input,
-      { name: base.name, parts, pageImages, background: background.name },
-      signal,
-    ),
-  );
+  const { plan, describedStyle } = await withProgress(onProgress, 0.1, 0.2, "Planning the new look", PLAN_EXPECTED_MS, async () => {
+    const plan = await planRemix(input, { name: base.name, parts, pageImages, background: background.name }, signal);
+    // A named reference is described on its own, which Spark does far better than inside the plan.
+    return { plan, describedStyle: plan.reference ? await describeStyle(plan.reference, signal) : null };
+  });
 
   onPrompt(plan.editPrompt, "original");
 
+  // The target style for a style change: the reference described on its own, else the plan's own
+  // description, else the picked preset. Null when the remix keeps the pages' style.
+  const styleLook = describedStyle ?? plan.style ?? (input.style === "auto" ? null : STYLE_LOOKS[input.style]);
+  const soften = !styleLook ? 0 : input.strength < 0.34 ? STYLE_SOFTEN.light : input.strength < 0.67 ? STYLE_SOFTEN.moderate : STYLE_SOFTEN.heavy;
   const kept = keptPartProperties(input);
   const buildImagePrompt = (editPrompt: string) => [
+    styleLook ? styleInstruction(styleLook, background.name) : "",
     editPrompt,
-    // With "auto", the plan already carries the style (the original one, or the prompt's).
-    input.style === "auto" ? "" : styleInstruction(input.style),
     `This image is a sprite atlas of separate character parts on a solid ${background.name} background.`,
     `Every shape that is not the ${background.name} background is a part; repaint all of them, including thin ones like bones, shafts and straps.`,
     kept ? `Keep every part in exactly the same ${kept}.` : "",
@@ -114,7 +130,9 @@ export async function runRemix(
           request,
           parts,
           plan,
+          styleLook,
           imagePrompt: buildImagePrompt(editPrompt),
+          soften,
           ...(reworded ? { rewordedForContentPolicy: true } : {}),
           layoutChecks,
         },
@@ -127,7 +145,7 @@ export async function runRemix(
   let reference: string | null = null;
   const pageKeys: string[] = [];
   for (const [i, page] of pages.entries()) {
-    const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background, layouts[i]);
+    const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background, layouts[i], soften);
     const generated = await withProgress(
       onProgress,
       0.2 + (0.75 * i) / pages.length,

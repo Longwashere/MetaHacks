@@ -3,9 +3,10 @@ import { IMAGE_MODEL, IMAGE_TIMEOUT_MS, META_API_BASE_URL, MUSE_MODEL, MUSE_TIME
 import type { ArtStyle, RemixInput } from "./types.js";
 
 /**
- * What each preset art style looks like in paint, for both models. A bare style name was too weak:
- * asked for "painterly", Muse Image kept an already hand-painted orc's crisp outlines and fine
- * texture (job_72ff8499), so each style names the rendering to replace as well as the new one.
+ * What each preset art style looks like in paint: Spark's starting point when the user picks one,
+ * and the image prompt's fallback when Spark doesn't describe the style itself. A bare style name
+ * was too weak: asked for "painterly", Muse Image kept an already hand-painted orc's crisp outlines
+ * and fine texture (job_72ff8499).
  */
 export const STYLE_LOOKS: Record<ArtStyle, string> = {
   cartoon: "bold clean dark outlines, flat bright colours with simple two-tone cel shading, smooth surfaces with almost no texture",
@@ -16,9 +17,13 @@ export const STYLE_LOOKS: Record<ArtStyle, string> = {
   flat: "flat vector art: solid colour shapes with no gradients or texture, minimal or no outlines, simple geometric shading",
 };
 
-/** The image prompt's art-style line: the style, what it looks like, and that the current rendering goes. */
-export function styleInstruction(style: ArtStyle): string {
-  return `Art style: ${style}, meaning ${STYLE_LOOKS[style]}. Repaint every part fully in this style, replacing its current line work, shading and texture; the result must not look like the original rendering.`;
+/**
+ * The image prompt's opening for a style change: what the style looks like, and that the current
+ * rendering goes. It leads the prompt, since Muse Image weighs the start most and otherwise holds
+ * on to the input's rendering.
+ */
+export function styleInstruction(look: string, background: string): string {
+  return `Art style: ${look.replace(/[.\s]+$/, "")}. Repaint every part fully in this style, replacing its current line work, shading and texture; the result must not look like the original rendering. Apply the style to the parts only: the background around and between them stays flat solid ${background}, with no paper, texture, wash, glow, mist or lines on it.`;
 }
 
 // Meta Model API: Muse Spark (chat completions) plans the look, Muse Image repaints
@@ -30,6 +35,13 @@ export interface RemixPlan {
   name: string;
   /** Instructions for the image model describing the new look. */
   editPrompt: string;
+  /**
+   * The target art style in paint terms when the remix changes the pages' style, else null.
+   * Spark writes it, so a named reference ("Black Clover", "ukiyo-e") becomes concrete traits.
+   */
+  style: string | null;
+  /** The most specific style reference the user named ("Black Clover manga by Yuki Tabata"), or null. */
+  reference: string | null;
 }
 
 function apiKey(): string {
@@ -54,13 +66,16 @@ How to write editPrompt:
 - Translate abstract requests into concrete visuals. Do not repeat vague words like "modern", "cool", or "lawyer". Say what that means in paint: materials, colors, patterns, and surface details, for example charcoal wool suit fabric with subtle pinstripes, white shirt, burgundy tie pattern.
 - Cover the major visible parts and explicitly mention thin or small parts, like straps, bones, shafts, and buckles, so the image model does not drop them.
 - The Parts list gives each part's page and where it sits, as percentages of that page image (x from the left edge, y from the top). Use it to work out what each part is from its picture; names can mislead (e.g. "head_2" may be a jaw). In editPrompt, name parts by what they are and where they sit (e.g. "the tusked lower jaw at bottom left"), especially small or odd-shaped parts that could pass for something else.
-- When the requested look or the Art style line names an art style that differs from the pages (a studio, game, artist or medium, e.g. "Studio Ghibli", "MapleStory", "watercolor"), the style change matters as much as the subject. Start editPrompt with one sentence saying what that style looks like in paint (line weight, colour and shading, amount of texture, lighting), end it with a short reminder of the same, and describe every material in that style's terms.
-- When the Art style line says it's a style change, the style is the main change, whatever the Change amount, even if the requested look says "same character". The image model holds on to the pages' current rendering unless told plainly to drop it, so: in the opening sentence, also name what goes (for example "replace the crisp dark outlines and fine noisy texture with ..."), describe every part in the new style's terms rather than as it looks now ("brushy blended green skin", not "green skin with brown straps"), and keep the part list short so the style words aren't drowned out. For a soft or clean style, don't ask for grit like fine cracks, scratches, pitting or weathering; for Studio Ghibli, for example: clean thin outlines, soft flat colours with gentle gradients, simple texture, warm light.
+- Decide whether this is a style change: the requested look names or clearly implies an art style, medium or reference (a show, game, studio, artist, era or technique, e.g. "Black Clover", "ukiyo-e", "watercolor", "claymation", "stained glass", "16-bit") that differs from how the pages are rendered now, or the Art style line says it is one. "Same character but in X style" is a style change.
+- For a style change, the style is the main change, whatever the Change amount. Write it into "style" (below), and in editPrompt describe every part in the new style's terms rather than as it looks now ("loose watery green wash", not "green skin with brown straps"); keep the part list short so the style isn't drowned out. Don't repeat the style sentence at the start of editPrompt; it's added for you.
+- For a soft or clean style, don't ask for grit like fine cracks, scratches, pitting or weathering.
 - Use specific, paintable language only. No instructions about the model, the rig, or the atlas itself.
 - One paragraph, imperative voice, at most 1000 characters.
 
-Reply with JSON only, no markdown, no extra fields: {"name": "...", "editPrompt": "..."}
+Reply with JSON only, no markdown, no extra fields, in this order: {"name": "...", "reference": "..." or null, "style": "..." or null, "editPrompt": "..."}
 - name: 2 to 5 words naming the remixed asset, Title Case, based on the new look, not the original asset name.
+- reference: null unless this is a style change. Otherwise the most specific style reference in the request, with its creator or origin when known, e.g. "Black Clover manga by Yuki Tabata" (not just "anime"), "Edo-period ukiyo-e woodblock print", "Aardman claymation". For a bare medium or preset ("watercolor"), name the medium.
+- style: null unless this is a style change. Otherwise one or two sentences, at most 400 characters, saying exactly what the target style looks like in paint, so a painter who has never heard of the reference could match it: outline (weight, colour, clean or scratchy, or none), colour and shading (flat, cel steps, soft gradients, washes, solid black shadows, hatching, dithering), texture and medium marks (brush strokes, paper grain, pixels, clay, glass leading), palette and lighting. Then name what replaces the current rendering, e.g. "instead of the fine gritty texture and soft airbrushed shading". Describe the parts' own surfaces only: no paper, canvas or background, and no effects around them (speed lines, glows, mist, sparkles). Translate any named show, game or artist into these traits; a name alone means little to the image model. Describe what sets the reference apart from its genre's generic look, as you'd recall it if asked about that reference on its own, not the traits every work in the genre shares (for a manga known for rough heavy inking, cross-hatching and blocky black shadows, say that, not "clean outlines and cel shading"). If the Art style line gives a preset description and the requested look names a more specific reference, describe the reference.
 - editPrompt: one paragraph, at most 1000 characters, as described above.`;
 
 /** Asks Muse Spark to turn the user's prompt into instructions for the image model. */
@@ -77,7 +92,7 @@ export async function planRemix(
     `Requested look: ${input.prompt}`,
     input.style === "auto"
       ? "Art style: keep the original art style of the pages, unless the requested look names a different one"
-      : `Art style: ${input.style} (${STYLE_LOOKS[input.style]}). This is a style change: unless the pages already look like this, every part must clearly end up in this style.`,
+      : `Art style: ${input.style} (${STYLE_LOOKS[input.style]}). This is a style change, unless the pages already look like this.`,
     `Change amount: ${strengthHint(input.strength, input.keepOutline, input.style !== "auto")}`,
     `Keep palette: ${input.keepPalette ? "on" : "off"}`,
     kept ? `Every part must keep exactly the same ${kept}.` : "",
@@ -117,7 +132,7 @@ export async function planRemix(
   }
   // Muse's reply is untrusted; if it's unusable, fall back to the user's own words.
   console.warn("Muse returned an unusable plan; using the prompt as-is.");
-  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.` };
+  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.`, style: null, reference: null };
 }
 
 function strengthHint(strength: number, keepOutline: boolean, styleChange: boolean): string {
@@ -162,7 +177,16 @@ function parsePlan(body: unknown): RemixPlan | null {
   const cleanName = name.replace(/[^\p{L}\p{N} '\-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 60);
   const cleanPrompt = editPrompt.replace(/\s+/g, " ").trim().slice(0, 1500);
   if (!cleanName || cleanPrompt.length < 20) return null;
-  return { name: cleanName, editPrompt: cleanPrompt };
+  const style = getPath(parsed, ["style"]);
+  const cleanStyle = typeof style === "string" ? style.replace(/\s+/g, " ").trim().slice(0, 600) : "";
+  const reference = getPath(parsed, ["reference"]);
+  const cleanReference = typeof reference === "string" ? reference.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+  return {
+    name: cleanName,
+    editPrompt: cleanPrompt,
+    style: cleanStyle.length >= 20 ? cleanStyle : null,
+    reference: cleanReference.length >= 3 && cleanStyle.length >= 20 ? cleanReference : null,
+  };
 }
 
 /**
@@ -218,6 +242,49 @@ export class ContentPolicyError extends Error {
 const REWORD_SYSTEM_PROMPT = `You rewrite prompts for an image-editing model that repaints 2D game sprite sheets.
 The prompt you are given was rejected by the Muse Image content policy. Re-word this prompt so it does not get rejected by the Muse Image generation content policy, while keeping the same look: materials, colors, patterns and art style. Soften or drop anything violent, gory, sexual, hateful, or naming real people, brands or copyrighted characters; describe the look in neutral visual terms instead.
 Reply with the new prompt only: one paragraph, at most 1000 characters, no quotes or markdown.`;
+
+const STYLE_SYSTEM_PROMPT = `You describe an art style so an image model that has never heard of it can paint in it. You are given a style reference: a show, game, artist, era, technique or medium.
+
+Recall what that reference actually looks like, and describe what sets it apart from its genre's generic look, not what every work in the genre shares. Cover: line work (weight, colour, clean or rough, hatching, or none), colour and shading (flat, cel steps, gradients, washes, solid black shadow shapes, dithering), texture and medium marks (brush strokes, paper grain, pixels, clay, glass leading, print grain), palette and lighting.
+
+The description is for painting separate cut-out character parts on a plain background, so:
+- Describe only how the subject's own surfaces are rendered. Never mention paper, canvas, a background or anything around the subject, and leave out effects that happen off the subject: speed lines, motion lines, glows, auras, mist, sparkles, splatter.
+- Keep it in colour, with the reference's own palette, unless the reference is a medium that has no colour (charcoal, graphite, ink wash) or says black and white. For a comic or manga usually printed in black and white, describe its colour version (its anime adaptation or colour pages).
+
+Write one or two sentences, at most 400 characters, as visual traits only: no names of the reference, its creators or characters, and nothing about subjects or story. Reply with the description only, no quotes or preamble.`;
+
+/**
+ * Asks Muse Spark to describe a style reference's look in paint terms, on its own. Inside the
+ * remix plan, Spark described "Black Clover" as clean generic anime, the opposite of the pages'
+ * gritty rendering; asked about the reference alone, it recalls its rough inking and black
+ * shadows. Returns null when the reply is unusable.
+ */
+export async function describeStyle(reference: string, signal: AbortSignal): Promise<string | null> {
+  logPrompt(`chat/completions (${MUSE_MODEL}) describe style`, reference);
+  const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: MUSE_MODEL,
+      messages: [
+        { role: "system", content: STYLE_SYSTEM_PROMPT },
+        { role: "user", content: `Style reference: ${reference}` },
+      ],
+    }),
+    timeoutMs: MUSE_TIMEOUT_MS,
+    signal,
+  });
+  if (!res.ok) {
+    console.error(`Muse style request failed (${res.status})`, await res.text());
+    return null;
+  }
+  const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
+  if (typeof content !== "string") return null;
+  const look = content.replace(/^["'`\s]+|["'`\s]+$/g, "").replace(/\s+/g, " ").trim().slice(0, 600);
+  if (look.length < 20) return null;
+  logPrompt(`chat/completions (${MUSE_MODEL}) style`, look);
+  return look;
+}
 
 /**
  * Asks Muse Spark to re-word an edit prompt that Muse Image rejected under its content

@@ -142,10 +142,18 @@ export interface ModelInput {
 /**
  * The page's parts drawn into a `side`-pixel square as `layout` places them, on `background`.
  * The image model only honours aspect ratios loosely, and a square comes back square, so
- * the parts stay where they were.
+ * the parts stay where they were. `soften` (see softenTexture) smooths the parts' painted
+ * texture first, for style changes.
  */
-export async function toModelInput(page: PageImage, side: number, background: Background, layout: PartLayout): Promise<ModelInput> {
-  const flat = await sharp(page.rgba, { raw: { width: page.width, height: page.height, channels: 4 } })
+export async function toModelInput(
+  page: PageImage,
+  side: number,
+  background: Background,
+  layout: PartLayout,
+  soften = 0,
+): Promise<ModelInput> {
+  const rgba = soften > 0 ? await softenTexture(page, soften) : page.rgba;
+  const flat = await sharp(rgba, { raw: { width: page.width, height: page.height, channels: 4 } })
     .flatten({ background: background.hex })
     .raw()
     .toBuffer();
@@ -165,6 +173,45 @@ export async function toModelInput(page: PageImage, side: number, background: Ba
     .png()
     .toBuffer();
   return { dataUrl: `data:image/png;base64,${square.toString("base64")}`, side, layout, background };
+}
+
+/**
+ * The page with its painted texture smoothed away but its shapes, colours and silhouettes kept:
+ * a median filter `amount` of the page's longer side wide, on colour only, with the original
+ * alpha. Muse Image has no edit-strength setting and copies whatever fine texture it's given,
+ * so for a style change it gets less of the old rendering to hold on to (job_72ff8499).
+ * Colours are spread past the parts' edges first, so the filter doesn't pull in the
+ * transparent background as a dark fringe.
+ */
+async function softenTexture(page: PageImage, amount: number): Promise<Buffer> {
+  const { width, height, rgba } = page;
+  const window = Math.max(3, Math.round((amount * Math.max(width, height)) / 2) * 2 + 1);
+  // Alpha-weighted blur, divided back out: each transparent pixel takes its painted neighbours' colour.
+  const pre = Buffer.alloc(rgba.length);
+  for (let i = 0; i < rgba.length; i += 4) {
+    const a = rgba[i + 3] / 255;
+    pre[i] = Math.round(rgba[i] * a);
+    pre[i + 1] = Math.round(rgba[i + 1] * a);
+    pre[i + 2] = Math.round(rgba[i + 2] * a);
+    pre[i + 3] = rgba[i + 3];
+  }
+  const spread = await sharp(pre, { raw: { width, height, channels: 4 } }).blur(window).raw().toBuffer();
+  const filled = Buffer.alloc(width * height * 3);
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+    const a = rgba[i + 3];
+    const s = spread[i + 3];
+    for (let c = 0; c < 3; c++) {
+      filled[j + c] = a >= 128 || s === 0 ? rgba[i + c] : Math.min(255, Math.round((spread[i + c] * 255) / s));
+    }
+  }
+  const smooth = await sharp(filled, { raw: { width, height, channels: 3 } }).median(window).raw().toBuffer();
+  const out = Buffer.from(rgba);
+  for (let i = 0, j = 0; i < out.length; i += 4, j += 3) {
+    out[i] = smooth[j];
+    out[i + 1] = smooth[j + 1];
+    out[i + 2] = smooth[j + 2];
+  }
+  return out;
 }
 
 export async function toDataUrl(image: Buffer, maxSide: number): Promise<string> {
