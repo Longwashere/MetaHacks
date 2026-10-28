@@ -56,6 +56,21 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Muse Spark animated the wrong part and the wrong direction from bone names alone
+- **What happened:** rendered with textures, generated animations swung the orc's skull shoulder pad instead of the axe, struck behind the character, and raised arms when it meant to punch forward.
+- **Evidence (verified, `POST /chat/completions`, `muse-spark-1.3`; 22 generations plus replays, rendered to video in `backend/data/animation-videos/`, local):** given only text (bone names, positions, directions), Spark named `SH_AC` as the axe (it's the shoulder accessory; the axe is on `ARM_L`/`ARM_L3`/`ARM_L4`). With a labelled rig sheet as an `image_url`, its plan read "faces right, axe handle at ARM_L4" on every run. Separately, relative rotations came out with the wrong sign (an arm keyed to "snap forward" went up); with "aim" keys (screen directions) resolved by our code, posed bones landed within a few degrees of the requested direction, the worst 14° off.
+- **Cost:** about 8 generations before the sheet and aim keys, and the user's time.
+- **Workaround / status:** fixed: the page draws a rig sheet (`frontend/app/lib/spine-rig-sheet.ts`) and the backend accepts screen-space aim keys (`resolveAims` in `backend/src/lib/animate.ts`).
+- **Lesson:** give Spark a picture of anything spatial, and let it state goals in the frame it reasons in (screen directions), converting to the rig's frame in code.
+
+### 2026-10-28 — Muse Spark put stray words inside long JSON replies
+- **What happened:** a "rage roar" animation failed twice with "Muse's animation came back unreadable".
+- **Evidence (verified, `POST /chat/completions`, `muse-spark-1.3`, ~12,700-character replies, 12–21k completion tokens of which 6–14k reasoning):** both replies were valid JSON except for stray text between values: `…]} credible:1], "drawOrder"…` and `…]} Has mistaken? Actually slot field...], …`. `response_format: {"type": "json_object"}` and `{"type": "json_schema", …}` are both accepted on a small request (returned `{"a": 1}`); whether they prevent this on long replies isn't confirmed yet.
+- **Cost:** one failed generation (two Spark calls plus the plan call).
+- **Workaround / status:** the keys call now sends `response_format: json_object`, and the parser deletes text from a parse error to the next `,`, `]` or `}` and retries (`parseLooseJson`); both failed replies parse with it.
+- **Ask for Meta:** document whether `response_format` constrains decoding on `muse-spark-1.3`, and why reasoning text leaks into the answer.
+- **Lesson:** repair-and-retry parsing is cheaper than a second model call.
+
 ### 2026-10-28 — Muse Spark's one-shot animations were weak, and it read key eases backwards
 - **What happened:** the first version of generated animations asked `muse-spark-1.3` for the keyframes in one call. The user found the results weak: a "jumping slash… make it look epic" and a "one-two punch" on the orc came back small and mushy.
 - **Evidence (verified, `POST /chat/completions`, `muse-spark-1.3`, text only; runs in `backend/data/animations/`, local):** replies took 22–45 s. In the jump-slash, about 30 bones were keyed on the same six times (35 distinct key times in total), with a mean rotation of 10° per key against the rig's own Attack swinging the arm through 150°. In the punch, 13 distinct key times. Every curve was smooth. After splitting into a planning call and a keying call with per-key eases: mean rotation 29° and 26°, and 64 and 97 distinct key times. A second problem showed up then: given eases defined as "the move from this key to the next", Spark used `hold` 36 times as if it meant "arrive here and hold", which froze the punch's first 0.4 s.

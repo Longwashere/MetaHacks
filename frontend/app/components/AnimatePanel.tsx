@@ -63,14 +63,20 @@ export function AnimatePanel({ remix, onAnimated }: AnimatePanelProps) {
     try {
       // The backend reads skeleton JSON itself; a binary .skel is converted here, where the
       // converter already lives, and sent along.
-      let skeleton: object | undefined;
-      if (files.skeletonUrl.toLowerCase().endsWith(".skel")) {
-        const { skelToJson } = await import("~/lib/spine-skel-json");
-        const res = await fetch(files.skeletonUrl);
-        if (!res.ok) throw new Error("Couldn't read the rig's skeleton.");
-        skeleton = skelToJson(await res.arrayBuffer());
+      const binary = files.skeletonUrl.toLowerCase().endsWith(".skel");
+      const res = await fetch(files.skeletonUrl);
+      if (!res.ok) throw new Error("Couldn't read the rig's skeleton.");
+      const json: object = binary ? (await import("~/lib/spine-skel-json")).skelToJson(await res.arrayBuffer()) : await res.json();
+      // A labelled picture of the rig, so Muse can see which way it faces and what it holds.
+      // Animating still works without it, just less reliably.
+      let images: string[] = [];
+      try {
+        const { captureRigSheet } = await import("~/lib/spine-rig-sheet");
+        images = [await captureRigSheet(files, json)];
+      } catch (error) {
+        console.warn("Couldn't draw the rig sheet", error);
       }
-      fetcher.submit(JSON.stringify({ assetId: remix.id, prompt, durationSec, loop, skeleton }), {
+      fetcher.submit(JSON.stringify({ assetId: remix.id, prompt, durationSec, loop, skeleton: binary ? json : undefined, images }), {
         method: "post",
         action: "/api/remix-animation",
         encType: "text/plain",

@@ -223,6 +223,8 @@ export interface AnimateInput {
   durationSec: number;
   loop: boolean;
   skeleton?: object;
+  /** The rig sheet (rest pose with bone names, frames of its own attack) as a JPEG data URL. */
+  images?: string[];
 }
 
 /** A new animation Muse wrote and saved into the remix's skeleton. */
