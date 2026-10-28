@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { getSavedAssetIds, listAssets } from "~/lib/api.server";
-import { getCurrentUser } from "~/lib/auth.server";
+import { getSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, breadcrumbJsonLd, categoryLabel, seoMeta } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
 import {
@@ -35,7 +35,7 @@ const isCategory = (v: string | null): v is AssetCategory =>
   ASSET_CATEGORIES.some((c) => c === v);
 const isSort = (v: string | null): v is SortOption => SORT_OPTIONS.some((s) => s === v);
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const q = url.searchParams.get("q")?.slice(0, 200) ?? "";
   const sortParam = url.searchParams.get("sort");
@@ -46,10 +46,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const category = isCategory(categoryParam) ? categoryParam : undefined;
   const sort = isSort(sortParam) ? sortParam : "popular";
 
-  const user = await getCurrentUser(request);
   const [assets, savedIds] = await Promise.all([
     listAssets({ q, category, sort }),
-    getSavedAssetIds(user.id),
+    getSavedAssetIds(getSession(context)),
   ]);
   return { assets, savedIds, q, category: category ?? null, sort, siteUrl: getSiteUrl(request) };
 }

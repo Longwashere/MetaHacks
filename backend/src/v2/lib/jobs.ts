@@ -4,13 +4,24 @@ import { REMIX_JOB_TIMEOUT_MS } from "../../lib/config.js";
 import { runRemix } from "./remix.js";
 import type { RemixJob, RemixRequest } from "./types.js";
 
-// In-memory store; resets on restart. Swap for a database or queue when you need persistence.
+// Live progress lives here and resets on restart; remix-jobs.ts records each job in the database.
 const jobs = new Map<string, RemixJob>();
 
+export interface RemixJobOptions {
+  /** Job id; generated when omitted. */
+  id?: string;
+  /** Called once when the job succeeds or fails. Errors it throws are logged. */
+  onSettled?: (job: RemixJob) => Promise<void>;
+}
+
+export function newRemixJobId(): string {
+  return `job_${randomUUID().slice(0, 8)}`;
+}
+
 /** Creates a queued job and starts it in the background. Returns right away. */
-export function createRemixJob(input: RemixRequest): RemixJob {
+export function createRemixJob(input: RemixRequest, { id = newRemixJobId(), onSettled }: RemixJobOptions = {}): RemixJob {
   const job: RemixJob = {
-    id: `job_${randomUUID().slice(0, 8)}`,
+    id,
     status: "queued",
     progress: 0,
     stage: "Queued",
@@ -22,7 +33,13 @@ export function createRemixJob(input: RemixRequest): RemixJob {
     error: null,
   };
   jobs.set(job.id, job);
-  void runJob(job);
+  void runJob(job).then(async () => {
+    try {
+      await onSettled?.(job);
+    } catch (error) {
+      console.error(`Recording remix job ${job.id} failed`, error);
+    }
+  });
   return job;
 }
 

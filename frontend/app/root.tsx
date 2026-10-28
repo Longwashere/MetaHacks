@@ -12,11 +12,15 @@ import {
 import type { Route } from "./+types/root";
 import { Toaster } from "~/components/ui/sonner";
 import { TooltipProvider } from "~/components/ui/tooltip";
+import { authMiddleware, getSession } from "~/lib/auth.server";
 import { getTheme, type Theme } from "~/lib/theme.server";
 import "./app.css";
 
-export async function loader({ request }: Route.LoaderArgs) {
-  return { theme: await getTheme(request) };
+export const middleware: Route.MiddlewareFunction[] = [authMiddleware];
+
+export async function loader({ request, context }: Route.LoaderArgs) {
+  // Only the public fields: the session's access token must not reach the browser.
+  return { theme: await getTheme(request), user: getSession(context)?.user ?? null };
 }
 
 export const links: Route.LinksFunction = () => [

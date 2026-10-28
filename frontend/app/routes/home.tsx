@@ -7,7 +7,7 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { getSavedAssetIds, listFeaturedAssets } from "~/lib/api.server";
-import { getCurrentUser } from "~/lib/auth.server";
+import { getSession } from "~/lib/auth.server";
 import { SITE_NAME, seoMeta } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
 
@@ -33,11 +33,10 @@ export function meta({ loaderData }: Route.MetaArgs) {
   });
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getCurrentUser(request);
+export async function loader({ request, context }: Route.LoaderArgs) {
   const [featured, savedIds] = await Promise.all([
     listFeaturedAssets(4),
-    getSavedAssetIds(user.id),
+    getSavedAssetIds(getSession(context)),
   ]);
   return { featured, savedIds, siteUrl: getSiteUrl(request) };
 }

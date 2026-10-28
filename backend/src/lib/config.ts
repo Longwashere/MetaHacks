@@ -45,3 +45,34 @@ export const R2 = (() => {
   if (!accountId || !accessKeyId || !secretAccessKey || !bucket || !publicUrl) return null;
   return { accountId, accessKeyId, secretAccessKey, bucket, publicUrl };
 })();
+
+/** Supabase project. The backend uses the service-role key, so it bypasses RLS: keep it server-side. */
+export const SUPABASE = (() => {
+  const url = process.env.SUPABASE_URL?.replace(/\/+$/, "");
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) return null;
+  return { url, serviceRoleKey };
+})();
+
+/** The website's public origin, for Stripe's return URLs. */
+export const APP_URL = url("APP_URL", "http://localhost:5173");
+
+/** Stripe subscription. Billing endpoints return 503 until all three are set. */
+export const STRIPE = (() => {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const priceId = process.env.STRIPE_PRICE_ID;
+  if (!secretKey || !webhookSecret || !priceId) return null;
+  return { secretKey, webhookSecret, priceId };
+})();
+
+function count(name: string, fallback: number): number {
+  const value = Number(process.env[name] || NaN);
+  return Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+/** Remixes each plan can start per calendar month (UTC). Failed remixes don't count. */
+export const PLAN_LIMITS = {
+  free: count("FREE_MONTHLY_REMIXES", 3),
+  pro: count("PRO_MONTHLY_REMIXES", 100),
+} as const;

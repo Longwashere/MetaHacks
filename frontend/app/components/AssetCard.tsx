@@ -2,6 +2,7 @@ import { Bookmark, Film } from "lucide-react";
 import { Link } from "react-router";
 import { SaveButton } from "~/components/SaveButton";
 import { SpinePreview } from "~/components/SpinePreview";
+import { VisibilityToggle } from "~/components/VisibilityToggle";
 import { Badge } from "~/components/ui/badge";
 import { Card, CardContent } from "~/components/ui/card";
 import type { SpineAsset } from "~/lib/types";
@@ -12,10 +13,12 @@ import { cn } from "~/lib/utils";
 interface AssetCardProps {
   asset: SpineAsset;
   saved: boolean;
+  /** Show the public/private toggle (for the user's own remixes). */
+  manage?: boolean;
   className?: string;
 }
 
-export function AssetCard({ asset, saved, className }: AssetCardProps) {
+export function AssetCard({ asset, saved, manage = false, className }: AssetCardProps) {
   return (
     <Card className={cn("group relative gap-0 overflow-hidden py-0 transition-shadow hover:shadow-md", className)}>
       <Link
@@ -54,6 +57,7 @@ export function AssetCard({ asset, saved, className }: AssetCardProps) {
           </span>
           <span className="ml-auto truncate">by {asset.author.name}</span>
         </div>
+        {manage && <VisibilityToggle assetId={asset.id} assetName={asset.name} visibility={asset.visibility} size="sm" className="self-start" />}
       </CardContent>
     </Card>
   );

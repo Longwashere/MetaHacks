@@ -24,8 +24,7 @@ const queue = [...files];
 await Promise.all(
   Array.from({ length: CONCURRENCY }, async () => {
     for (let file = queue.shift(); file; file = queue.shift()) {
-      const objectKey = ["spine", ...file.split(path.sep)].map(encodeURIComponent).join("/");
-      await putR2Object(objectKey, await readFile(path.join(root, file)), CACHE_CONTROL);
+      await putR2Object(["spine", ...file.split(path.sep)].join("/"), await readFile(path.join(root, file)), CACHE_CONTROL);
       done++;
       if (done % 20 === 0 || done === files.length) console.log(`  ${done}/${files.length}`);
     }

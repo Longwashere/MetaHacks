@@ -126,13 +126,27 @@ Add the entry in the same task, not later.
 ### Open
 
 - **RogueBard preview is broken.** It shows "Preview unavailable" with `Animation bounds are invalid: idle_aggressive`, even though its default skin has attachments. Not yet investigated. (2026-10-27)
-- **Dev-server reloads kill remix jobs.** `tsx watch` restarts the backend on every file save, and jobs only live in memory, so a running remix is lost, wasting its credits. Its folder ends up with only `prompts.json`. Don't edit backend files while a remix is running, or tell the user their run was lost. (2026-10-27)
+- **Dev-server reloads kill remix jobs.** `tsx watch` restarts the backend on every file save, and jobs only live in memory, so a running remix is lost, wasting its credits. Its folder ends up with only `prompts.json`. Don't edit backend files while a remix is running, or tell the user their run was lost. Since the Supabase work, the lost job is marked failed (on the next poll and at startup) so it doesn't use up the user's monthly allowance, but the run itself is still lost. (2026-10-27)
 - **Keyed mode is untested in a full run.** The despill fix for keyed mode (outline not kept) was only checked offline on saved model output. Still to see: gaps at joints, parts cut off at their region rectangle, and art close to the key colour turning transparent. (2026-10-27)
 - **Spine viewer `dispose` crash.** A failed skeleton download makes the Spine runtime throw `Cannot read properties of null (reading 'dispose')`. The cause was found, but the fix (fetch the rig files ourselves, fall back to the placeholder) was never applied. (2026-10-26)
 - **Node version.** React Router needs Node > 22.22.0; the dev machine runs 22.20.0, and every frontend command warns about it. (2026-10-27)
-- **An API key appeared in plain text in a chat session.** It's stored in `backend/.env` (gitignored), but rotate it before the repo goes public. (2026-10-27)
+- **API keys appeared in plain text in chat sessions.** The Meta key and the Cloudflare API token (which the R2 credentials are derived from) are stored in `backend/.env` (gitignored), but rotate both before the repo goes public. Rolling the Cloudflare token changes `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` too. (2026-10-27)
 
 ### Log
+
+### 2026-10-28 — Remix textures from R2 failed to load in the viewer
+- **What happened:** the first two remixes stored in R2 finished and were saved, but the viewer showed "Couldn't load image" for their texture pages.
+- **Cost:** two remix results that looked broken; time spent diagnosing.
+- **Cause:** R2 only sends `Access-Control-Allow-Origin` (and `Vary: Origin`) when the request has an `Origin` header, and remix files are cached for a year. The sprite sheet's plain `<img>` (no `crossOrigin`) loaded the page first, the browser cached the CORS-less response, and the Spine runtime's `crossOrigin = "anonymous"` load reused it and was refused.
+- **Workaround / status:** `crossOrigin="anonymous"` on the sprite sheet image (`frontend/app/components/SpriteSheet.tsx`). Browsers that already cached the bad response need a hard refresh.
+- **Lesson:** load every cross-origin file the WebGL viewer uses in CORS mode, everywhere it appears on the page.
+
+### 2026-10-27 — Moving rigs to R2 broke new remixes
+- **What happened:** after the base rigs moved to R2, the frontend sent absolute `https://pub-….r2.dev/...` atlas URLs, but the backend's remix route only accepted plain `/spine/...` paths, so every new remix would have failed with "This rig has no textures to remix." Caught while reading the code for the Supabase work, before anyone ran a remix.
+- **Cost:** no wasted runs; one wrong turn.
+- **Cause:** the backend trusted, and therefore tightly validated, a file URL sent by the frontend. Changing where files live broke that check.
+- **Workaround / status:** fixed. The backend now looks up the base rig in Supabase by `baseAssetId` and builds file URLs from stored keys (`backend/src/lib/remix-jobs.ts`, `storage.ts`).
+- **Lesson:** after moving files, run one remix end to end. Don't let the client send URLs the server will fetch.
 
 ### 2026-10-27 — Some rigs never rendered: empty default skin
 - **What happened:** EmberSerpent and FireBurstVFX showed "Preview unavailable" in the viewer and on the remix page. This only came to light while testing the new tweak panel, because EmberSerpent is one of only two rigs with physics.

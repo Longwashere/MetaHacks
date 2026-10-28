@@ -13,7 +13,7 @@ import {
 } from "~/components/ui/empty";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { getLibrary, getMyRemixes } from "~/lib/api.server";
-import { getCurrentUser } from "~/lib/auth.server";
+import { requireSession } from "~/lib/auth.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -24,12 +24,12 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getCurrentUser(request);
+export async function loader({ request, context }: Route.LoaderArgs) {
+  const session = requireSession(context, request);
   const tab = new URL(request.url).searchParams.get("tab") === "remixes" ? "remixes" : "saved";
   const [saved, remixes] = await Promise.all([
-    getLibrary(user.id),
-    getMyRemixes(user.id),
+    getLibrary(session),
+    getMyRemixes(session),
   ]);
   return { tab, saved, remixes, savedIds: saved.map((a) => a.id) };
 }
@@ -42,7 +42,7 @@ export default function Library({ loaderData }: Route.ComponentProps) {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-3xl font-bold tracking-tight">My Library</h1>
-        <p className="text-muted-foreground">Rigs you've saved from the community — ready to remix — and every remix you've made.</p>
+        <p className="text-muted-foreground">Rigs you've saved from the community — ready to remix — and every remix you've made. Remixes start private; publish one to share it in Explore.</p>
       </div>
 
       <Tabs
@@ -86,7 +86,7 @@ export default function Library({ loaderData }: Route.ComponentProps) {
 
         <TabsContent value="remixes">
           {remixes.length > 0 ? (
-            <AssetGrid assets={remixes} savedIds={savedIds} />
+            <AssetGrid assets={remixes} savedIds={savedIds} manage />
           ) : (
             <Empty className="border">
               <EmptyHeader>

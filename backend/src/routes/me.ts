@@ -1,0 +1,175 @@
+import { randomUUID } from "node:crypto";
+import express, { Router } from "express";
+import { getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
+import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
+import { getAccount } from "../lib/billing.js";
+import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
+import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
+import { putFile } from "../lib/storage.js";
+import { parseRemixInput, parseSkeleton } from "../lib/validate.js";
+
+/** Large rigs export several hundred KB of JSON; leave headroom without accepting anything huge. */
+const MAX_SKELETON_BYTES = "8mb";
+
+// Everything scoped to the signed-in user. Mounted before the global JSON parser so the skeleton
+// route can use its own, larger body limit.
+export const meRouter = Router();
+meRouter.use(requireUser);
+const json = express.json();
+
+/** GET /me → Account: profile, plan, subscription and this month's remix usage */
+meRouter.get("/", async (_req, res) => {
+  res.json(await getAccount(userIdOf(res), isAdminOf(res)));
+});
+
+// ---------------------------------------------------------------------------
+// Library (bookmarks)
+// ---------------------------------------------------------------------------
+
+async function libraryIds(userId: string): Promise<string[]> {
+  const rows = check(
+    await db()
+      .from("library")
+      .select("asset_id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .overrideTypes<{ asset_id: string }[], { merge: false }>(),
+  );
+  return (rows ?? []).map((r) => r.asset_id);
+}
+
+/** GET /me/library/ids → string[] */
+meRouter.get("/library/ids", async (_req, res) => {
+  res.json(await libraryIds(userIdOf(res)));
+});
+
+/** GET /me/library → SpineAsset[], most recently saved first */
+meRouter.get("/library", async (_req, res) => {
+  const userId = userIdOf(res);
+  res.json(await getAssetsByIds(await libraryIds(userId), userId));
+});
+
+/** PUT /me/library/:assetId → 204. Idempotent. */
+meRouter.put("/library/:assetId", async (req, res) => {
+  const userId = userIdOf(res);
+  if (!(await getAssetRow(req.params.assetId, userId, isAdminOf(res)))) {
+    res.status(404).json({ error: "Asset not found." });
+    return;
+  }
+  check(
+    await db()
+      .from("library")
+      .upsert({ user_id: userId, asset_id: req.params.assetId }, { onConflict: "user_id,asset_id", ignoreDuplicates: true }),
+  );
+  res.status(204).end();
+});
+
+/** DELETE /me/library/:assetId → 204. Idempotent. */
+meRouter.delete("/library/:assetId", async (req, res) => {
+  check(await db().from("library").delete().eq("user_id", userIdOf(res)).eq("asset_id", req.params.assetId));
+  res.status(204).end();
+});
+
+// ---------------------------------------------------------------------------
+// The user's remixes
+// ---------------------------------------------------------------------------
+
+async function ownedAsset(userId: string, assetId: string): Promise<AssetRow | null> {
+  const row = await getAssetRow(assetId, userId);
+  return row?.owner_id === userId ? row : null;
+}
+
+/** GET /me/remixes → SpineAsset[], newest first */
+meRouter.get("/remixes", async (_req, res) => {
+  res.json(await listOwnedAssets(userIdOf(res)));
+});
+
+/** PATCH /me/remixes/:assetId  body = { visibility: "public" | "private" } → SpineAsset. Admins can change any asset. */
+meRouter.patch("/remixes/:assetId", json, async (req, res) => {
+  const visibility: unknown = req.body?.visibility;
+  if (visibility !== "public" && visibility !== "private") {
+    res.status(400).json({ error: 'Expected { visibility: "public" | "private" }.' });
+    return;
+  }
+  const userId = userIdOf(res);
+  const allowed = isAdminOf(res) ? await getAssetRow(req.params.assetId, userId, true) : await ownedAsset(userId, req.params.assetId);
+  if (!allowed) {
+    res.status(404).json({ error: "You can only change your own remixes." });
+    return;
+  }
+  const row = check(
+    await db()
+      .from("assets")
+      .update({ visibility })
+      .eq("id", req.params.assetId)
+      .select(ASSET_COLUMNS)
+      .single()
+      .overrideTypes<AssetRow, { merge: false }>(),
+  );
+  res.json(toSpineAsset(row));
+});
+
+/**
+ * POST /me/remixes/:assetId/skeleton  body = { skeleton: <Spine 4.2 JSON>, skin: string | null } → SpineAsset
+ * Stores the skeleton the user edited on the remix page (tweaks baked in) and points the remix at it.
+ */
+meRouter.post("/remixes/:assetId/skeleton", express.json({ limit: MAX_SKELETON_BYTES }), async (req, res) => {
+  const skeleton = parseSkeleton(req.body?.skeleton);
+  const skin: unknown = req.body?.skin ?? null;
+  if (!skeleton || (skin !== null && (typeof skin !== "string" || skin.length > 200))) {
+    res.status(400).json({ error: "Expected { skeleton, skin } with a Spine skeleton JSON." });
+    return;
+  }
+  const userId = userIdOf(res);
+  const asset = await ownedAsset(userId, req.params.assetId);
+  if (!asset?.files) {
+    res.status(404).json({ error: "You can only save edits to your own remixes." });
+    return;
+  }
+
+  const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_tweak_${randomUUID().slice(0, 8)}`;
+  const key = await putFile(folder, "skeleton.json", JSON.stringify(skeleton));
+  const row = check(
+    await db()
+      .from("assets")
+      .update({ files: { ...asset.files, skeleton: key, skin: skin ?? asset.files.skin } })
+      .eq("id", asset.id)
+      .select(ASSET_COLUMNS)
+      .single()
+      .overrideTypes<AssetRow, { merge: false }>(),
+  );
+  res.json(toSpineAsset(row));
+});
+
+// ---------------------------------------------------------------------------
+// Remix jobs
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /me/remix-jobs  body = RemixInput & { apiVersion: "v1" | "v2" }
+ * → 202 RemixJob, 400 { errors }, or 402 { error } when the monthly allowance is used up.
+ */
+meRouter.post("/remix-jobs", json, async (req, res) => {
+  const parsed = parseRemixInput(req.body);
+  const apiVersion = REMIX_API_VERSIONS.find((v) => v === req.body?.apiVersion);
+  if ("errors" in parsed || !apiVersion) {
+    res.status(400).json({ errors: { ...("errors" in parsed ? parsed.errors : {}), ...(apiVersion ? {} : { apiVersion: "Choose a remix API version." }) } });
+    return;
+  }
+  const result = await startRemix(userIdOf(res), parsed.input, apiVersion, isAdminOf(res));
+  if (!result.ok) {
+    res.status(result.status).json(result.field ? { errors: { [result.field]: result.error } } : { error: result.error });
+    return;
+  }
+  res.status(202).json(result.job);
+});
+
+/** GET /me/remix-jobs/:id → RemixJob, or 404 if it isn't the user's */
+meRouter.get("/remix-jobs/:id", async (req, res) => {
+  const job = await getRemixJobView(userIdOf(res), req.params.id);
+  if (!job) {
+    res.status(404).json({ error: "Remix job not found." });
+    return;
+  }
+  res.json(job);
+});

@@ -1,11 +1,12 @@
 import { data } from "react-router";
 import type { Route } from "./+types/api.library";
 import { removeFromLibrary, saveToLibrary } from "~/lib/api.server";
-import { getCurrentUser } from "~/lib/auth.server";
+import { getSession } from "~/lib/auth.server";
 
 // Save / unsave an asset. Posted to by <SaveButton> via useFetcher from any page.
-export async function action({ request }: Route.ActionArgs) {
-  const user = await getCurrentUser(request);
+export async function action({ request, context }: Route.ActionArgs) {
+  const session = getSession(context);
+  if (!session) return data({ ok: false, error: "Sign in to save assets." }, { status: 401 });
   const form = await request.formData();
   const intent = form.get("intent");
   const assetId = form.get("assetId");
@@ -16,10 +17,10 @@ export async function action({ request }: Route.ActionArgs) {
 
   switch (intent) {
     case "save":
-      await saveToLibrary(user.id, assetId);
+      await saveToLibrary(session, assetId);
       return { ok: true, saved: true };
     case "remove":
-      await removeFromLibrary(user.id, assetId);
+      await removeFromLibrary(session, assetId);
       return { ok: true, saved: false };
     default:
       return data({ ok: false, error: "Unknown intent" }, { status: 400 });

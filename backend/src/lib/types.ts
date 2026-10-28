@@ -24,12 +24,14 @@ export interface RemixInput {
   keepPosition: boolean;
   keepSize: boolean;
   keepOutline: boolean;
+  /** Who can see the finished remix. Public remixes appear in Explore and anyone can remix them. */
+  visibility: "public" | "private";
 }
 
-/** The base rig's files the remix repaints. Sent by the frontend with the input. */
+/** The base rig's files the remix repaints, looked up by the backend from `baseAssetId`. */
 export interface RemixBase {
   name: string;
-  /** Path of the base .atlas on ASSET_BASE_URL, e.g. "/spine/spineboy/Spineboy.atlas". */
+  /** URL of the base .atlas, built by the backend from the asset's storage key. Pages sit next to it. */
   atlasUrl: string;
   premultipliedAlpha: boolean;
 }
@@ -42,8 +44,9 @@ export interface RemixRequest extends RemixInput {
 export interface RemixResult {
   /** Short name for the remix, suggested by Muse. */
   name: string;
-  atlasUrl: string;
-  textureUrls: string[];
+  /** Storage keys of the new .atlas and its pages (see storage.ts). */
+  atlas: string;
+  textures: string[];
 }
 
 export interface RemixJob {

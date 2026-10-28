@@ -1,6 +1,7 @@
 import { Bone, Menu } from "lucide-react";
 import { Link, NavLink } from "react-router";
 import { ThemeToggle } from "~/components/ThemeToggle";
+import { UserMenu } from "~/components/UserMenu";
 import { Button } from "~/components/ui/button";
 import {
   Sheet,
@@ -43,6 +44,7 @@ export function SiteHeader() {
         </nav>
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggle />
+          <UserMenu />
           <Sheet>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">

@@ -1,15 +1,15 @@
 import { data, redirect } from "react-router";
 import type { Route } from "./+types/asset-download";
-import { getAsset, getSkeletonExport } from "~/lib/api.server";
+import { buildPlaceholderSkeleton, getAsset } from "~/lib/api.server";
+import { getSession } from "~/lib/auth.server";
 
-// Downloads the skeleton file. BACKEND: proxy the real file or redirect to a signed URL.
-export async function loader({ params }: Route.LoaderArgs) {
-  const asset = await getAsset(params.assetId);
-  if (asset?.files) throw redirect(asset.files.skeletonUrl);
+// Downloads the skeleton file: a redirect to the stored file, or a placeholder for assets without one.
+export async function loader({ params, context }: Route.LoaderArgs) {
+  const asset = await getAsset(params.assetId, getSession(context));
+  if (!asset) throw data("Asset not found", { status: 404 });
+  if (asset.files) throw redirect(asset.files.skeletonUrl);
 
-  const skeleton = await getSkeletonExport(params.assetId);
-  if (!skeleton) throw data("Asset not found", { status: 404 });
-  return new Response(JSON.stringify(skeleton, null, 2), {
+  return new Response(JSON.stringify(buildPlaceholderSkeleton(asset), null, 2), {
     headers: {
       "Content-Type": "application/json",
       "Content-Disposition": `attachment; filename="${params.assetId}.json"`,

@@ -1,37 +1,40 @@
 # Connecting the backend
 
-The UI runs entirely on mock data right now. All data access goes through **one file**, so wiring up a real backend means changing the function bodies there. You shouldn't need to touch the routes or components.
+The UI gets all its data from the backend (`BACKEND_URL`, default `http://localhost:4000`) through **one file**, `app/lib/api.server.ts`. Routes and components don't call the backend directly.
 
-| File | What it does now | What to do |
-| --- | --- | --- |
-| `app/lib/api.server.ts` | In-memory mock store (resets on server restart) | Replace each function body with a call to your API/DB. Keep the signatures. |
-| `app/lib/auth.server.ts` | Always returns `demo-user` | Read the real session/JWT from `request` and return the user (or `throw redirect("/login")`). |
-| `app/lib/mock-data.server.ts` | Seed assets | Delete it once `api.server.ts` no longer imports it. |
-| `app/lib/types.ts` | The response shapes the UI expects | Match your API to these, or map to them inside `api.server.ts`. |
-| `app/components/SpinePreview.tsx` | Draws a fake SVG rig with CSS animations | Swap in the Spine web runtime (see "Real previews" below). |
+| File | What it does |
+| --- | --- |
+| `app/lib/api.server.ts` | One function per backend endpoint (table below). Calls for the signed-in user take their `Session` and send its access token as `Authorization: Bearer …`. |
+| `app/lib/auth.server.ts` | Supabase Auth (Google sign-in). The root `middleware` reads and refreshes the session cookies on every request. Loaders and actions call `getSession(context)` (guests get `null`) or `requireSession(context, request)` (sends guests to `/login?next=…`). |
+| `app/lib/types.ts` | The response shapes the UI expects. The backend returns these shapes. |
 
-All `*.server.ts` files run on the server only, so API keys and secrets can go there (read from `process.env`). They never reach the browser.
+All `*.server.ts` files run on the server only, so API keys and secrets can go there (read from `process.env`). They never reach the browser. A `Session` holds the access token, so **never return it from a loader**: the root loader returns only `session.user` (id, name, email, avatar).
+
+Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `process.env`): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `BACKEND_URL`, `PUBLIC_SITE_URL`.
 
 ## Function → endpoint contract
 
-Each function in `api.server.ts` has a `BACKEND:` comment with the endpoint it stands in for. These paths are suggestions; any API that returns the same shapes will work.
-
-| Function | Suggested endpoint | Returns |
+| Function | Endpoint | Returns |
 | --- | --- | --- |
-| `listAssets({ q, category, sort })` | `GET /assets?q=&category=&sort=popular\|newest\|name` | `SpineAsset[]` |
-| `listFeaturedAssets(limit)` | `GET /assets/featured?limit=` | `SpineAsset[]` |
-| `getAsset(id)` | `GET /assets/:id` | `SpineAsset \| null` (return `null` on 404) |
-| `getSkeletonExport(id)` | `GET /assets/:id/skeleton` | Skeleton file contents. The `/assets/:id/download` route serves it. Change that route to stream the file or `redirect()` to a signed URL. |
-| `getSavedAssetIds(userId)` | `GET /me/library/ids` | `string[]` |
-| `getLibrary(userId)` | `GET /me/library` | `SpineAsset[]` (most recently saved first) |
-| `getMyRemixes(userId)` | `GET /me/remixes` | `SpineAsset[]` (newest first) |
-| `listRelatedAssets(asset, limit)` | `GET /assets/:id/related` | `SpineAsset[]` (same category) |
-| `listRemixesOf(assetId, limit)` | `GET /assets/:id/remixes` | Public `SpineAsset[]` whose `remixOf.id === assetId` |
-| `saveToLibrary(userId, assetId)` | `PUT /me/library/:assetId` | `void`. Should be idempotent. |
-| `removeFromLibrary(userId, assetId)` | `DELETE /me/library/:assetId` | `void`. Should be idempotent. |
-| `createRemixJob(userId, input, apiVersion)` | `POST /v2/remixes` or `POST /v1/remixes` (JSON `RemixInput` + `base: { name, atlasUrl, premultipliedAlpha }`) | **Live:** calls the backend at `BACKEND_URL` (default `http://localhost:4000`). Returns `RemixJob`, or `null` if the base rig doesn't exist or has no files |
-| `saveRemixSkeleton(userId, assetId, skeleton, skin)` | `POST /skeletons` (JSON `{ skeleton }`, up to 8 MB) | **Live:** stores the skeleton JSON the remix page baked the tweak panel's edits into, and returns `{ skeletonUrl }`. The mock then points the remix's `files.skeletonUrl` (and `files.skin`, for a chosen or combined skin) at it. Returns the updated `SpineAsset`, or `null` if the asset isn't one of the user's remixes |
-| `getRemixJob(userId, jobId)` | `GET /{v1,v2}/remixes/:id`, using the job's version | **Live:** polls the backend while the job runs. `RemixJob \| null` |
+| `listAssets({ q, category, sort })` | `GET /assets?q=&category=&sort=popular\|newest\|name` | Public `SpineAsset[]` |
+| `listFeaturedAssets(limit)` | `GET /assets?sort=popular&limit=` | Public `SpineAsset[]` |
+| `getAsset(id, session)` | `GET /assets/:id` | `SpineAsset \| null`. Private assets are only returned to their owner. |
+| `listRelatedAssets(asset, limit)` | `GET /assets/:id/related?limit=` | Public `SpineAsset[]` in the same category |
+| `listRemixesOf(assetId, limit)` | `GET /assets/:id/remixes?limit=` | Public `SpineAsset[]` whose `remixOf.id === assetId` |
+| `getSavedAssetIds(session)` | `GET /me/library/ids` | `string[]`; `[]` for guests without a call |
+| `getLibrary(session)` | `GET /me/library` | `SpineAsset[]`, most recently saved first |
+| `saveToLibrary(session, assetId)` | `PUT /me/library/:assetId` | `204`. Idempotent. |
+| `removeFromLibrary(session, assetId)` | `DELETE /me/library/:assetId` | `204`. Idempotent. |
+| `getMyRemixes(session)` | `GET /me/remixes` | The user's own `SpineAsset[]`, newest first |
+| `setRemixVisibility(session, assetId, visibility)` | `PATCH /me/remixes/:assetId` (JSON `{ visibility }`) | Updated `SpineAsset`, or `null` if it isn't the user's |
+| `saveRemixSkeleton(session, assetId, skeleton, skin)` | `POST /me/remixes/:assetId/skeleton` (JSON `{ skeleton, skin }`, up to 8 MB) | Updated `SpineAsset` pointing at the stored skeleton, or `null` if it isn't the user's |
+| `createRemixJob(session, input, apiVersion)` | `POST /me/remix-jobs` (JSON `RemixInput` + `apiVersion`) | `202` `RemixJob`; `400 { errors }`; `402 { error }` when the monthly allowance is used up |
+| `getRemixJob(session, jobId)` | `GET /me/remix-jobs/:id` | `RemixJob \| null` |
+| `getAccount(session)` | `GET /me` | `Account`: profile, plan, subscription and `usage: { used, limit, resetsAt }` |
+| `createCheckoutUrl(session)` | `POST /billing/checkout` | `{ url }` of Stripe Checkout (or the portal for existing subscribers) |
+| `createPortalUrl(session)` | `POST /billing/portal` | `{ url }` of the Stripe customer portal, or `null` if they never subscribed |
+
+`/assets/:id/download` redirects to the asset's `skeletonUrl`, or serves `buildPlaceholderSkeleton(asset)` for assets without files.
 
 ## Remix flow
 
@@ -40,7 +43,7 @@ Users don't create rigs from scratch. They pick an existing rig and re-texture i
 1. **Pick a base rig.** `/remix` shows a picker with two tabs: **All rigs** (`listAssets`, searchable with `?rq=`) and **My library** (`getLibrary`). Choosing a rig sets `?base=<assetId>`. The asset page's "Remix this rig" button links straight to that URL.
 2. **Describe the new look.** The form posts `RemixInput` to the `action` in `app/routes/remix.tsx`:
    ```ts
-   { baseAssetId, prompt, style, strength /* 0–1 */, keepPalette, keepPosition, keepSize, keepOutline /* booleans */ }
+   { baseAssetId, prompt, style, strength /* 0–1 */, keepPalette, keepPosition, keepSize, keepOutline /* booleans */, visibility /* "public" | "private" */ }
    ```
    `style` is one of `REMIX_STYLES`: `"auto"` (the default) leaves the style to the prompt and otherwise keeps the base rig's, or an `ArtStyle` to force one. The resulting asset's `style` is the base rig's for `"auto"`.
    The action validates it on the server. Return field errors as `data({ errors }, { status: 400 })`; the keys are `base`, `prompt`, `style` and `strength`.
@@ -51,7 +54,7 @@ The backend will need the base rig's atlas regions (slot attachments and their U
 
 If a remix takes longer than a minute or so, consider server-sent events (SSE) or a WebSocket instead of polling. You can add an SSE resource route and replace the `useEffect` polling in `remix.tsx`.
 
-**Who can remix what:** the mock lets users remix any public rig or anything in their library, including other remixes. If some rigs shouldn't be remixable (licensing, premium content), add a flag such as `remixable: boolean` to `SpineAsset`. Filter on it in the picker, hide the "Remix this rig" button, and reject it in `createRemixJob`.
+**Who can remix what:** users can remix any public rig or any of their own remixes, including other remixes. Signing in is required, and each remix counts toward the monthly allowance. If some rigs shouldn't be remixable (licensing, premium content), add a flag such as `remixable: boolean` to `SpineAsset`. Filter on it in the picker, hide the "Remix this rig" button, and reject it in `createRemixJob`.
 
 ## Asset files
 
@@ -79,16 +82,17 @@ The viewer uses the official `@esotericsoftware/spine-player`, pinned to 4.2.x t
 | `SpineRuntime` | Wraps `SpinePlayer`. It's imported dynamically inside an effect, so it never runs during SSR and isn't in the main bundle. It mounts only while near the viewport (`useInView`) and frees the WebGL context when it unmounts, which keeps grids under the browser's limit of about 16 contexts. |
 | `AssetPlayer` | Controls: animation (URL-driven), play/pause, speed and bones overlay. These map to `setAnimation`, `play()`/`pause()`, `player.speed` and `debug.bones`. |
 
-**Example rigs:** `public/spine/` holds Esoteric's official example exports (spineboy, raptor, goblins, coin, owl, powerup), which back a few mock assets. They're for development only (see `public/spine/README.md`). Delete them once the backend serves real files.
+**Example rigs:** `public/spine/` holds the base rigs, including Esoteric's official example exports, which are for development only (see `public/spine/README.md`). The same files are in the R2 bucket under `spine/` (`npm run upload:spine -w backend`); the backend serves URLs from there when R2 is configured.
 
-**Remixes** are painted by the backend: v1 in `backend/src/lib/remix.ts`, v2 in `backend/src/v2/lib/remix.ts`. v2 started as an exact copy of v1 and will change. Both currently work the same way: Muse Spark looks at the base atlas pages and writes an edit prompt and a name, Muse Image repaints each page, and the result is resized and clipped to the original page's alpha so every region still fits its attachment. The remix keeps the base skeleton and gets a new `.atlas` + pages served from the backend at `/files/remixes/<jobId>/` (with CORS). Only rigs with `files` can be remixed. The remix form has a **Remix API** selector, which defaults to v2, and each job records its `apiVersion`. `tint` is now only used by seed data; drop it once no asset sets it.
+**Remixes** are painted by the backend: v1 in `backend/src/lib/remix.ts`, v2 in `backend/src/v2/lib/remix.ts`. v2 started as an exact copy of v1 and will change. Both currently work the same way: Muse Spark looks at the base atlas pages and writes an edit prompt and a name, Muse Image repaints each page, and the result is resized and clipped to the original page's alpha so every region still fits its attachment. The remix keeps the base skeleton and gets a new `.atlas` + pages stored under `remixes/<timestamp>_<jobId>/` in R2 (or locally at the backend's `/files/remixes/` without R2). Only rigs with `files` can be remixed. The remix form has a **Remix API** selector, which defaults to v2, and each job records its `apiVersion`. `tint` is now only used by seed data; drop it once no asset sets it.
 
 If grid performance becomes a problem with many real rigs, show `thumbnailUrl` images in `AssetCard`/`RigPicker` and mount `SpineRuntime` only on hover.
 
 ## Auth & users
 
-- `getCurrentUser(request)` is called by every loader and action that needs a user. Make it the single source of truth.
-- `SpineAsset.visibility` controls exposure. Only `public` assets appear in Explore, the sitemap and search engines. New remixes start `private`. Add a publish action when you want users to share their remixes.
+- Sign-in is Google via Supabase Auth: `/login` starts the OAuth flow, `/auth/callback` exchanges the code for session cookies, and `/logout` (POST) clears them. Guests can browse Explore, asset pages and the remix picker; saving, remixing, the library and `/account` need an account.
+- `SpineAsset.visibility` controls exposure. Only `public` assets appear in Explore, the sitemap and search engines. The user picks a remix's visibility in the remix form (**Who can see it**, default private). Public remixes appear in Explore and on the base rig's page, and anyone can remix them in turn; private ones are only shown to their owner (others get a 404). The owner can change it later with `<VisibilityToggle>` (asset page, remix result, and **My Library → Remixes**).
+- Plans: everyone gets `FREE_MONTHLY_REMIXES` (default 3) a calendar month; a Stripe subscription gives `PRO_MONTHLY_REMIXES` (default 100). `/account` shows usage and opens Stripe Checkout or the customer portal. The backend's Stripe webhook is the only thing that changes a user's plan.
 - The theme cookie (`app/lib/theme.server.ts`) is independent of auth and can stay as is.
 
 ## Error handling

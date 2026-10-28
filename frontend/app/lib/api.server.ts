@@ -1,113 +1,99 @@
-// Data layer for the app. Every route loader/action goes through these functions,
-// so connecting the real backend means replacing the bodies below — the UI
-// doesn't need to change. See BACKEND.md for the endpoint contract.
-//
-// Assets and libraries are an in-memory mock that resets when the server restarts.
-// Remix jobs run on the backend (BACKEND_URL).
+// Data layer for the app. Every route loader/action goes through these functions, which call the
+// backend (BACKEND_URL) over HTTP. Calls for the signed-in user pass their Session, whose access
+// token the backend verifies. See BACKEND.md for the endpoint contract.
 
-import { MOCK_ASSETS } from "~/lib/mock-data.server";
-import type {
-  AssetAccent,
-  AssetQuery,
-  RemixApiVersion,
-  RemixInput,
-  RemixJob,
-  SpineAsset,
-  SpineAssetFiles,
-} from "~/lib/types";
+import type { Session } from "~/lib/auth.server";
+import type { AssetQuery, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
-// Survive Vite HMR in dev by parking the mock store on globalThis.
-interface MockStore {
-  assets: Map<string, SpineAsset>;
-  /** userId -> saved asset ids (most recent first) */
-  libraries: Map<string, string[]>;
-  jobs: Map<string, RemixJob & { userId: string }>;
-}
-const globalStore = globalThis as typeof globalThis & { __spineMock?: MockStore };
-const store: MockStore = (globalStore.__spineMock ??= {
-  assets: new Map(MOCK_ASSETS.map((a) => [a.id, a])),
-  libraries: new Map([["demo-user", ["knight-errant", "spinning-coin"]]]),
-  jobs: new Map(),
-});
+const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
-// Ensure assets are always up-to-date even when globalStore persists across HMR
-for (const a of MOCK_ASSETS) {
-  const existing = store.assets.get(a.id);
-  if (!existing) {
-    store.assets.set(a.id, a);
-  } else {
-    store.assets.set(a.id, { ...a, saves: existing.saves, downloads: existing.downloads });
+class BackendError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: unknown,
+    path: string,
+  ) {
+    super(`Backend ${path} failed (${status}): ${JSON.stringify(body).slice(0, 300)}`);
   }
 }
 
-const MOCK_LATENCY_MS = 150;
-const delay = (ms = MOCK_LATENCY_MS) => new Promise((r) => setTimeout(r, ms));
+async function backend<T>(
+  path: string,
+  { session, method = "GET", body }: { session?: Session | null; method?: string; body?: unknown } = {},
+): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (session) headers.authorization = `Bearer ${session.accessToken}`;
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  const parsed: unknown = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new BackendError(res.status, parsed, path);
+  return parsed as T;
+}
+
+/** Like backend(), but resolves to null on 404. */
+async function backendOrNull<T>(path: string, options?: Parameters<typeof backend>[1]): Promise<T | null> {
+  try {
+    return await backend<T>(path, options);
+  } catch (error) {
+    if (error instanceof BackendError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+const id = encodeURIComponent;
+
+/** The `error` (or first field error) of a 4xx response body. */
+function errorMessage(body: unknown, fallback: string): string {
+  if (typeof body !== "object" || body === null) return fallback;
+  const { error, errors } = body as { error?: unknown; errors?: Record<string, unknown> };
+  if (typeof error === "string") return error;
+  const first = errors && Object.values(errors).find((v) => typeof v === "string");
+  return typeof first === "string" ? first : fallback;
+}
 
 // ---------------------------------------------------------------------------
 // Assets
 // ---------------------------------------------------------------------------
 
-/** BACKEND: GET /assets?q=&category=&sort= */
+/** GET /assets?q=&category=&sort= — public assets only. */
 export async function listAssets(query: AssetQuery = {}): Promise<SpineAsset[]> {
-  await delay();
-  const q = query.q?.trim().toLowerCase();
-  let results = [...store.assets.values()].filter((a) => a.visibility === "public");
-
-  if (query.category) results = results.filter((a) => a.category === query.category);
-  if (q) {
-    results = results.filter((a) =>
-      [a.name, a.description, a.prompt ?? "", ...a.tags]
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
-    );
-  }
-
-  switch (query.sort ?? "popular") {
-    case "newest":
-      results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      break;
-    case "name":
-      results.sort((a, b) => a.name.localeCompare(b.name));
-      break;
-    default:
-      results.sort((a, b) => b.saves - a.saves);
-  }
-  return results;
+  const params = new URLSearchParams();
+  if (query.q?.trim()) params.set("q", query.q.trim());
+  if (query.category) params.set("category", query.category);
+  if (query.sort) params.set("sort", query.sort);
+  return backend<SpineAsset[]>(`/assets?${params}`);
 }
 
-/** BACKEND: GET /assets/featured */
+/** GET /assets?sort=popular&limit= */
 export async function listFeaturedAssets(limit = 4): Promise<SpineAsset[]> {
-  const all = await listAssets({ sort: "popular" });
-  return all.slice(0, limit);
+  return backend<SpineAsset[]>(`/assets?sort=popular&limit=${limit}`);
 }
 
-/** BACKEND: GET /assets/:id/related — same category, for internal linking on asset pages. */
+/** GET /assets/:id/related — same category, for internal linking on asset pages. */
 export async function listRelatedAssets(asset: SpineAsset, limit = 4): Promise<SpineAsset[]> {
-  const sameCategory = await listAssets({ category: asset.category, sort: "popular" });
-  return sameCategory.filter((a) => a.id !== asset.id).slice(0, limit);
+  return (await backendOrNull<SpineAsset[]>(`/assets/${id(asset.id)}/related?limit=${limit}`)) ?? [];
 }
 
-/** BACKEND: GET /assets/:id/remixes — public remixes built on this rig. */
+/** GET /assets/:id/remixes — public remixes built on this rig. */
 export async function listRemixesOf(assetId: string, limit = 8): Promise<SpineAsset[]> {
-  const all = await listAssets({ sort: "popular" });
-  return all.filter((a) => a.remixOf?.id === assetId).slice(0, limit);
+  return backend<SpineAsset[]>(`/assets/${id(assetId)}/remixes?limit=${limit}`);
 }
 
-/** BACKEND: GET /assets/:id */
-export async function getAsset(id: string): Promise<SpineAsset | null> {
-  await delay();
-  return store.assets.get(id) ?? null;
+/** GET /assets/:id — private assets only for their owner. */
+export async function getAsset(assetId: string, session: Session | null): Promise<SpineAsset | null> {
+  return backendOrNull<SpineAsset>(`/assets/${id(assetId)}`, { session });
 }
 
 /**
- * BACKEND: GET /assets/:id/skeleton — should stream the real .json/.skel file
- * (or return a signed storage URL to redirect to).
- * The mock builds a minimal Spine JSON from the asset's metadata.
+ * For assets without exported files: a minimal Spine JSON built from the asset's metadata, so the
+ * download link still gives something to open.
  */
-export async function getSkeletonExport(id: string): Promise<object | null> {
-  const asset = await getAsset(id);
-  if (!asset) return null;
+export function buildPlaceholderSkeleton(asset: SpineAsset): object {
   return {
     skeleton: { hash: asset.id, spine: `${asset.spineVersion}.00`, x: -64, y: 0, width: 128, height: 160 },
     bones: [{ name: "root" }, { name: "body", parent: "root", y: 60 }],
@@ -126,227 +112,121 @@ export async function getSkeletonExport(id: string): Promise<object | null> {
 // Library
 // ---------------------------------------------------------------------------
 
-/** BACKEND: GET /me/library/ids — cheap lookup so cards can show saved state. */
-export async function getSavedAssetIds(userId: string): Promise<string[]> {
-  return [...(store.libraries.get(userId) ?? [])];
+/** GET /me/library/ids — cheap lookup so cards can show saved state. Empty for guests. */
+export async function getSavedAssetIds(session: Session | null): Promise<string[]> {
+  return session ? backend<string[]>("/me/library/ids", { session }) : [];
 }
 
-/** BACKEND: GET /me/library */
-export async function getLibrary(userId: string): Promise<SpineAsset[]> {
-  await delay();
-  const ids = store.libraries.get(userId) ?? [];
-  return ids.flatMap((id) => store.assets.get(id) ?? []);
+/** GET /me/library — most recently saved first. */
+export async function getLibrary(session: Session): Promise<SpineAsset[]> {
+  return backend<SpineAsset[]>("/me/library", { session });
 }
 
-/** BACKEND: GET /me/remixes */
-export async function getMyRemixes(userId: string): Promise<SpineAsset[]> {
-  await delay();
-  return [...store.jobs.values()]
-    .filter((j) => j.userId === userId && j.asset)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .flatMap((j) => j.asset ?? []);
+/** GET /me/remixes — newest first. */
+export async function getMyRemixes(session: Session): Promise<SpineAsset[]> {
+  return backend<SpineAsset[]>("/me/remixes", { session });
 }
 
-/** BACKEND: PUT /me/library/:assetId */
-export async function saveToLibrary(userId: string, assetId: string): Promise<void> {
-  await delay();
-  const asset = store.assets.get(assetId);
-  if (!asset) throw new Response("Asset not found", { status: 404 });
-  const ids = store.libraries.get(userId) ?? [];
-  if (!ids.includes(assetId)) {
-    store.libraries.set(userId, [assetId, ...ids]);
-    asset.saves += 1;
-  }
+/** PUT /me/library/:assetId — idempotent. */
+export async function saveToLibrary(session: Session, assetId: string): Promise<void> {
+  await backend(`/me/library/${id(assetId)}`, { session, method: "PUT" });
 }
 
-/** BACKEND: DELETE /me/library/:assetId */
-export async function removeFromLibrary(userId: string, assetId: string): Promise<void> {
-  await delay();
-  const ids = store.libraries.get(userId) ?? [];
-  if (ids.includes(assetId)) {
-    store.libraries.set(userId, ids.filter((id) => id !== assetId));
-    const asset = store.assets.get(assetId);
-    if (asset) asset.saves = Math.max(0, asset.saves - 1);
-  }
+/** DELETE /me/library/:assetId — idempotent. */
+export async function removeFromLibrary(session: Session, assetId: string): Promise<void> {
+  await backend(`/me/library/${id(assetId)}`, { session, method: "DELETE" });
+}
+
+/** PATCH /me/remixes/:assetId — publish or unpublish one of the user's remixes. Null if it isn't theirs. */
+export async function setRemixVisibility(
+  session: Session,
+  assetId: string,
+  visibility: SpineAsset["visibility"],
+): Promise<SpineAsset | null> {
+  return backendOrNull<SpineAsset>(`/me/remixes/${id(assetId)}`, { session, method: "PATCH", body: { visibility } });
 }
 
 // ---------------------------------------------------------------------------
 // Remixing (re-texture an existing rig)
 // ---------------------------------------------------------------------------
 
-// The backend runs the job (Muse plans the look, Muse Image repaints the atlas pages).
-// Assets and users still live in the mock store above, so jobs are tracked here too.
-const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
+export type CreateRemixResult =
+  | { ok: true; job: RemixJob }
+  /** `limitReached` when the monthly allowance is used up (402). */
+  | { ok: false; error: string; field: "base" | null; limitReached: boolean };
 
-/** The parts of the backend's job we read. See backend/src/lib/types.ts. */
-interface BackendRemixJob {
-  id: string;
-  status: RemixJob["status"];
-  progress: number;
-  stage: string;
-  editPrompt: string | null;
-  promptStatus: RemixJob["promptStatus"];
-  result: { name: string; atlasUrl: string; textureUrls: string[] } | null;
-  error: string | null;
-}
-
-/**
- * BACKEND: POST /{v1,v2}/remixes  body = RemixInput + the base rig's atlas
- * Returns immediately with a queued job; the UI polls getRemixJob.
- * Returns null if the base asset doesn't exist or has no files to repaint.
- */
+/** POST /me/remix-jobs — returns right away with a queued job; the UI polls getRemixJob. */
 export async function createRemixJob(
-  userId: string,
+  session: Session,
   input: RemixInput,
   apiVersion: RemixApiVersion = "v2",
-): Promise<RemixJob | null> {
-  const base = store.assets.get(input.baseAssetId);
-  if (!base?.files) return null;
-
-  const res = await fetch(`${BACKEND_URL}/${apiVersion}/remixes`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...input,
-      base: { name: base.name, atlasUrl: base.files.atlasUrl, premultipliedAlpha: base.files.premultipliedAlpha },
-    }),
-  });
-  if (!res.ok) throw new Error(`POST /${apiVersion}/remixes failed (${res.status}): ${await res.text()}`);
-  const remote = (await res.json()) as BackendRemixJob;
-
-  const job: RemixJob & { userId: string } = {
-    id: remote.id,
-    userId,
-    status: "queued",
-    progress: 0,
-    stage: "Queued",
-    input,
-    apiVersion,
-    base: {
-      id: base.id,
-      name: base.name,
-      category: base.category,
-      accent: base.accent,
-      animations: base.animations,
-      files: base.files,
-      tint: base.tint,
-    },
-    createdAt: new Date().toISOString(),
-    editPrompt: null,
-    promptStatus: "original",
-    asset: null,
-    error: null,
-  };
-  store.jobs.set(job.id, job);
-  applyBackendJob(job, remote);
-  return publicJob(job);
+): Promise<CreateRemixResult> {
+  try {
+    const job = await backend<RemixJob>("/me/remix-jobs", { session, method: "POST", body: { ...input, apiVersion } });
+    return { ok: true, job };
+  } catch (error) {
+    if (!(error instanceof BackendError) || (error.status !== 400 && error.status !== 402)) throw error;
+    const fieldErrors = (error.body as { errors?: { base?: unknown } } | null)?.errors;
+    return {
+      ok: false,
+      error: errorMessage(error.body, "Couldn't start the remix."),
+      field: typeof fieldErrors?.base === "string" ? "base" : null,
+      limitReached: error.status === 402,
+    };
+  }
 }
 
-/** BACKEND: GET /{v1,v2}/remixes/:id (or push updates over SSE/WebSocket). */
-export async function getRemixJob(userId: string, jobId: string): Promise<RemixJob | null> {
-  const job = store.jobs.get(jobId);
-  if (!job || job.userId !== userId) return null;
-  if (job.status === "queued" || job.status === "running") {
-    const res = await fetch(`${BACKEND_URL}/${job.apiVersion}/remixes/${encodeURIComponent(jobId)}`);
-    if (res.status === 404) {
-      // The backend keeps jobs in memory, so a restart loses them.
-      job.status = "failed";
-      job.error = "The remix service restarted. Try again.";
-    } else if (!res.ok) {
-      throw new Error(`GET /${job.apiVersion}/remixes/${jobId} failed (${res.status})`);
-    } else {
-      applyBackendJob(job, (await res.json()) as BackendRemixJob);
-    }
-  }
-  return publicJob(job);
+/** GET /me/remix-jobs/:id — null if it isn't the user's. */
+export async function getRemixJob(session: Session, jobId: string): Promise<RemixJob | null> {
+  return backendOrNull<RemixJob>(`/me/remix-jobs/${id(jobId)}`, { session });
 }
 
 /**
- * BACKEND: POST /skeletons  body = { skeleton } → { skeletonUrl }
+ * POST /me/remixes/:assetId/skeleton  body = { skeleton, skin }
  * Replaces a remix's skeleton with one the user edited on the remix page. Only the user who made
  * the remix can do this. Returns the updated asset, or null if it isn't theirs.
  */
 export async function saveRemixSkeleton(
-  userId: string,
+  session: Session,
   assetId: string,
   skeleton: object,
   skin: string | null,
 ): Promise<SpineAsset | null> {
-  const job = [...store.jobs.values()].find((j) => j.userId === userId && j.asset?.id === assetId);
-  const asset = job?.asset;
-  if (!job || !asset?.files) return null;
-
-  const res = await fetch(`${BACKEND_URL}/skeletons`, {
+  return backendOrNull<SpineAsset>(`/me/remixes/${id(assetId)}/skeleton`, {
+    session,
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ skeleton }),
+    body: { skeleton, skin },
   });
-  if (!res.ok) throw new Error(`POST /skeletons failed (${res.status}): ${await res.text()}`);
-  const { skeletonUrl } = (await res.json()) as { skeletonUrl: string };
-
-  const updated: SpineAsset = { ...asset, files: { ...asset.files, skeletonUrl, skin: skin ?? asset.files.skin } };
-  job.asset = updated;
-  store.assets.set(updated.id, updated);
-  return updated;
 }
 
-function publicJob({ userId: _userId, ...job }: RemixJob & { userId: string }): RemixJob {
-  return job;
+// ---------------------------------------------------------------------------
+// Account & billing
+// ---------------------------------------------------------------------------
+
+export interface Account {
+  user: { id: string; name: string; avatarUrl: string | null };
+  plan: "free" | "pro";
+  /** Admins have no remix limit and can see and moderate any asset. */
+  isAdmin: boolean;
+  subscription: { status: string; currentPeriodEnd: string | null } | null;
+  /** Remixes started this calendar month (UTC) that didn't fail, and the plan's allowance (null = unlimited). */
+  usage: { used: number; limit: number | null; resetsAt: string };
+  billingEnabled: boolean;
 }
 
-function applyBackendJob(job: RemixJob, remote: BackendRemixJob) {
-  job.status = remote.status;
-  job.progress = remote.progress;
-  job.stage = remote.stage;
-  job.editPrompt = remote.editPrompt;
-  job.promptStatus = remote.promptStatus;
-  job.error = remote.error;
-  if (remote.status !== "succeeded" || job.asset) return;
-
-  const base = store.assets.get(job.base.id);
-  if (!remote.result || !base?.files) {
-    job.status = "failed";
-    job.error = "The base rig is no longer available.";
-    return;
-  }
-  job.asset = buildRemix(job, base, base.files, remote.result);
-  store.assets.set(job.asset.id, job.asset);
+/** GET /me */
+export async function getAccount(session: Session): Promise<Account> {
+  return backend<Account>("/me", { session });
 }
 
-const ACCENTS: AssetAccent[] = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
+/** POST /billing/checkout → Stripe Checkout URL (or the portal, for existing subscribers). */
+export async function createCheckoutUrl(session: Session): Promise<string> {
+  const { url } = await backend<{ url: string }>("/billing/checkout", { session, method: "POST" });
+  return url;
+}
 
-function buildRemix(
-  job: RemixJob,
-  base: SpineAsset,
-  baseFiles: SpineAssetFiles,
-  result: NonNullable<BackendRemixJob["result"]>,
-): SpineAsset {
-  const { input } = job;
-  const name = result.name || `${base.name} Remix`;
-  // Readable slug + short suffix for uniqueness, e.g. "crimson-ninja-wandering-monk-3f9a1c2b".
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const id = `${slug || "remix"}-${job.id.slice(4)}`;
-
-  return {
-    // Skeleton, bones, slots and animations come straight from the base rig.
-    ...base,
-    id,
-    name,
-    description: `Remix of ${base.name}: ${input.prompt}`,
-    style: input.style === "auto" ? base.style : input.style,
-    tags: [...new Set([...base.tags, "remix"])],
-    prompt: input.prompt,
-    remixOf: { id: base.id, name: base.name },
-    // Remixes start private (noindex, not in sitemap). BACKEND: add a publish flow.
-    visibility: "private",
-    author: { id: "you", name: "You" },
-    createdAt: new Date().toISOString(),
-    accent: input.keepPalette ? base.accent : ACCENTS[(ACCENTS.indexOf(base.accent) + 1) % ACCENTS.length],
-    downloads: 0,
-    saves: 0,
-    thumbnailUrl: null,
-    // Same skeleton, new atlas pages painted by the backend.
-    files: { ...baseFiles, atlasUrl: result.atlasUrl, textureUrls: result.textureUrls },
-    tint: null,
-  };
+/** POST /billing/portal → Stripe customer portal URL, or null if the user never subscribed. */
+export async function createPortalUrl(session: Session): Promise<string | null> {
+  const res = await backendOrNull<{ url: string }>("/billing/portal", { session, method: "POST" });
+  return res?.url ?? null;
 }

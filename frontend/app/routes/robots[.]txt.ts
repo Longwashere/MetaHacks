@@ -7,6 +7,9 @@ export function loader({ request }: Route.LoaderArgs) {
     "Allow: /",
     // Private / non-content pages
     "Disallow: /library",
+    "Disallow: /account",
+    "Disallow: /login",
+    "Disallow: /auth/",
     "Disallow: /api/",
     "Disallow: /assets/*/download",
     "",

@@ -1,8 +1,7 @@
 import path from "node:path";
 import { isSafePageName, parseAtlas } from "./atlas.js";
-import { ASSET_BASE_URL } from "./config.js";
 import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy } from "./meta.js";
-import { fileUrl, putFile } from "./storage.js";
+import { putFile } from "./storage.js";
 import { decodePage, fitToPage, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
 
@@ -110,6 +109,7 @@ export async function runRemix(
   await writePrompts();
 
   let reference: string | null = null;
+  const pageKeys: string[] = [];
   for (const [i, page] of pages.entries()) {
     const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background);
     const generated = await withProgress(
@@ -151,29 +151,28 @@ export async function runRemix(
     await putFile(folder, `${path.parse(page.name).name}.generated.png`, generated);
     // Kept outlines reuse the original alpha; otherwise the model's own shapes are keyed out.
     const keyedRects = input.keepOutline ? null : page.rects;
-    await putFile(
+    const pageKey = await putFile(
       folder,
       page.name,
       await fitToPage(generated, modelInput, images[i], base.premultipliedAlpha, keyedRects),
     );
+    pageKeys.push(pageKey);
     reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
   }
 
   onProgress(0.95, "Packing atlas");
   // Regions are unchanged and page names are kept, so the base atlas works as-is.
-  await putFile(folder, "remix.atlas", atlasText);
+  const atlasKey = await putFile(folder, "remix.atlas", atlasText);
 
   return {
     name: plan.name,
-    atlasUrl: fileUrl(folder, "remix.atlas"),
-    textureUrls: pages.map((p) => fileUrl(folder, p.name)),
+    atlas: atlasKey,
+    textures: pageKeys,
   };
 }
 
-/** Fetches a base rig file. Paths come from the request, so they stay on ASSET_BASE_URL. */
-async function fetchBaseFile(filePath: string, signal: AbortSignal): Promise<Buffer> {
-  const url = new URL(filePath, `${ASSET_BASE_URL}/`);
-  if (url.origin !== new URL(ASSET_BASE_URL).origin) throw new Error("The base rig's files aren't available.");
+/** Fetches a base rig file. URLs are built by the backend from the asset's storage keys. */
+async function fetchBaseFile(url: string, signal: AbortSignal): Promise<Buffer> {
   const res = await fetch(url, { signal });
   if (!res.ok) {
     console.error(`Fetching ${url} failed (${res.status})`);

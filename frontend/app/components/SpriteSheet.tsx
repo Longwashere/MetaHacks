@@ -125,6 +125,9 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
             <img
               key={url}
               src={url}
+              // Same CORS mode as the Spine runtime's loader. A plain request caches a response
+              // without CORS headers, which the viewer's WebGL load then reuses and rejects.
+              crossOrigin="anonymous"
               alt={`${source.asset.name} texture atlas${pages.length > 1 ? `, page ${page + 1}` : ""}`}
               onLoad={(e) => setSize({ url, w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
               className={cn("block", actualSize ? "max-w-none" : "h-auto max-w-full")}

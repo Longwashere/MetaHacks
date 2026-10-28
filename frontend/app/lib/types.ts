@@ -109,6 +109,8 @@ export interface RemixInput {
   keepPosition: boolean;
   keepSize: boolean;
   keepOutline: boolean;
+  /** Who can see the finished remix. Public remixes appear in Explore and anyone can remix them. */
+  visibility: SpineAsset["visibility"];
 }
 
 export interface RemixJob {

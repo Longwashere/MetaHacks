@@ -1,12 +1,13 @@
 import { data } from "react-router";
 import type { Route } from "./+types/api.remix-skeleton";
 import { saveRemixSkeleton } from "~/lib/api.server";
-import { getCurrentUser } from "~/lib/auth.server";
+import { getSession } from "~/lib/auth.server";
 
 // Saves a remix's skeleton with the tweak panel's edits baked in. The remix page posts
 // { assetId, skeleton, skin } as a JSON string (text/plain) via useFetcher.
-export async function action({ request }: Route.ActionArgs) {
-  const user = await getCurrentUser(request);
+export async function action({ request, context }: Route.ActionArgs) {
+  const session = getSession(context);
+  if (!session) return data({ ok: false as const, error: "Sign in to save edits." }, { status: 401 });
   let body: unknown = null;
   try {
     body = JSON.parse(await request.text());
@@ -25,7 +26,7 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: false as const, error: "Invalid skin." }, { status: 400 });
   }
 
-  const asset = await saveRemixSkeleton(user.id, assetId, skeleton, skin);
+  const asset = await saveRemixSkeleton(session, assetId, skeleton, skin);
   if (!asset) return data({ ok: false as const, error: "You can only save edits to your own remixes." }, { status: 403 });
   return { ok: true as const, assetId: asset.id };
 }

@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Palette, Search, SlidersHorizontal, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Globe, Loader2, Lock, Palette, Search, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -7,6 +7,7 @@ import {
   data,
   redirect,
   useFetcher,
+  useLocation,
   useNavigation,
   useRevalidator,
   useSearchParams,
@@ -17,6 +18,7 @@ import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
 import { RigPicker } from "~/components/RigPicker";
 import { SaveButton } from "~/components/SaveButton";
+import { VisibilityToggle } from "~/components/VisibilityToggle";
 import { SpinePreview } from "~/components/SpinePreview";
 import { SpriteSheet } from "~/components/SpriteSheet";
 import { TweakPanel } from "~/components/TweakPanel";
@@ -48,6 +50,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Textarea } from "~/components/ui/textarea";
 import {
   createRemixJob,
+  getAccount,
   getAsset,
   getLibrary,
   getMyRemixes,
@@ -55,7 +58,7 @@ import {
   getSavedAssetIds,
   listAssets,
 } from "~/lib/api.server";
-import { getCurrentUser } from "~/lib/auth.server";
+import { getSession, requireSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
 import { hasSavableTweaks } from "~/lib/spine-tweak-bake";
 import { DEFAULT_TWEAKS, type RigInfo, type SpineTweakBinding, type SpineTweaks, type TweakExporter } from "~/lib/spine-tweaks";
@@ -83,26 +86,28 @@ export function meta({ loaderData }: Route.MetaArgs) {
 
 type PickerSource = "library" | "all";
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getCurrentUser(request);
+export async function loader({ request, context }: Route.LoaderArgs) {
+  // Guests can pick and preview rigs; starting a remix needs an account.
+  const session = getSession(context);
   const params = new URL(request.url).searchParams;
   const jobId = params.get("job");
   const rq = params.get("rq")?.slice(0, 200) ?? "";
   const source: PickerSource = params.get("src") === "library" ? "library" : "all";
 
-  const job = jobId ? await getRemixJob(user.id, jobId) : null;
+  const job = jobId && session ? await getRemixJob(session, jobId) : null;
   const baseId = params.get("base") ?? job?.base.id ?? null;
 
-  const [base, savedIds, myRemixes, pickerRigs] = await Promise.all([
-    baseId ? getAsset(baseId) : null,
-    getSavedAssetIds(user.id),
-    getMyRemixes(user.id),
+  const [base, savedIds, myRemixes, pickerRigs, account] = await Promise.all([
+    baseId ? getAsset(baseId, session) : null,
+    getSavedAssetIds(session),
+    session ? getMyRemixes(session) : [],
     // Only load the picker when no rig is selected yet.
     baseId
       ? []
       : source === "library"
-        ? getLibrary(user.id)
+        ? session ? getLibrary(session) : []
         : listAssets({ q: rq, sort: "popular" }),
+    session ? getAccount(session) : null,
   ]);
 
   return {
@@ -114,6 +119,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     pickerRigs: source === "library" && rq ? filterRigs(pickerRigs, rq) : pickerRigs,
     recent: myRemixes.filter((a) => a.id !== job?.asset?.id).slice(0, 4),
     savedIds,
+    signedIn: session !== null,
+    usage: account && { ...account.usage, plan: account.plan },
     siteUrl: getSiteUrl(request),
   };
 }
@@ -123,14 +130,15 @@ function filterRigs(rigs: SpineAsset[], q: string) {
   return rigs.filter((r) => [r.name, r.description, ...r.tags].join(" ").toLowerCase().includes(needle));
 }
 
-type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength" | "apiVersion", string>>;
+/** `limit`: the monthly remix allowance is used up. */
+type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength" | "apiVersion" | "limit", string>>;
 
 const isStyle = (v: unknown): v is RemixStyle => typeof v === "string" && REMIX_STYLES.some((s) => s === v);
 const isApiVersion = (v: unknown): v is RemixApiVersion =>
   typeof v === "string" && REMIX_API_VERSIONS.some((s) => s === v);
 
-export async function action({ request }: Route.ActionArgs) {
-  const user = await getCurrentUser(request);
+export async function action({ request, context }: Route.ActionArgs) {
+  const session = requireSession(context, request);
   const form = await request.formData();
   const errors: FieldErrors = {};
 
@@ -143,6 +151,8 @@ export async function action({ request }: Route.ActionArgs) {
   const keepSize = form.get("keepSize") === "on";
   const keepOutline = form.get("keepOutline") === "on";
   const apiVersion = form.get("apiVersion");
+  // Private unless the user chose public.
+  const visibility = form.get("visibility") === "public" ? "public" : "private";
 
   if (!baseAssetId) errors.base = "Choose a rig to remix.";
   if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters.";
@@ -155,13 +165,13 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ errors }, { status: 400 });
   }
 
-  const base = await getAsset(baseAssetId);
+  const base = await getAsset(baseAssetId, session);
   if (!base?.files) {
     const message = base ? "This rig has no textures to repaint yet. Choose another one." : "That rig no longer exists.";
     return data({ errors: { base: message } satisfies FieldErrors }, { status: 400 });
   }
 
-  const job = await createRemixJob(user.id, {
+  const result = await createRemixJob(session, {
     baseAssetId,
     prompt,
     style,
@@ -170,10 +180,14 @@ export async function action({ request }: Route.ActionArgs) {
     keepPosition,
     keepSize,
     keepOutline,
+    visibility,
   }, apiVersion);
-  if (!job) return data({ errors: { base: "That rig no longer exists." } satisfies FieldErrors }, { status: 400 });
+  if (!result.ok) {
+    const key = result.limitReached ? "limit" : result.field === "base" ? "base" : "prompt";
+    return data({ errors: { [key]: result.error } satisfies FieldErrors }, { status: result.limitReached ? 402 : 400 });
+  }
 
-  throw redirect(`/remix?${new URLSearchParams({ base: baseAssetId, job: job.id })}`);
+  throw redirect(`/remix?${new URLSearchParams({ base: baseAssetId, job: result.job.id })}`);
 }
 
 /** Optional prompt constraints; all off by default so the model can reshape parts. */
@@ -191,7 +205,7 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, job, anim, rq, source, pickerRigs, recent, savedIds } = loaderData;
+  const { base, job, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData?.errors ?? {};
   const { revalidate } = useRevalidator();
@@ -324,7 +338,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       <CardDescription>Textures are repainted to fit the existing atlas regions, so every animation keeps working.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <RemixForm key={base.id} base={base} errors={errors} />
+                      <RemixForm key={base.id} base={base} errors={errors} signedIn={signedIn} usage={usage} />
                     </CardContent>
                   </TabsContent>
                   <TabsContent value="tweak" forceMount className="data-[state=inactive]:hidden">
@@ -374,6 +388,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       </p>
                     </div>
                     <SaveButton assetId={job.asset.id} assetName={job.asset.name} saved={savedIds.includes(job.asset.id)} />
+                    <VisibilityToggle assetId={job.asset.id} assetName={job.asset.name} visibility={job.asset.visibility} />
                     <Button asChild variant="outline">
                       <Link to={assetPath(job.asset)}>
                         <ExternalLink /> Open
@@ -668,7 +683,26 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   );
 }
 
-function RemixForm({ base, errors }: { base: SpineAsset; errors: FieldErrors }) {
+interface RemixUsage {
+  used: number;
+  /** null = unlimited (admins). */
+  limit: number | null;
+  resetsAt: string;
+  plan: "free" | "pro";
+}
+
+function RemixForm({
+  base,
+  errors,
+  signedIn,
+  usage,
+}: {
+  base: SpineAsset;
+  errors: FieldErrors;
+  signedIn: boolean;
+  usage: RemixUsage | null;
+}) {
+  const location = useLocation();
   const [prompt, setPrompt] = useState("");
   const [strength, setStrength] = useState(60);
   const navigation = useNavigation();
@@ -768,6 +802,26 @@ function RemixForm({ base, errors }: { base: SpineAsset; errors: FieldErrors }) 
       <FieldError id="base-error" message={errors.base} />
 
       <div className="flex flex-col gap-2">
+        <Label htmlFor="visibility">Who can see it</Label>
+        <Select name="visibility" defaultValue="private">
+          <SelectTrigger id="visibility" className="w-full" aria-describedby="visibility-hint">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="private">
+              <Lock /> Private — only you
+            </SelectItem>
+            <SelectItem value="public">
+              <Globe /> Public — shown in Explore, anyone can remix it
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p id="visibility-hint" className="text-xs text-muted-foreground">
+          You can change this later from the remix or your library.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
         <Label htmlFor="apiVersion">Remix API</Label>
         <Select name="apiVersion" defaultValue="v2">
           <SelectTrigger id="apiVersion" className="w-full sm:w-48" aria-invalid={Boolean(errors.apiVersion)}>
@@ -784,10 +838,57 @@ function RemixForm({ base, errors }: { base: SpineAsset; errors: FieldErrors }) 
         <FieldError id="apiVersion-error" message={errors.apiVersion} />
       </div>
 
-      <Button type="submit" size="lg" disabled={submitting} className="w-full">
-        {submitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
-        {submitting ? "Starting…" : "Remix textures"}
-      </Button>
+      {errors.limit && (
+        <Alert>
+          <AlertCircle />
+          <AlertTitle>Monthly remixes used up</AlertTitle>
+          <AlertDescription>
+            {errors.limit}
+            {usage?.plan !== "pro" && (
+              <Button asChild size="sm" className="mt-2">
+                <Link to="/account">Upgrade to Pro</Link>
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {signedIn ? (
+        <div className="flex flex-col gap-2">
+          <Button type="submit" size="lg" disabled={submitting} className="w-full">
+            {submitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            {submitting ? "Starting…" : "Remix textures"}
+          </Button>
+          {usage && <RemixAllowance usage={usage} />}
+        </div>
+      ) : (
+        <Button asChild size="lg" className="w-full">
+          <Link to={`/login?${new URLSearchParams({ next: location.pathname + location.search })}`} rel="nofollow">
+            <Sparkles /> Sign in to remix
+          </Link>
+        </Button>
+      )}
     </Form>
+  );
+}
+
+function RemixAllowance({ usage }: { usage: RemixUsage }) {
+  if (usage.limit === null) {
+    return <p className="text-center text-xs text-muted-foreground">Unlimited remixes (admin) · {usage.used} this month</p>;
+  }
+  const left = Math.max(usage.limit - usage.used, 0);
+  const resets = new Date(usage.resetsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return (
+    <p className="text-center text-xs text-muted-foreground">
+      {left} of {usage.limit} {usage.plan === "pro" ? "Pro" : "free"} remixes left this month · resets {resets}
+      {usage.plan === "free" && (
+        <>
+          {" · "}
+          <Link to="/account" className="font-medium text-foreground underline-offset-4 hover:underline">
+            Upgrade
+          </Link>
+        </>
+      )}
+    </p>
   );
 }

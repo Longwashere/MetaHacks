@@ -4,13 +4,14 @@ import type { Route } from "./+types/asset";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
 import { SaveButton } from "~/components/SaveButton";
+import { VisibilityToggle } from "~/components/VisibilityToggle";
 import type { SpineViewMode } from "~/lib/types";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Separator } from "~/components/ui/separator";
 import { getAsset, getSavedAssetIds, listRelatedAssets, listRemixesOf } from "~/lib/api.server";
-import { getCurrentUser } from "~/lib/auth.server";
+import { getSession } from "~/lib/auth.server";
 import { formatCount, formatDate } from "~/lib/format";
 import {
   SITE_NAME,
@@ -24,11 +25,11 @@ import {
 } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
 
-export async function loader({ request, params }: Route.LoaderArgs) {
-  const user = await getCurrentUser(request);
+export async function loader({ request, params, context }: Route.LoaderArgs) {
+  const session = getSession(context);
   const [asset, savedIds] = await Promise.all([
-    getAsset(params.assetId),
-    getSavedAssetIds(user.id),
+    getAsset(params.assetId, session),
+    getSavedAssetIds(session),
   ]);
   if (!asset) throw data("Asset not found", { status: 404 });
 
@@ -47,6 +48,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     related: related.filter((a) => !remixes.some((r) => r.id === a.id)),
     remixes,
     savedIds,
+    // Remixes are authored by their owner's user id; official rigs never match. Admins can moderate any asset.
+    canManage: session !== null && (asset.author.id === session.user.id || session.user.isAdmin),
     siteUrl: getSiteUrl(request),
   };
 }
@@ -79,7 +82,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function AssetPage({ loaderData }: Route.ComponentProps) {
-  const { asset, animation, related, remixes, savedIds } = loaderData;
+  const { asset, animation, related, remixes, savedIds, canManage } = loaderData;
   const saved = savedIds.includes(asset.id);
   const [searchParams, setSearchParams] = useSearchParams();
   const viewParam = searchParams.get("view");
@@ -231,6 +234,7 @@ export default function AssetPage({ loaderData }: Route.ComponentProps) {
                 </Link>
               </Button>
               <SaveButton assetId={asset.id} assetName={asset.name} saved={saved} />
+              {canManage && <VisibilityToggle assetId={asset.id} assetName={asset.name} visibility={asset.visibility} />}
               <Button asChild variant="outline">
                 {/* reloadDocument: this is a resource route returning a file */}
                 <Link to={href("/assets/:assetId/download", { assetId: asset.id })} reloadDocument rel="nofollow">

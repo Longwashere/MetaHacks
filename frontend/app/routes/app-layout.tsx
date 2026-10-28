@@ -9,7 +9,7 @@ export default function AppLayout() {
         <Outlet />
       </main>
       <footer className="border-t py-6 text-center text-xs text-muted-foreground">
-        RigForge · Spine is a trademark of Esoteric Software. Mock data — backend not connected.
+        RigForge · Spine is a trademark of Esoteric Software.
       </footer>
     </div>
   );

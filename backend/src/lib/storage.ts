@@ -1,11 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { AwsClient } from "aws4fetch";
-import { PUBLIC_URL, R2, REMIX_OUTPUT_DIR } from "./config.js";
+import { ASSET_BASE_URL, PUBLIC_URL, R2, REMIX_OUTPUT_DIR } from "./config.js";
 
-// Generated files (atlases, textures, skeletons, prompts.json). With R2 configured they go to the
-// bucket and are served from R2_PUBLIC_URL; otherwise they're written under REMIX_OUTPUT_DIR and
-// served by this server at /files/remixes/.
+// Files are addressed by storage key: "spine/<rig>/<file>" for base rigs, "remixes/<folder>/<file>"
+// for generated ones. The database stores keys; objectUrl() turns one into a public URL.
+// With R2 configured every key is served from R2_PUBLIC_URL. Without it, generated files are
+// written under REMIX_OUTPUT_DIR and served by this server at /files/remixes/, and base rigs come
+// from ASSET_BASE_URL (the frontend's public/spine/ in dev).
 
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -28,40 +30,40 @@ const r2 = R2
 
 export const STORAGE_BACKEND = r2 ? "r2" : "local";
 
-/** Key of a file under the remixes prefix, e.g. `remixes/<folder>/remix.atlas`, URL-encoded per segment. */
-function key(folder: string, name: string): string {
-  return ["remixes", folder, name].map(encodeURIComponent).join("/");
+const encodeKey = (key: string) => key.split("/").map(encodeURIComponent).join("/");
+
+/** Public URL of a stored file. */
+export function objectUrl(key: string): string {
+  if (R2) return `${R2.publicUrl}/${encodeKey(key)}`;
+  return `${key.startsWith("spine/") ? ASSET_BASE_URL : `${PUBLIC_URL}/files`}/${encodeKey(key)}`;
 }
 
-/** Public URL a stored file is served from. */
-export function fileUrl(folder: string, name: string): string {
-  return `${R2 ? R2.publicUrl : `${PUBLIC_URL}/files`}/${key(folder, name)}`;
-}
-
-/** Stores `body` as `<folder>/<name>`. Overwrites; names come from our code or are checked by the caller. */
-export async function putFile(folder: string, name: string, body: Buffer | string): Promise<void> {
+/** Stores `body` as remixes/<folder>/<name> and returns its key. Names come from our code or are checked by the caller. */
+export async function putFile(folder: string, name: string, body: Buffer | string): Promise<string> {
+  const key = `remixes/${folder}/${name}`;
   if (!r2) {
     const dir = path.join(REMIX_OUTPUT_DIR, folder);
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, name), body);
-    return;
+    return key;
   }
 
   // prompts.json is rewritten mid-job; everything else is written once.
-  await putR2Object(key(folder, name), body, name === "prompts.json" ? "no-cache" : "public, max-age=31536000, immutable");
+  await putR2Object(key, body, name === "prompts.json" ? "no-cache" : "public, max-age=31536000, immutable");
+  return key;
 }
 
-/** Uploads to R2 at `objectKey` (already URL-encoded). Throws if R2 isn't configured. */
-export async function putR2Object(objectKey: string, body: Buffer | string, cacheControl: string): Promise<void> {
+/** Uploads to R2 at `key`. Throws if R2 isn't configured. */
+export async function putR2Object(key: string, body: Buffer | string, cacheControl: string): Promise<void> {
   if (!r2) throw new Error("R2 isn't configured; set every R2_* variable in .env.");
-  const contentType = CONTENT_TYPES[path.extname(objectKey).toLowerCase()] ?? "application/octet-stream";
-  const res = await r2.client.fetch(`${r2.bucketUrl}/${objectKey}`, {
+  const contentType = CONTENT_TYPES[path.extname(key).toLowerCase()] ?? "application/octet-stream";
+  const res = await r2.client.fetch(`${r2.bucketUrl}/${encodeKey(key)}`, {
     method: "PUT",
     body: typeof body === "string" ? body : new Uint8Array(body),
     headers: { "Content-Type": contentType, "Cache-Control": cacheControl },
   });
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 300);
-    throw new Error(`Couldn't save ${objectKey} to R2 (${res.status}): ${detail}`);
+    throw new Error(`Couldn't save ${key} to R2 (${res.status}): ${detail}`);
   }
 }
