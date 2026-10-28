@@ -3,6 +3,7 @@ import express, { Router } from "express";
 import { getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
+import { AnimateError, generateAnimation, parseAnimateInput } from "../lib/animate.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
 import { getPartFixView, startPartFix } from "../lib/part-fix-jobs.js";
@@ -181,6 +182,34 @@ meRouter.post("/remixes/:assetId/auto-tweak", express.json({ limit: MAX_AUTO_TWE
   } catch (error) {
     console.error("Auto-tweak review failed", error);
     res.status(502).json({ error: error instanceof Error && !(error instanceof AiTimeoutError) ? error.message : "Muse took too long to review the rig. Try again." });
+  }
+});
+
+/**
+ * POST /me/remixes/:assetId/animations  body = { prompt, durationSec, loop, skeleton? } → 201 AnimateResult
+ * One Muse Spark call writes a new animation's keyframes; it's saved into the remix's skeleton.
+ * `skeleton` is only needed when the stored skeleton is a binary .skel. Doesn't use the allowance.
+ */
+meRouter.post("/remixes/:assetId/animations", express.json({ limit: MAX_SKELETON_BYTES }), async (req, res) => {
+  const input = parseAnimateInput(req.body);
+  if ("error" in input) {
+    res.status(400).json({ error: input.error });
+    return;
+  }
+  const asset = await ownedAsset(userIdOf(res), req.params.assetId);
+  if (!asset?.files) {
+    res.status(404).json({ error: "You can only animate your own remixes." });
+    return;
+  }
+  try {
+    res.status(201).json(await generateAnimation(asset, input, AbortSignal.timeout(MUSE_TIMEOUT_MS * 2)));
+  } catch (error) {
+    if (error instanceof AnimateError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    console.error("Generating an animation failed", error);
+    res.status(502).json({ error: error instanceof AiTimeoutError ? "Muse took too long to write the animation. Try again." : "Couldn't make the animation. Try again." });
   }
 });
 

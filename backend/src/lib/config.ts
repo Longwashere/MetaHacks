@@ -39,6 +39,8 @@ export const REMIX_OUTPUT_DIR = path.resolve(process.env.REMIX_OUTPUT_DIR || "da
  * the snapshots can show private remixes.
  */
 export const AUTO_TWEAK_LOG_DIR = path.resolve(process.env.AUTO_TWEAK_LOG_DIR || "data/auto-tweaks");
+/** Where each generated-animation run's request, Muse reply and result are saved. Always local, like auto-tweak runs. */
+export const ANIMATION_LOG_DIR = path.resolve(process.env.ANIMATION_LOG_DIR || "data/animations");
 
 /** Cloudflare R2 bucket for generated files. Used only when every R2_* variable is set. */
 export const R2 = (() => {

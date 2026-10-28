@@ -30,6 +30,7 @@ Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `pr
 | `copyRemix(session, assetId)` | `POST /me/remixes/:assetId/copy` | `201` new private copy as `SpineAsset`; `200` with the user's existing copy, or the remix itself if it's theirs; `{ ok: false, error }` on 400/404. Free: no model runs. See **Copies** below. |
 | `saveRemixSkeleton(session, assetId, skeleton, skin)` | `POST /me/remixes/:assetId/skeleton` (JSON `{ skeleton, skin }`, up to 8 MB) | Updated `SpineAsset` pointing at the stored skeleton, or `null` if it isn't the user's |
 | `autoTweakRemix(session, assetId, input)` | `POST /me/remixes/:assetId/auto-tweak` (JSON `AutoTweakInput`, up to 12 MB) | `AutoTweakReview` (one Muse Spark call, nothing stored); `{ ok: false, error }` on 400/404/502. See **Auto-tweak** below. |
+| `animateRemix(session, assetId, input)` | `POST /me/remixes/:assetId/animations` (JSON `AnimateInput`, up to 8 MB) | `201` `AnimateResult`: the updated `SpineAsset`, the new animation, Muse's notes and any dropped bones; `{ ok: false, error }` on 400/404/409/502. See **Generated animations** below. |
 | `createRemixJob(session, input, apiVersion)` | `POST /me/remix-jobs` (JSON `RemixInput` + `apiVersion`) | `202` `RemixJob`; `400 { errors }`; `402 { error }` when the monthly allowance is used up |
 | `getRemixJob(session, jobId)` | `GET /me/remix-jobs/:id` | `RemixJob \| null` |
 | `getAccount(session)` | `GET /me` | `Account`: profile, plan, subscription and `usage: { used, limit, resetsAt }` |
@@ -80,6 +81,17 @@ The tweak panel's **Line up parts** button (Parts tab, finished remixes only) fi
 4. The page applies them as live tweaks; the user reviews and saves as usual. If the review fails, the measured fixes are applied on their own.
 
 Every run, including failed ones, is saved locally (never to R2, since snapshots can show private remixes) to `backend/data/auto-tweaks/<time>_<assetId>/`: `pose-N.jpg` (the images Muse saw), `system-prompt.txt`, and `reply.json` (the text request, the part list, Muse's HTTP status and full raw response, and the validated review or error the endpoint returned, plus timing). Set `AUTO_TWEAK_LOG_DIR` to change the folder.
+
+## Generated animations
+
+The remix page's **Animate** tab (finished remixes only, `app/components/AnimatePanel.tsx`) adds a new animation from a prompt. It's one Muse Spark call (`backend/src/lib/animate.ts`) and doesn't count toward the monthly allowance.
+
+1. The backend reads the remix's skeleton JSON. A binary `.skel` can't be read there, so for those the page converts it with `skelToJson` and sends it as `skeleton`.
+2. Muse gets the request, the duration and loop flag, the rig's size, one line per bone (parent, setup-pose position and direction in screen space, the slots it carries), and the largest motion per bone in the rig's own animations, for scale. Bones driven by a constraint are marked, with the bone to move instead: an IK target, or the bone a transform constraint follows.
+3. Muse replies with keys per bone in screen terms: `rotate` (degrees counter-clockwise), `move` (skeleton units, +y up) and `scale`, plus an ease. The backend drops unknown and constraint-driven bones (listed in `dropped`), clamps every value and time, adds a rest key at 0, and for loops makes the last key match the first. Moves are converted into the parent bone's local space, and smooth eases get Bézier curves with Catmull-Rom tangents so motion flows through keys. An unusable reply is retried once.
+4. The animation is added to the skeleton under a unique name and saved to a new `remixes/<time>_anim_<id>/skeleton.json`, and the asset's `animations` gets `{ name, durationSec, loop }`. If the remix's skeleton changed while Muse was working (a tweak save or part fix), it fails with `409` rather than overwrite those edits. The page then plays the new animation (`?anim=`).
+
+Every run, including failed ones, is saved locally to `backend/data/animations/<time>_<assetId>/` (`system-prompt.txt` and `run.json` with the rig description, Muse's raw replies and the result). Set `ANIMATION_LOG_DIR` to change the folder.
 
 ## Part fixes
 

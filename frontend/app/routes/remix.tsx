@@ -8,6 +8,7 @@ import {
   redirect,
   useFetcher,
   useLocation,
+  useNavigate,
   useNavigation,
   useRevalidator,
   useSearchParams,
@@ -15,6 +16,7 @@ import {
 import type { Route } from "./+types/remix";
 import type { action as autoTweakAction } from "./api.auto-tweak";
 import type { action as saveSkeletonAction } from "./api.remix-skeleton";
+import { AnimatePanel } from "~/components/AnimatePanel";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
 import { RigPicker } from "~/components/RigPicker";
@@ -283,8 +285,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   };
   // Tweaks need a rig on screen: the original before a remix, or the finished remix.
   const canTweak = !job || savedRemix !== null;
-  const [panelTab, setPanelTab] = useState<"generate" | "tweak">("generate");
+  const [panelTab, setPanelTab] = useState<"generate" | "tweak" | "animate">("generate");
   const tweaking = canTweak && panelTab === "tweak";
+  const animating = savedRemix !== null && panelTab === "animate";
+  const navigate = useNavigate();
   // Picking and the part outline only make sense while the Tweak tab is open.
   const playerTweaks: SpineTweakBinding = {
     ...tweak.binding,
@@ -384,17 +388,20 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
               <BaseRigSummary base={base} />
               <Card>
                 <Tabs
-                  value={tweaking ? "tweak" : "generate"}
-                  onValueChange={(v) => setPanelTab(v === "tweak" ? "tweak" : "generate")}
+                  value={tweaking ? "tweak" : animating ? "animate" : "generate"}
+                  onValueChange={(v) => setPanelTab(v === "tweak" || v === "animate" ? v : "generate")}
                   className="gap-6"
                 >
                   <div className="px-6">
-                    <TabsList className="grid w-full grid-cols-2">
+                    <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="generate">
                         <Sparkles /> Generate
                       </TabsTrigger>
                       <TabsTrigger value="tweak" disabled={!canTweak} title={canTweak ? undefined : "Available once the remix finishes"}>
                         <SlidersHorizontal /> Tweak
+                      </TabsTrigger>
+                      <TabsTrigger value="animate" disabled={!savedRemix} title={savedRemix ? undefined : "Available once the remix finishes"}>
+                        <Film /> Animate
                       </TabsTrigger>
                     </TabsList>
                   </div>
@@ -413,6 +420,15 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                   <TabsContent value="tweak" forceMount className="data-[state=inactive]:hidden">
                     <CardContent>
                       <TweakPanel {...tweakPanel} />
+                    </CardContent>
+                  </TabsContent>
+                  <TabsContent value="animate" forceMount className="data-[state=inactive]:hidden">
+                    <CardContent>
+                      <AnimatePanel
+                        key={savedRemix?.id ?? ""}
+                        remix={savedRemix}
+                        onAnimated={(name) => navigate(withParams({ anim: name }), { replace: true, preventScrollReset: true })}
+                      />
                     </CardContent>
                   </TabsContent>
                 </Tabs>

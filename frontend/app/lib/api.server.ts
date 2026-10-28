@@ -3,7 +3,7 @@
 // token the backend verifies. See BACKEND.md for the endpoint contract.
 
 import type { Session } from "~/lib/auth.server";
-import type { AssetQuery, AutoTweakInput, AutoTweakReview, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AnimateInput, AnimateResult, AssetQuery, AutoTweakInput, AutoTweakReview, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -255,6 +255,24 @@ export async function autoTweakRemix(
   } catch (error) {
     if (!(error instanceof BackendError) || error.status === 401 || (error.status >= 500 && error.status !== 502)) throw error;
     return { ok: false, error: errorMessage(error.body, "Couldn't auto-tweak the remix.") };
+  }
+}
+
+/**
+ * POST /me/remixes/:assetId/animations — Muse writes a new animation and it's saved into the remix.
+ * Resolves to `{ ok: false, error }` for the user's own mistakes and model failures.
+ */
+export async function animateRemix(
+  session: Session,
+  assetId: string,
+  input: AnimateInput,
+): Promise<{ ok: true; result: AnimateResult } | { ok: false; error: string }> {
+  try {
+    const result = await backend<AnimateResult>(`/me/remixes/${id(assetId)}/animations`, { session, method: "POST", body: input });
+    return { ok: true, result };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status === 401 || (error.status >= 500 && error.status !== 502)) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't make the animation.") };
   }
 }
 

@@ -213,3 +213,24 @@ export interface AutoTweakReview {
   changes: (AutoTweakTransform & { part: string; reason: string })[];
   notes: string;
 }
+
+/** Limits of a generated animation's length, in seconds. Same as DURATION_LIMITS in backend/src/lib/animate.ts. */
+export const ANIMATE_DURATION = { min: 0.5, max: 8 };
+
+/** Body of POST /me/remixes/:assetId/animations. `skeleton` is the rig as JSON, sent only when the stored file is a binary .skel. */
+export interface AnimateInput {
+  prompt: string;
+  durationSec: number;
+  loop: boolean;
+  skeleton?: object;
+}
+
+/** A new animation Muse wrote and saved into the remix's skeleton. */
+export interface AnimateResult {
+  /** The remix with the new skeleton and the animation added to `animations`. */
+  asset: SpineAsset;
+  animation: SpineAnimation;
+  notes: string;
+  /** Bones Muse keyed that were left out, with the reason. */
+  dropped: string[];
+}

@@ -14,9 +14,9 @@ the second section.
 - **Hackathon:** building period Oct 27 – Nov 4, 2026. Submissions are due **Wed, Nov 4, 9:00 PM ET** and need a public repo and a three-minute demo video of what was built during the event.
 - **This repo will be public.** Never write keys, tokens or personal data here.
 - **Meta models in use (Meta Model API, `https://api.meta.ai/v1`):**
-  - **Muse Spark** (`muse-spark-1.3`, `/chat/completions`): looks at the atlas pages and the user's prompt, and writes the repaint instructions (`backend/src/lib/meta.ts`, `planRemix`).
+  - **Muse Spark** (`muse-spark-1.3`, `/chat/completions`): looks at the atlas pages and the user's prompt, and writes the repaint instructions (`backend/src/lib/meta.ts`, `planRemix`). Also writes the keyframes for generated animations (`backend/src/lib/animate.ts`).
   - **Muse Image** (`muse-image-1.0`, `/images/edits`): repaints each atlas page (`repaintPage`).
-  - **Muse Code:** not used yet.
+  - **Muse Code:** not used; it isn't on the Model API (see the 2026-10-28 entry).
 
 ## How to add an entry
 
@@ -52,8 +52,18 @@ Add the entry in the same task, not later.
 - **Muse Image moves and resizes parts** by a few percent, so we need a pixel-alignment step after every call. (2026-10-27)
 - **Muse Image sometimes redraws the whole layout** on big changes, moving and duplicating parts. We check every page and repaint once, which costs an extra image call. (2026-10-28)
 - **Ambiguous atlas pieces get the wrong content:** Spark called the scarf-wrapped torso a helm, and Muse Image painted a face into it. (2026-10-28)
+- **Muse Code isn't on the Model API.** `GET /v1/models` lists no Muse Code model, so the backend can't call it; planned "generate an animation with Muse Code" has to use Muse Spark instead. (2026-10-28)
 
 ### Log
+
+### 2026-10-28 — Muse Code can't be called from the backend
+- **What happened:** while planning prompt-generated animations around Muse Code, we found there's no Muse Code model to call.
+- **Evidence (verified):** `GET https://api.meta.ai/v1/models` with our key returns `muse-wonder-1.0`, `sam-3.1`, `muse-spark-1.3`, `muse-spark-1.3-contributor`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.1`, `muse-image-1.0` and `muse-voice-transcribe-1.0`. No Muse Code ID.
+- **Cost:** a planning detour before any code was written.
+- **Cause (inferred):** Muse Code looks like a coding agent for developers, not a model on the API.
+- **Workaround / status:** the animation feature will use `muse-spark-1.3` to write keyframes.
+- **Ask for Meta:** say in the docs whether Muse Code can be called from an app, and if it can, under which model ID.
+- **Lesson:** list `/v1/models` before designing a feature around a model.
 
 ### 2026-10-28 — Style changes on "auto" were weak; Spark knew a reference but didn't use it while planning
 - **What happened:** "same orc but in an anime art style like black clover style" (`job_5f05df7b`) came back as generic flat cartoon, and "as a watercolor painting" looked like the original with paler colours. Muse Image copies the input's fine texture, and Muse Spark described named references as their genre's generic look.

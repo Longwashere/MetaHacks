@@ -27,5 +27,6 @@ export default [
   route("api/remix-visibility", "routes/api.remix-visibility.ts"),
   route("api/remix-skeleton", "routes/api.remix-skeleton.ts"),
   route("api/auto-tweak", "routes/api.auto-tweak.ts"),
+  route("api/remix-animation", "routes/api.remix-animation.ts"),
   route("api/theme", "routes/api.theme.ts"),
 ] satisfies RouteConfig;
