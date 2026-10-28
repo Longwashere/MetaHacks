@@ -7,8 +7,10 @@ const anim = (name: string, durationSec: number, loop = true): SpineAnimation =>
   loop,
 });
 
-// Real rigs: Esoteric Software's official Spine 4.2 example exports, served from
-// public/spine/. They're for local development only — see public/spine/README.md.
+// Real rigs: Esoteric Software's official Spine 4.2 example exports in public/spine/. They're
+// for local development only — see public/spine/README.md. Set SPINE_ASSET_URL (e.g. the R2
+// bucket's public URL) to load them from <SPINE_ASSET_URL>/spine/ instead of this server.
+const SPINE_BASE = `${(process.env.SPINE_ASSET_URL ?? "").replace(/\/+$/, "")}/spine`;
 // The examples aren't named consistently: `skel` is the skeleton's basename (Pro, Essential or
 // unsuffixed export) and `pages` is how many atlas pages it has (name-pma.png, name-pma_2.png, …).
 const exampleRig = (
@@ -16,9 +18,9 @@ const exampleRig = (
   baseFile: string,
   { skin = null, pages = 1 }: { skin?: string | null; pages?: number } = {},
 ) => ({
-  skeletonUrl: `/spine/${folder}/${baseFile}.skel`,
-  atlasUrl: `/spine/${folder}/${baseFile}.atlas`,
-  textureUrls: Array.from({ length: pages }, (_, i) => `/spine/${folder}/${baseFile}${i ? `_${i + 1}` : ""}.png`),
+  skeletonUrl: `${SPINE_BASE}/${folder}/${baseFile}.skel`,
+  atlasUrl: `${SPINE_BASE}/${folder}/${baseFile}.atlas`,
+  textureUrls: Array.from({ length: pages }, (_, i) => `${SPINE_BASE}/${folder}/${baseFile}${i ? `_${i + 1}` : ""}.png`),
   premultipliedAlpha: true,
   skin,
 });
@@ -33,9 +35,9 @@ const customRig = (
     pages = 1,
   }: { skin?: string | null; premultipliedAlpha?: boolean; pages?: number } = {},
 ) => ({
-  skeletonUrl: `/spine/${folder}/${baseFile}.json`,
-  atlasUrl: `/spine/${folder}/${baseFile}.atlas`,
-  textureUrls: Array.from({ length: pages }, (_, i) => `/spine/${folder}/${baseFile}${i ? `_${i + 1}` : ""}.png`),
+  skeletonUrl: `${SPINE_BASE}/${folder}/${baseFile}.json`,
+  atlasUrl: `${SPINE_BASE}/${folder}/${baseFile}.atlas`,
+  textureUrls: Array.from({ length: pages }, (_, i) => `${SPINE_BASE}/${folder}/${baseFile}${i ? `_${i + 1}` : ""}.png`),
   premultipliedAlpha,
   skin,
 });

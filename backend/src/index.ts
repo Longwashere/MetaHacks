@@ -2,6 +2,7 @@ import express from "express";
 import { PORT, REMIX_OUTPUT_DIR } from "./lib/config.js";
 import { remixesRouter } from "./routes/remixes.js";
 import { skeletonsRouter } from "./routes/skeletons.js";
+import { STORAGE_BACKEND } from "./lib/storage.js";
 import { remixesV2Router } from "./v2/routes/remixes.js";
 
 const app = express();
@@ -19,7 +20,7 @@ app.get("/health", (_req, res) => {
 app.use(["/remixes", "/v1/remixes"], remixesRouter);
 app.use("/v2/remixes", remixesV2Router);
 
-// Generated atlases and textures. The Spine viewer loads them with WebGL from the
+// Generated atlases and textures stored locally (when R2 isn't configured). The Spine viewer loads them with WebGL from the
 // frontend's origin, which needs CORS.
 app.use(
   "/files/remixes",
@@ -31,5 +32,5 @@ app.use(
 );
 
 app.listen(PORT, () => {
-  console.log(`Backend listening on http://localhost:${PORT}`);
+  console.log(`Backend listening on http://localhost:${PORT} (storage: ${STORAGE_BACKEND})`);
 });

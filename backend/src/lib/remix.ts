@@ -1,8 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isSafePageName, parseAtlas } from "./atlas.js";
-import { ASSET_BASE_URL, PUBLIC_URL, REMIX_OUTPUT_DIR } from "./config.js";
+import { ASSET_BASE_URL } from "./config.js";
 import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy } from "./meta.js";
+import { fileUrl, putFile } from "./storage.js";
 import { decodePage, fitToPage, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
 
@@ -27,7 +27,7 @@ const PAGE_EXPECTED_MS = 10_000;
 /**
  * Re-textures the base rig: fetches its atlas pages, has Muse plan the new look,
  * repaints each page with Muse Image and fits it back onto the original regions.
- * Writes the new .atlas and pages under REMIX_OUTPUT_DIR/<timestamp>_<jobId>/, plus a
+ * Stores the new .atlas and pages under <timestamp>_<jobId>/ (see storage.ts), plus a
  * prompts.json recording what was asked for and sent to the models.
  *
  * Throw an Error with a user-facing message on failure; the job runner stores it as
@@ -86,14 +86,13 @@ export async function runRemix(
   let editPrompt = plan.editPrompt;
   let reworded: string | null = null;
 
-  // Timestamp first so folders sort by creation time when browsing REMIX_OUTPUT_DIR.
+  // Timestamp first so folders sort by creation time when browsing the output.
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
-  const outDir = path.join(REMIX_OUTPUT_DIR, folder);
-  await mkdir(outDir, { recursive: true });
   const { base: _base, ...request } = input;
   const writePrompts = () =>
-    writeFile(
-      path.join(outDir, "prompts.json"),
+    putFile(
+      folder,
+      "prompts.json",
       JSON.stringify(
         {
           jobId,
@@ -149,11 +148,12 @@ export async function runRemix(
     );
     signal.throwIfAborted();
     // The raw model output, kept for debugging how well it lined up with the page.
-    await writeFile(path.join(outDir, `${path.parse(page.name).name}.generated.png`), generated);
+    await putFile(folder, `${path.parse(page.name).name}.generated.png`, generated);
     // Kept outlines reuse the original alpha; otherwise the model's own shapes are keyed out.
     const keyedRects = input.keepOutline ? null : page.rects;
-    await writeFile(
-      path.join(outDir, page.name),
+    await putFile(
+      folder,
+      page.name,
       await fitToPage(generated, modelInput, images[i], base.premultipliedAlpha, keyedRects),
     );
     reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
@@ -161,13 +161,12 @@ export async function runRemix(
 
   onProgress(0.95, "Packing atlas");
   // Regions are unchanged and page names are kept, so the base atlas works as-is.
-  await writeFile(path.join(outDir, "remix.atlas"), atlasText);
+  await putFile(folder, "remix.atlas", atlasText);
 
-  const fileUrl = (name: string) => `${PUBLIC_URL}/files/remixes/${folder}/${encodeURIComponent(name)}`;
   return {
     name: plan.name,
-    atlasUrl: fileUrl("remix.atlas"),
-    textureUrls: pages.map((p) => fileUrl(p.name)),
+    atlasUrl: fileUrl(folder, "remix.atlas"),
+    textureUrls: pages.map((p) => fileUrl(folder, p.name)),
   };
 }
 

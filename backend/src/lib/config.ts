@@ -32,5 +32,16 @@ export const IMAGE_MODEL = process.env.IMAGE_MODEL || "muse-image-1.0";
 export const ASSET_BASE_URL = url("ASSET_BASE_URL", "http://localhost:5173");
 /** This server's public origin, used to build URLs for generated textures. */
 export const PUBLIC_URL = url("PUBLIC_URL", `http://localhost:${PORT}`);
-/** Where generated atlases and textures are written. */
+/** Where generated atlases and textures are written when R2 isn't configured. */
 export const REMIX_OUTPUT_DIR = path.resolve(process.env.REMIX_OUTPUT_DIR || "data/remixes");
+
+/** Cloudflare R2 bucket for generated files. Used only when every R2_* variable is set. */
+export const R2 = (() => {
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  const bucket = process.env.R2_BUCKET;
+  const publicUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "");
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucket || !publicUrl) return null;
+  return { accountId, accessKeyId, secretAccessKey, bucket, publicUrl };
+})();
