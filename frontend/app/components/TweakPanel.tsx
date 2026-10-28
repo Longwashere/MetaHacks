@@ -435,6 +435,25 @@ export function TweakPanel({
                       </p>
                     </div>
                   )}
+                  {selectedPart in meshes && !(part.fullTexture && meshes[selectedPart] === null) && (
+                    <div className="flex flex-col gap-1.5">
+                      <SliderField
+                        id="tw-part-grow"
+                        label="Grow outline"
+                        value={Math.round(part.grow * 100)}
+                        min={0}
+                        max={100}
+                        step={5}
+                        format={(v) => `${v}%`}
+                        onChange={(v) => setPart(selectedPart, { grow: v / 100 })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Pushes the mesh's outline out toward the edges of its texture, so art painted past it shows. Inner points stay
+                        put, so it still bends and animates the same; near joints the new edge can stretch a little. Turn on Mesh
+                        triangles under Look to see it.
+                      </p>
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Offsets follow the part's bone, so a fix stays aligned through every animation. Use them to line up a part the
                     image model shifted.
@@ -519,12 +538,13 @@ export function TweakPanel({
   );
 }
 
-/** The part transform fields auto-tweak sets, formatted like their sliders. */
+/** The part fields auto-tweak sets, formatted like their sliders. */
 const CHANGE_FIELDS = [
   { key: "dx", label: "Offset X", format: (p: PartTweak) => `${p.dx.toFixed(2)}%` },
   { key: "dy", label: "Offset Y", format: (p: PartTweak) => `${p.dy.toFixed(2)}%` },
   { key: "scale", label: "Scale", format: (p: PartTweak) => `${Math.round(p.scale * 100)}%` },
   { key: "rotation", label: "Rotate", format: (p: PartTweak) => `${p.rotation}°` },
+  { key: "grow", label: "Grow outline", format: (p: PartTweak) => `${Math.round(p.grow * 100)}%` },
 ] as const;
 
 function AutoTweakBox({
@@ -551,7 +571,7 @@ function AutoTweakBox({
       <p className="-mt-2 text-xs text-muted-foreground" aria-live="polite">
         {stage ??
           disabledReason ??
-          "Compares the remix with the original at a few paused poses, measures parts that drifted, and has Muse decide which fixes to keep. Changes show on the preview right away; Save keeps them."}
+          "Compares the remix with the original at a few paused poses, measures parts that drifted, and has Muse decide which fixes to keep. Parts whose new art is cut off by their mesh get their outline grown until it shows. Changes show on the preview right away; Save keeps them."}
       </p>
 
       {result && !stage && hidden !== result && (

@@ -281,7 +281,6 @@ export function SpineRuntime({
           controllerRef.current = controller;
           latest.current.tweaks?.onRigInfo(controller.info());
           latest.current.tweaks?.onExporter?.({
-            canExport: !files.skeletonUrl.toLowerCase().endsWith(".skel"),
             exportSkeleton: async (values) => {
               const res = await fetch(files.skeletonUrl);
               if (!res.ok) throw new Error(`Couldn't load the skeleton file (${res.status}).`);

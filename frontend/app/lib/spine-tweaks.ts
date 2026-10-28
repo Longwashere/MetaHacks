@@ -27,6 +27,11 @@ export interface PartTweak {
    * repainted part with a new shape isn't cut off. Only rigid meshes can (see RigInfo.meshes).
    */
   fullTexture: boolean;
+  /**
+   * 0–1: how far each of the part's meshes pushes its outline out toward the edges of its atlas
+   * region. Works on any mesh, including ones that can't show their full texture.
+   */
+  grow: number;
 }
 
 /** Changes a bone's setup pose; animations play relative to it, so they keep working. */
@@ -113,6 +118,7 @@ export const DEFAULT_PART: PartTweak = {
   shadow: null,
   blend: "rig",
   fullTexture: false,
+  grow: 0,
 };
 
 export const DEFAULT_BONE: BoneTweak = { scaleX: 1, scaleY: 1, rotation: 0 };
@@ -146,8 +152,6 @@ export interface RigInfo {
 
 /** Bakes tweaks into the rig's skeleton JSON. Provided by the runtime once the rig has loaded. */
 export interface TweakExporter {
-  /** False for binary .skel rigs, which the bake can't edit. */
-  canExport: boolean;
   exportSkeleton: (tweaks: SpineTweaks) => Promise<{ skeleton: unknown; skin: string | null }>;
 }
 

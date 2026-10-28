@@ -281,8 +281,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
     save: useSaveTweaks(savedRemix?.id ?? null, tweak),
     autoTweak: useAutoTweak(base, savedRemix, previewAnimation, tweak),
   };
-  // Tweaks need a rig on screen: the original before a remix, or the finished remix.
-  const canTweak = !job || savedRemix !== null;
+  // Tweaks need a rig on screen: the original before a remix, or the finished remix. Binary .skel
+  // rigs can't take them: the bake that saves them only edits skeleton JSON.
+  const binaryRig = (savedRemix ?? base)?.files?.skeletonUrl.toLowerCase().endsWith(".skel") ?? false;
+  const canTweak = (!job || savedRemix !== null) && !binaryRig;
   const [panelTab, setPanelTab] = useState<"generate" | "tweak">("generate");
   const tweaking = canTweak && panelTab === "tweak";
   // Picking and the part outline only make sense while the Tweak tab is open.
@@ -393,10 +395,20 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       <TabsTrigger value="generate">
                         <Sparkles /> Generate
                       </TabsTrigger>
-                      <TabsTrigger value="tweak" disabled={!canTweak} title={canTweak ? undefined : "Available once the remix finishes"}>
+                      <TabsTrigger
+                        value="tweak"
+                        disabled={!canTweak}
+                        title={canTweak ? undefined : binaryRig ? "Not available for binary .skel rigs" : "Available once the remix finishes"}
+                      >
                         <SlidersHorizontal /> Tweak
                       </TabsTrigger>
                     </TabsList>
+                    {binaryRig && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Tweaks aren't available for this rig: its skeleton is a binary .skel file, and edits can only be saved into JSON.
+                        Re-export it from Spine as JSON to tweak it.
+                      </p>
+                    )}
                   </div>
                   {/* Both tabs stay mounted so the prompt and the tweak panel keep their state. */}
                   <TabsContent value="generate" forceMount className="flex flex-col gap-6 data-[state=inactive]:hidden">
@@ -798,9 +810,7 @@ function useSaveTweaks(remixId: string | null, tweak: ReturnType<typeof useTweak
     ? "Live in your browser, no model calls. Run a remix to save edits into its skeleton file."
     : !tweak.exporter
       ? "Loading the rig…"
-      : !tweak.exporter.canExport
-        ? "This rig's skeleton is a binary .skel file, so edits can't be saved into it."
-        : null;
+      : null;
 
   const onSave = async () => {
     if (!remixId || !tweak.exporter) return;
@@ -860,7 +870,10 @@ function useAutoTweak(
         const change = review?.changes.find((r) => r.part === c.part);
         // Muse kept the measurement when it sent back the same numbers.
         const kept = !change || (fix !== undefined && (["x", "y", "scale", "rotate"] as const).every((k) => Math.abs(change[k] - fix[k]) < 0.01));
-        return { ...c, source: kept ? "measured" : "muse", reason: reasons.get(c.part) ?? (review ? "" : "Measured drift from the original.") };
+        const grow = capture.grows.get(c.part);
+        const grew = grow !== undefined ? `Its art was cut off by the mesh outline, so the outline grew ${Math.round(grow * 100)}%.` : null;
+        const reason = reasons.get(c.part) ?? (review || !measured.has(c.part) ? "" : "Measured drift from the original.");
+        return { ...c, source: kept ? "measured" : "muse", reason: [reason, grew].filter(Boolean).join(" ") };
       });
       onChange(next);
       setResult({ changes, notes: review?.notes || null, measuredOnly: !review });
@@ -875,13 +888,13 @@ function useAutoTweak(
     // Runs once per finished review; `onChange` and `tweaks` are read at that moment on purpose.
   }, [fetcher.state, fetcher.data]);
 
-  /** Restores the transform the run changed on each part, leaving any later colour or blend edits. */
+  /** Restores the transform and outline grow the run changed on each part, leaving any later colour or blend edits. */
   const onUndo = () => {
     if (!result) return;
     let parts = tweaks.parts;
     for (const { part, before } of result.changes) {
       const { [part]: current, ...rest } = parts;
-      const restored = { ...(current ?? DEFAULT_PART), dx: before.dx, dy: before.dy, scale: before.scale, rotation: before.rotation };
+      const restored = { ...(current ?? DEFAULT_PART), dx: before.dx, dy: before.dy, scale: before.scale, rotation: before.rotation, grow: before.grow };
       parts = isDefaultPart(restored) ? rest : { ...rest, [part]: restored };
     }
     onChange({ ...tweaks, parts });
@@ -923,13 +936,13 @@ function useAutoTweak(
   return { onRun, stage, disabledReason, result, onUndo };
 }
 
-/** Parts whose offset, scale or rotation differ between two part maps. */
+/** Parts whose offset, scale, rotation or outline grow differ between two part maps. */
 function partChanges(before: SpineTweaks["parts"], after: SpineTweaks["parts"]) {
   const names = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...names].flatMap((part) => {
     const b = before[part] ?? DEFAULT_PART;
     const a = after[part] ?? DEFAULT_PART;
-    const same = b.dx === a.dx && b.dy === a.dy && b.scale === a.scale && b.rotation === a.rotation;
+    const same = b.dx === a.dx && b.dy === a.dy && b.scale === a.scale && b.rotation === a.rotation && b.grow === a.grow;
     return same ? [] : [{ part, before: b, after: a }];
   });
 }

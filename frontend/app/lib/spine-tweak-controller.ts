@@ -13,7 +13,7 @@ import type {
   SpinePlayer,
   TextureAtlas,
 } from "@esotericsoftware/spine-player";
-import { type MeshReason, QUAD_EDGES, QUAD_TRIANGLES, QUAD_UVS, quadFromMesh } from "~/lib/spine-mesh";
+import { growOutline, type MeshReason, QUAD_EDGES, QUAD_TRIANGLES, QUAD_UVS, quadFromMesh } from "~/lib/spine-mesh";
 import type { SetupPose } from "~/lib/spine-tweak-bake";
 import { DEFAULT_BONE, PHYSICS_FORCE_SCALE, type RigInfo, type SpineTweaks, type TweakBlendMode } from "~/lib/spine-tweaks";
 
@@ -39,13 +39,18 @@ interface MeshShape {
   edges: number[];
 }
 
-/** A rigid mesh that can show its whole region: its own shape, and a box over the region. */
+/** A mesh the part tweaks can reshape: its own shape, and a box over its region if it's rigid. */
 interface MeshPlan {
   mesh: MeshAttachment;
   slot: string;
   original: MeshShape;
-  box: MeshShape;
+  box: MeshShape | null;
+  /** Linked meshes that share this one's shape. */
+  children: MeshAttachment[];
+  /** Keys of animations that deform it. Unweighted keys hold whole positions, so a grown outline moves them too. */
+  deforms: { frames: NumberArrayLike[]; original: NumberArrayLike[] }[];
   boxed: boolean;
+  grow: number;
 }
 
 /**
@@ -57,7 +62,8 @@ interface MeshPlan {
  * - Part offsets are applied to the world vertices each attachment computes, so they work for
  *   regions, weighted meshes and deformed meshes alike.
  * - Bone sculpting edits the setup pose, which animations are keyed relative to.
- * - "Full texture" swaps a rigid mesh's shape for a box over its whole atlas region.
+ * - "Full texture" swaps a rigid mesh's shape for a box over its whole atlas region; "grow outline"
+ *   pushes any mesh's outline toward the region's edges.
  */
 export class TweakController {
   tweaks: SpineTweaks;
@@ -131,16 +137,22 @@ export class TweakController {
    * flip and scale are applied like the runtime applies them.
    */
   setupPose(tweaks: SpineTweaks): SetupPose {
-    const skeleton = new this.spine.Skeleton(this.skeleton.data);
-    skeleton.setSkin(this.skeleton.skin);
-    skeleton.scaleX = (tweaks.flipX ? -1 : 1) * tweaks.scaleX;
-    skeleton.scaleY = tweaks.scaleY;
-    skeleton.setToSetupPose();
-    skeleton.updateWorldTransform(this.spine.Physics.none);
+    const skeleton = this.setupSkeleton((tweaks.flipX ? -1 : 1) * tweaks.scaleX, tweaks.scaleY);
     return {
       rigSize: this.rigSize,
       bones: skeleton.bones.map((b) => ({ name: b.data.name, a: b.a, b: b.b, c: b.c, d: b.d, x: b.worldX, y: b.worldY })),
     };
+  }
+
+  /** A copy of the skeleton posed at its setup pose (bone sculpting included). */
+  private setupSkeleton(scaleX = 1, scaleY = 1): Skeleton {
+    const skeleton = new this.spine.Skeleton(this.skeleton.data);
+    skeleton.setSkin(this.skeleton.skin);
+    skeleton.scaleX = scaleX;
+    skeleton.scaleY = scaleY;
+    skeleton.setToSetupPose();
+    skeleton.updateWorldTransform(this.spine.Physics.none);
+    return skeleton;
   }
 
   /** Applies whatever changed since the last sync. */
@@ -251,24 +263,30 @@ export class TweakController {
   }
 
   /**
-   * Finds the meshes that can show their whole region. Only rigid ones qualify: unweighted (one
-   * bone moves them), never deformed by an animation, not shared with linked meshes, and still
-   * mapped straight from the image. A part can show its full texture if any of its meshes can.
+   * Plans every mesh that owns its shape (linked meshes follow their parent). Only rigid ones can
+   * show their whole region: unweighted (one bone moves them), never deformed by an animation, not
+   * shared with linked meshes, and still mapped straight from the image. A part can show its full
+   * texture if any of its meshes can.
    */
   private planMeshes() {
     const { spine } = this;
     const data = this.skeleton.data;
-    const deformed = new Set<Attachment>();
+    const deforms = new Map<Attachment, NumberArrayLike[][]>();
     for (const animation of data.animations) {
       for (const timeline of animation.timelines) {
-        if (timeline instanceof spine.DeformTimeline) deformed.add(timeline.attachment);
+        if (!(timeline instanceof spine.DeformTimeline)) continue;
+        const list = deforms.get(timeline.attachment) ?? [];
+        list.push(timeline.vertices);
+        deforms.set(timeline.attachment, list);
       }
     }
     const entries = data.skins.flatMap((skin) => skin.getAttachments());
-    const parents = new Set<Attachment>();
+    const children = new Map<Attachment, MeshAttachment[]>();
     for (const { attachment } of entries) {
       const parent = attachment instanceof spine.MeshAttachment ? attachment.getParentMesh() : null;
-      if (parent) parents.add(parent);
+      if (parent && !children.get(parent)?.includes(attachment as MeshAttachment)) {
+        children.set(parent, [...(children.get(parent) ?? []), attachment as MeshAttachment]);
+      }
     }
 
     const done = new Set<Attachment>();
@@ -278,15 +296,15 @@ export class TweakController {
       const slot = data.slots[slotIndex].name;
       let reason: MeshReason | null = mesh.bones
         ? "weighted"
-        : deformed.has(mesh)
+        : deforms.has(mesh)
           ? "deformed"
-          : mesh.getParentMesh() || parents.has(mesh)
+          : mesh.getParentMesh() || children.has(mesh)
             ? "linked"
             : null;
       const quad = reason ? null : quadFromMesh(mesh.regionUVs, mesh.vertices);
       if (!reason && !quad) reason = "distorted";
       if (reason === null || !this.meshReasons.has(slot)) this.meshReasons.set(slot, reason);
-      if (!quad) continue;
+      if (mesh.getParentMesh()) continue;
       this.meshPlans.push({
         mesh,
         slot,
@@ -298,20 +316,86 @@ export class TweakController {
           worldVerticesLength: mesh.worldVerticesLength,
           edges: mesh.edges,
         },
-        box: { regionUVs: [...QUAD_UVS], vertices: quad, triangles: [...QUAD_TRIANGLES], hullLength: 8, worldVerticesLength: 8, edges: [...QUAD_EDGES] },
+        box: quad
+          ? { regionUVs: [...QUAD_UVS], vertices: quad, triangles: [...QUAD_TRIANGLES], hullLength: 8, worldVerticesLength: 8, edges: [...QUAD_EDGES] }
+          : null,
+        children: children.get(mesh) ?? [],
+        deforms: mesh.bones ? [] : (deforms.get(mesh) ?? []).map((frames) => ({ frames, original: [...frames] })),
         boxed: false,
+        grow: 0,
       });
     }
   }
 
   private applyMeshes(parts: SpineTweaks["parts"]) {
+    let pose: Skeleton | null = null;
     for (const plan of this.meshPlans) {
-      const boxed = parts[plan.slot]?.fullTexture === true;
-      if (boxed === plan.boxed || !plan.mesh.region) continue;
-      Object.assign(plan.mesh, boxed ? plan.box : plan.original);
-      plan.mesh.updateRegion();
+      const part = parts[plan.slot];
+      const boxed = plan.box !== null && part?.fullTexture === true;
+      // A box already covers the whole region.
+      const grow = boxed ? 0 : (part?.grow ?? 0);
+      if ((boxed === plan.boxed && grow === plan.grow) || !plan.mesh.region) continue;
+      let shape: Partial<MeshShape> = plan.original;
+      let moves: number[] | null = null;
+      if (boxed && plan.box) shape = plan.box;
+      else if (grow > 0) {
+        if (plan.mesh.bones && !pose) pose = this.setupSkeleton();
+        const grown = this.grow(plan, grow, pose);
+        shape = { ...plan.original, regionUVs: grown.uvs, vertices: grown.vertices };
+        moves = grown.moves;
+      }
+      for (const mesh of [plan.mesh, ...plan.children]) {
+        Object.assign(mesh, mesh === plan.mesh ? shape : { regionUVs: shape.regionUVs, vertices: shape.vertices });
+        if (mesh.region) mesh.updateRegion();
+      }
+      const offsets = moves;
+      for (const { frames, original } of plan.deforms) {
+        for (let f = 0; f < frames.length; f++) {
+          frames[f] = offsets ? Array.from(original[f], (v, i) => v + (offsets[i] ?? 0)) : original[f];
+        }
+      }
       plan.boxed = boxed;
+      plan.grow = grow;
     }
+  }
+
+  /**
+   * The plan's mesh with its outline grown. Unweighted vertices move in their bone's space. For a
+   * weighted one, each outline point's move is worked out in world space at the setup pose and
+   * handed to every bone that pulls on it, so it lands there whatever the weights.
+   */
+  private grow(plan: MeshPlan, grow: number, pose: Skeleton | null) {
+    const { regionUVs, vertices, triangles, hullLength } = plan.original;
+    const bones = plan.mesh.bones;
+    if (!bones || !pose) {
+      const { uvs, moves } = growOutline(regionUVs, vertices, triangles, hullLength, grow);
+      return { uvs, moves, vertices: Array.from(vertices, (v, i) => v + moves[i]) };
+    }
+    const world: number[] = [];
+    for (let b = 0, w = 0; b < bones.length; ) {
+      let x = 0;
+      let y = 0;
+      for (let n = bones[b++]; n > 0; n--, b++, w += 3) {
+        const bone = pose.bones[bones[b]];
+        const weight = vertices[w + 2];
+        x += (bone.a * vertices[w] + bone.b * vertices[w + 1] + bone.worldX) * weight;
+        y += (bone.c * vertices[w] + bone.d * vertices[w + 1] + bone.worldY) * weight;
+      }
+      world.push(x, y);
+    }
+    const { uvs, moves } = growOutline(regionUVs, world, triangles, hullLength, grow);
+    const out = Array.from(vertices);
+    for (let b = 0, w = 0, v = 0; b < bones.length; v += 2) {
+      for (let n = bones[b++]; n > 0; n--, b++, w += 3) {
+        const bone = pose.bones[bones[b]];
+        const det = bone.a * bone.d - bone.b * bone.c;
+        if (Math.abs(det) < 1e-9) continue;
+        out[w] += (bone.d * moves[v] - bone.b * moves[v + 1]) / det;
+        out[w + 1] += (-bone.c * moves[v] + bone.a * moves[v + 1]) / det;
+      }
+    }
+    // Weighted deform keys are offsets, so they still fit; only unweighted keys need the moves.
+    return { uvs, moves: null, vertices: out };
   }
 
   /** Wraps each drawable attachment so part offsets apply to its world vertices. */

@@ -4,7 +4,7 @@
 // Not saved (preview only): crossfade, reverse, hold frame, layered animation,
 // pixel-crisp filtering and debug overlays.
 
-import { QUAD_EDGES, QUAD_TRIANGLES, QUAD_UVS, quadFromMesh } from "~/lib/spine-mesh";
+import { growOutline, QUAD_EDGES, QUAD_TRIANGLES, QUAD_UVS, quadFromMesh } from "~/lib/spine-mesh";
 import { PHYSICS_FORCE_SCALE, type SpineTweaks, type TweakBlendMode } from "~/lib/spine-tweaks";
 
 /** The rig's setup pose with the current tweaks applied, read from the live runtime. */
@@ -261,7 +261,7 @@ function bakeConstraints(json: SkeletonJson, t: SpineTweaks, rigSize: number) {
   }
 }
 
-/** Hides parts by removing their attachments, shows their full texture, and moves, scales and rotates them. */
+/** Hides parts by removing their attachments, shows their full texture or grows their outline, and moves, scales and rotates them. */
 function bakeParts(json: SkeletonJson, t: SpineTweaks, pose: SetupPose) {
   for (const slot of json.slots ?? []) {
     const part = t.parts[slot.name];
@@ -284,8 +284,9 @@ function bakeParts(json: SkeletonJson, t: SpineTweaks, pose: SetupPose) {
           }
           continue;
         }
-        // Before the nudge, so the nudge moves the box.
-        if (part.fullTexture && type === "mesh") boxMesh(json, slot.name, name, att, deforms);
+        // Before the nudge, so the nudge moves the box or grown outline. A box already covers the region.
+        const boxed = part.fullTexture && type === "mesh" && boxMesh(json, slot.name, name, att, deforms);
+        if (part.grow > 0 && type === "mesh" && !boxed) growMesh(att, part.grow, pose, boneIndex);
         if (moved && boneIndex >= 0) {
           const nudge = partNudge(pose, boneIndex, part.dx, part.dy, part.scale, part.rotation);
           if (type === "region") nudgeRegion(att, nudge);
@@ -301,18 +302,67 @@ function bakeParts(json: SkeletonJson, t: SpineTweaks, pose: SetupPose) {
  * Swaps a rigid mesh for a box over its whole region, the same as TweakController does live.
  * Leaves weighted, deformed, linked and distorted meshes alone.
  */
-function boxMesh(json: SkeletonJson, slot: string, name: string, att: AttachmentJson, deforms: DeformKey[]) {
-  if (!att.uvs || !att.vertices || att.vertices.length !== att.uvs.length || deforms.length > 0) return;
+function boxMesh(json: SkeletonJson, slot: string, name: string, att: AttachmentJson, deforms: DeformKey[]): boolean {
+  if (!att.uvs || !att.vertices || att.vertices.length !== att.uvs.length || deforms.length > 0) return false;
   const linked = (json.skins ?? []).some((skin) =>
     Object.values(skin.attachments?.[slot] ?? {}).some((a) => a.type === "linkedmesh" && a.parent === name),
   );
   const quad = linked ? null : quadFromMesh(att.uvs, att.vertices);
-  if (!quad) return;
+  if (!quad) return false;
   att.uvs = [...QUAD_UVS];
   att.vertices = quad;
   att.triangles = [...QUAD_TRIANGLES];
   att.hull = 4;
   att.edges = [...QUAD_EDGES];
+  return true;
+}
+
+/**
+ * Pushes a mesh's outline toward its region's edges, the same as TweakController does live.
+ * Deform keys in the file are offsets from the setup shape, so they still fit. Linked meshes
+ * share the shape, so they grow with it.
+ */
+function growMesh(att: AttachmentJson, grow: number, pose: SetupPose, slotBone: number) {
+  const { uvs, vertices, triangles } = att;
+  if (!uvs || !vertices || !triangles || !att.hull) return;
+  const hullLength = att.hull * 2;
+
+  // Unweighted vertices are in the slot bone's space.
+  if (vertices.length === uvs.length) {
+    if (!pose.bones[slotBone]) return;
+    const grown = growOutline(uvs, vertices, triangles, hullLength, grow);
+    att.uvs = grown.uvs.map(round);
+    att.vertices = vertices.map((v, i) => round(v + grown.moves[i]));
+    return;
+  }
+
+  // Weighted: work out each outline point's move in world space at the setup pose, then hand it
+  // to every bone that pulls on the point, so it lands there whatever the weights.
+  const world: number[] = [];
+  const influences: { bone: BoneWorld; at: number; vertex: number }[] = [];
+  for (let i = 0; i < vertices.length; ) {
+    const count = vertices[i++];
+    let x = 0;
+    let y = 0;
+    for (let j = 0; j < count; j++, i += 4) {
+      const bone = pose.bones[vertices[i]];
+      if (!bone) return;
+      const weight = vertices[i + 3];
+      x += (bone.a * vertices[i + 1] + bone.b * vertices[i + 2] + bone.x) * weight;
+      y += (bone.c * vertices[i + 1] + bone.d * vertices[i + 2] + bone.y) * weight;
+      influences.push({ bone, at: i + 1, vertex: world.length / 2 });
+    }
+    world.push(x, y);
+  }
+  if (world.length !== uvs.length) return;
+  const grown = growOutline(uvs, world, triangles, hullLength, grow);
+  for (const { bone, at, vertex } of influences) {
+    const move = toLocal(bone, grown.moves[vertex * 2], grown.moves[vertex * 2 + 1]);
+    if (!move) continue;
+    vertices[at] = round(vertices[at] + move.x);
+    vertices[at + 1] = round(vertices[at + 1] + move.y);
+  }
+  att.uvs = grown.uvs.map(round);
 }
 
 interface Nudge {

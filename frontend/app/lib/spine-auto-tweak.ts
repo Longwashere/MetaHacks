@@ -1,5 +1,5 @@
 import type * as SpineModule from "@esotericsoftware/spine-player";
-import type { SpinePlayer, TextureRegion } from "@esotericsoftware/spine-player";
+import type { MeshAttachment, SpinePlayer, TextureRegion } from "@esotericsoftware/spine-player";
 import { TweakController } from "~/lib/spine-tweak-controller";
 import { DEFAULT_PART, DEFAULT_TWEAKS, isDefaultPart, type PartTweak, type SpineTweaks } from "~/lib/spine-tweaks";
 import type { AutoTweakPart, AutoTweakReview, AutoTweakStatus, AutoTweakTransform, SpineAssetFiles } from "~/lib/types";
@@ -8,7 +8,8 @@ import type { AutoTweakPart, AutoTweakReview, AutoTweakStatus, AutoTweakTransfor
 // atlas pixels differ. So each part's drift can be measured exactly: compare where its opaque
 // pixels sit in the two atlases and map that through the attachment's UVs into world space.
 // The rigs are also rendered offscreen, paused at the same poses, as labelled side-by-side
-// snapshots for Muse to judge which fixes to keep.
+// snapshots for Muse to judge which fixes to keep. Parts whose new art spills past their mesh's
+// outline (and so is cut off) get the outline grown just far enough to show it.
 
 type Spine = typeof SpineModule;
 
@@ -30,10 +31,19 @@ const MIN_ELONGATION = 1.3;
 /** A measured turn beyond this is more likely a redrawn part than a drifted one, so it's left to Muse. */
 const MAX_ROTATION = 45;
 const LOAD_TIMEOUT_MS = 20_000;
+/** Clipping counts as noticeable when this share of a part's painted pixels (and at least MIN_PIXELS) is outside its outline. */
+const CLIP_NOTICEABLE = 0.02;
+/** Grow until no more than this share is still cut off. */
+const CLIP_TARGET = 0.005;
+/** Steps of the grow search; 6 halvings resolve it to under 2%, then it's rounded up to the slider's step. */
+const GROW_SEARCH_STEPS = 6;
+const GROW_STEP = 0.05;
 
 export interface AutoTweakCapture {
   images: string[];
   parts: AutoTweakPart[];
+  /** Per clipped part, the outline grow (0–1) that shows its art. Applied by `measured` and `apply` too. */
+  grows: Map<string, number>;
   /** `tweaks` with every measured fix applied: the fallback when the review fails. */
   measured: (tweaks: SpineTweaks) => SpineTweaks;
   /** `tweaks` with Muse's changes applied. */
@@ -82,7 +92,7 @@ export async function captureAutoTweak({
   let originalParts: Map<string, PartMeasure>;
   const originalShots: HTMLCanvasElement[] = [];
   try {
-    originalParts = measureParts(spine, originalRig.player);
+    originalParts = measureParts(spine, originalRig.player, new Map());
     for (const pose of POSES) {
       await poseAt(originalRig.player, pose);
       originalShots.push(copyCanvas(originalRig.player));
@@ -94,8 +104,14 @@ export async function captureAutoTweak({
   const remixRig = await openRig(spine, remix, animation, base);
   try {
     // Measured before the user's part tweaks are synced, since those move the vertices.
-    const remixParts = measureParts(spine, remixRig.player);
-    const names = remixRig.controller.info().parts;
+    const pages: PageCache = new Map();
+    const remixParts = measureParts(spine, remixRig.player, pages);
+    const info = remixRig.controller.info();
+    const names = info.parts;
+    // Parts already showing their full texture (a box over the region) can't be clipped.
+    const meshParts = Object.keys(info.meshes).filter((name) => !(tweaks.parts[name]?.fullTexture && info.meshes[name] === null));
+    const grows = measureClipping(spine, remixRig, meshParts, base, pages);
+    for (const [name, grow] of grows) if (grow <= (tweaks.parts[name]?.grow ?? 0)) grows.delete(name);
     const conv = new Converter(remixParts, remixRig.controller.rigSize, tweaks);
 
     const fixes = new Map<string, PartTransform>();
@@ -112,10 +128,14 @@ export async function captureAutoTweak({
         current: current && hasTransform(current) ? conv.toScreen(name, current) : null,
       };
     });
+    const withGrows = (parts: SpineTweaks["parts"]) => {
+      for (const [name, grow] of grows) parts = setGrow(parts, name, grow);
+      return parts;
+    };
     const withFixes = (t: SpineTweaks) => {
       let next = t.parts;
       for (const [name, fix] of fixes) next = setTransform(next, name, fix);
-      return { ...t, parts: next };
+      return { ...t, parts: withGrows(next) };
     };
 
     const panels: Panel[][] = POSES.map((_, i) => [{ title: "ORIGINAL", canvas: originalShots[i], labels: [] }]);
@@ -134,7 +154,8 @@ export async function captureAutoTweak({
     return {
       images: panels.map(composite),
       parts,
-      measuredCount: fixes.size,
+      grows,
+      measuredCount: fixes.size + grows.size,
       measured: withFixes,
       apply: (t, review) => {
         let next = t.parts;
@@ -142,7 +163,7 @@ export async function captureAutoTweak({
           const fix = conv.toTweak(change.part, change);
           if (fix) next = setTransform(next, change.part, fix);
         }
-        return { ...t, parts: next };
+        return { ...t, parts: withGrows(next) };
       },
     };
   } finally {
@@ -160,12 +181,16 @@ function setTransform(parts: Record<string, PartTweak>, name: string, t: PartTra
   return isDefaultPart(next) ? rest : { ...rest, [name]: next };
 }
 
+function setGrow(parts: Record<string, PartTweak>, name: string, grow: number): Record<string, PartTweak> {
+  return { ...parts, [name]: { ...(parts[name] ?? DEFAULT_PART), grow } };
+}
+
 // ---------------------------------------------------------------------------
 // Measuring
 // ---------------------------------------------------------------------------
 
 /** Measures every part's setup-pose attachment against its atlas pixels. */
-function measureParts(spine: Spine, player: SpinePlayer): Map<string, PartMeasure> {
+function measureParts(spine: Spine, player: SpinePlayer, pages: PageCache): Map<string, PartMeasure> {
   const live = player.skeleton;
   const out = new Map<string, PartMeasure>();
   if (!live) return out;
@@ -174,7 +199,6 @@ function measureParts(spine: Spine, player: SpinePlayer): Map<string, PartMeasur
   skeleton.setToSetupPose();
   skeleton.updateWorldTransform(spine.Physics.none);
 
-  const pages = new Map<unknown, ImageData | null>();
   for (const slot of skeleton.slots) {
     const att = slot.attachment;
     let vertices: number[];
@@ -201,8 +225,7 @@ function measureParts(spine: Spine, player: SpinePlayer): Map<string, PartMeasur
     const affine = fitAffine(points, vertices);
     if (!affine) continue;
 
-    if (!pages.has(region.texture)) pages.set(region.texture, pagePixels(region.texture));
-    const pixels = pages.get(region.texture);
+    const pixels = pagePixelsCached(pages, region.texture);
     const stats = pixels ? pixelStats(pixels, region) : null;
     if (!stats) continue;
 
@@ -233,6 +256,13 @@ function measureParts(spine: Spine, player: SpinePlayer): Map<string, PartMeasur
   return out;
 }
 
+type PageCache = Map<unknown, ImageData | null>;
+
+function pagePixelsCached(pages: PageCache, texture: unknown) {
+  if (!pages.has(texture)) pages.set(texture, pagePixels(texture));
+  return pages.get(texture) ?? null;
+}
+
 function pagePixels(texture: unknown): ImageData | null {
   const image = (texture as { getImage?: () => CanvasImageSource & { width: number; height: number } } | null)?.getImage?.();
   if (!image?.width || !image.height) return null;
@@ -248,6 +278,107 @@ function pagePixels(texture: unknown): ImageData | null {
     // A page served without CORS taints the canvas.
     return null;
   }
+}
+
+/**
+ * For each mesh part whose painted pixels noticeably spill past its outline, the smallest outline
+ * grow (rounded up to the slider's step) that shows them. Grows each part on `rig`'s controller to
+ * test it, and leaves the controller at `base` afterwards.
+ */
+function measureClipping(spine: Spine, rig: Rig, parts: string[], base: SpineTweaks, pages: PageCache): Map<string, number> {
+  const out = new Map<string, number>();
+  const live = rig.player.skeleton;
+  if (!live) return out;
+  const skeleton = new spine.Skeleton(live.data);
+  skeleton.setSkin(live.skin);
+  skeleton.setToSetupPose();
+
+  try {
+    for (const name of parts) {
+      const att = skeleton.findSlot(name)?.attachment;
+      if (!(att instanceof spine.MeshAttachment) || !att.region) continue;
+      const pixels = pagePixelsCached(pages, att.region.texture);
+      if (!pixels) continue;
+
+      const outside = spilledPixels(pixels, att.region, hull(att));
+      if (!outside || outside.clipped < MIN_PIXELS || outside.clipped < CLIP_NOTICEABLE * outside.total) continue;
+      const target = CLIP_TARGET * outside.total;
+      // The controller swaps in the grown shape, which updates the attachment's atlas UVs.
+      const clippedAt = (grow: number) => {
+        rig.controller.sync({ ...base, parts: { [name]: { ...DEFAULT_PART, grow } } });
+        return stillOutside(outside.points, hull(att));
+      };
+
+      let grow = 1;
+      if (clippedAt(1) <= target) {
+        let lo = 0;
+        for (let i = 0; i < GROW_SEARCH_STEPS; i++) {
+          const mid = (lo + grow) / 2;
+          if (clippedAt(mid) <= target) grow = mid;
+          else lo = mid;
+        }
+      }
+      out.set(name, Math.min(1, Math.ceil(grow / GROW_STEP - 1e-9) * GROW_STEP));
+    }
+  } finally {
+    rig.controller.sync(base);
+  }
+  return out;
+}
+
+/** A mesh's outline in atlas page UVs, as [u0, v0, u1, v1, ...]. */
+function hull(att: MeshAttachment): number[] {
+  return Array.from(att.uvs).slice(0, att.hullLength);
+}
+
+/**
+ * Painted pixels of a region that fall outside `outline` (page UVs): their centres and alpha, and
+ * the alpha-weighted totals outside and overall.
+ */
+function spilledPixels(image: ImageData, region: TextureRegion, outline: number[]) {
+  if (outline.length < 6) return null;
+  const { width: w, height: h, data } = image;
+  const x0 = Math.max(Math.round(region.u * w), 0);
+  const x1 = Math.min(Math.round(region.u2 * w), w);
+  const y0 = Math.max(Math.round(region.v * h), 0);
+  const y1 = Math.min(Math.round(region.v2 * h), h);
+  const points: number[] = [];
+  let total = 0;
+  let clipped = 0;
+  for (let y = y0; y < y1; y++) {
+    const v = (y + 0.5) / h;
+    for (let x = x0; x < x1; x++) {
+      const a = data[(y * w + x) * 4 + 3];
+      if (a === 0) continue;
+      const weight = a / 255;
+      total += weight;
+      const u = (x + 0.5) / w;
+      if (inPolygon(u, v, outline)) continue;
+      clipped += weight;
+      points.push(u, v, weight);
+    }
+  }
+  return { points, total, clipped };
+}
+
+/** Alpha-weighted amount of `points` ([u, v, weight, ...]) still outside `outline`. */
+function stillOutside(points: number[], outline: number[]) {
+  let clipped = 0;
+  for (let i = 0; i < points.length; i += 3) {
+    if (!inPolygon(points[i], points[i + 1], outline)) clipped += points[i + 2];
+  }
+  return clipped;
+}
+
+/** Even-odd test of a point against a polygon given as [x0, y0, x1, y1, ...]. */
+function inPolygon(x: number, y: number, polygon: number[]) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 2; i < polygon.length; j = i, i += 2) {
+    const xi = polygon[i], yi = polygon[i + 1];
+    const xj = polygon[j], yj = polygon[j + 1];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 /** Alpha-weighted centre and covariance of a region's pixels, in region-relative coordinates. */

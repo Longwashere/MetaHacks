@@ -1,7 +1,8 @@
 // Spine meshes trace their image's outline, and the runtime only draws the texture inside it. When
 // a part is repainted with a new shape (a mace where a sword was), anything past the old outline
 // is cut off. A rigid mesh can be swapped for a box covering its whole atlas region, so all of the
-// new art shows. Used by the live preview (TweakController) and the bake; the backend has the same
+// new art shows; any other mesh can grow its outline toward the region's edges instead
+// (growOutline). Used by the live preview (TweakController) and the bake; the backend has the same box
 // math in backend/src/lib/mesh.ts for part fixes. Keep them in step.
 
 /** Why a part's mesh can't become a box, shown in the tweak panel. */
@@ -79,4 +80,83 @@ function solve3(m: number[], r: number[]): number[] | null {
 
 function round(v: number) {
   return Math.round(v * 100) / 100;
+}
+
+/**
+ * Pushes a mesh's outline `grow` (0–1) of the way out to the edges of its region, so art painted
+ * past the old outline shows. Unlike a box this works for any mesh: inner points and the
+ * triangles stay, so it bends and deforms as before. Returns the new UVs and, per vertex, how far
+ * it moves in the space of `positions` (bone space, or world space at the setup pose for a
+ * weighted mesh). `hullLength` counts floats, like MeshAttachment.hullLength.
+ */
+export function growOutline(
+  uvs: ArrayLike<number>,
+  positions: ArrayLike<number>,
+  triangles: ArrayLike<number>,
+  hullLength: number,
+  grow: number,
+): { uvs: number[]; moves: number[] } {
+  const out = Array.from(uvs);
+  const moves = new Array<number>(uvs.length).fill(0);
+  const hull = Math.min(hullLength, uvs.length) / 2;
+  if (hull < 3 || !(grow > 0) || positions.length !== uvs.length) return { uvs: out, moves };
+
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < hull; i++) {
+    cx += uvs[2 * i];
+    cy += uvs[2 * i + 1];
+  }
+  cx /= hull;
+  cy /= hull;
+
+  const maps = uvToPosition(uvs, positions, triangles);
+  const g = Math.min(1, grow);
+  for (let i = 0; i < hull; i++) {
+    // Each outline point moves along the ray from the outline's centre to the region's edge.
+    const u = uvs[2 * i];
+    const v = uvs[2 * i + 1];
+    const dx = u - cx;
+    const dy = v - cy;
+    let s = Infinity;
+    if (dx > 0) s = Math.min(s, (1 - u) / dx);
+    else if (dx < 0) s = Math.min(s, -u / dx);
+    if (dy > 0) s = Math.min(s, (1 - v) / dy);
+    else if (dy < 0) s = Math.min(s, -v / dy);
+    if (!Number.isFinite(s) || s <= 0) continue;
+    const du = dx * s * g;
+    const dv = dy * s * g;
+    out[2 * i] = u + du;
+    out[2 * i + 1] = v + dv;
+    const [a, b, c, d] = maps[i];
+    moves[2 * i] = a * du + b * dv;
+    moves[2 * i + 1] = c * du + d * dv;
+  }
+  return { uvs: out, moves };
+}
+
+/**
+ * Per vertex, the 2×2 map [a, b, c, d] from a change in UV to a change in position
+ * (x += a·du + b·dv, y += c·du + d·dv), averaged over the triangles that use the vertex.
+ */
+function uvToPosition(uvs: ArrayLike<number>, positions: ArrayLike<number>, triangles: ArrayLike<number>): number[][] {
+  const n = uvs.length / 2;
+  const sums = Array.from({ length: n }, () => [0, 0, 0, 0, 0]);
+  const all = [0, 0, 0, 0, 0];
+  for (let t = 0; t + 2 < triangles.length; t += 3) {
+    const [i, j, k] = [triangles[t], triangles[t + 1], triangles[t + 2]];
+    const u1 = uvs[2 * j] - uvs[2 * i], v1 = uvs[2 * j + 1] - uvs[2 * i + 1];
+    const u2 = uvs[2 * k] - uvs[2 * i], v2 = uvs[2 * k + 1] - uvs[2 * i + 1];
+    const det = u1 * v2 - u2 * v1;
+    if (Math.abs(det) < 1e-12) continue;
+    const x1 = positions[2 * j] - positions[2 * i], y1 = positions[2 * j + 1] - positions[2 * i + 1];
+    const x2 = positions[2 * k] - positions[2 * i], y2 = positions[2 * k + 1] - positions[2 * i + 1];
+    // P · U⁻¹, where U and P hold the two edges in UV and in position as columns.
+    const m = [(x1 * v2 - x2 * v1) / det, (x2 * u1 - x1 * u2) / det, (y1 * v2 - y2 * v1) / det, (y2 * u1 - y1 * u2) / det, 1];
+    for (const s of [sums[i], sums[j], sums[k], all]) for (let q = 0; q < 5; q++) s[q] += m[q];
+  }
+  return sums.map((s) => {
+    const src = s[4] > 0 ? s : all;
+    return src[4] > 0 ? src.slice(0, 4).map((x) => x / src[4]) : [0, 0, 0, 0];
+  });
 }
