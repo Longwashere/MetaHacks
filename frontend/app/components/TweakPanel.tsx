@@ -1,4 +1,4 @@
-import { Crosshair, EyeOff, FlipHorizontal2, Loader2, RotateCcw, Save, SlidersHorizontal, Sparkles, Undo2, Wind, X } from "lucide-react";
+import { Crosshair, Expand, EyeOff, FlipHorizontal2, Loader2, RotateCcw, Save, SlidersHorizontal, Sparkles, Undo2, Wind, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -22,6 +22,7 @@ import {
   type SpineTweaks,
   type TweakBlendMode,
 } from "~/lib/spine-tweaks";
+import { MESH_REASONS } from "~/lib/spine-mesh";
 import { cn } from "~/lib/utils";
 
 interface TweakPanelProps {
@@ -108,6 +109,18 @@ export function TweakPanel({
   };
 
   const part = selectedPart ? (tweaks.parts[selectedPart] ?? DEFAULT_PART) : null;
+  const meshes = rig?.meshes ?? {};
+  const expandable = Object.keys(meshes).filter((name) => meshes[name] === null);
+  const allFull = expandable.length > 0 && expandable.every((name) => tweaks.parts[name]?.fullTexture);
+  const setAllFull = (fullTexture: boolean) => {
+    const parts = { ...tweaks.parts };
+    for (const name of expandable) {
+      const next = { ...(parts[name] ?? DEFAULT_PART), fullTexture };
+      if (isDefaultPart(next)) delete parts[name];
+      else parts[name] = next;
+    }
+    set({ parts });
+  };
   const bone = selectedBone ? (tweaks.bones[selectedBone] ?? DEFAULT_BONE) : null;
   const skins = tweaks.skins ?? (rig?.baseSkin ? [rig.baseSkin] : []);
 
@@ -357,6 +370,24 @@ export function TweakPanel({
                 </p>
               </div>
 
+              {expandable.length > 0 && (
+                <div className="flex flex-col gap-2 rounded-lg border p-3">
+                  <div className="flex min-h-8 items-center justify-between gap-2">
+                    <h3 className="flex items-center gap-1.5 text-sm font-medium">
+                      <Expand className="size-4 text-muted-foreground" /> Full textures
+                    </h3>
+                    <Button variant="outline" size="sm" onClick={() => setAllFull(!allFull)}>
+                      {allFull ? "Restore outlines" : `Show all (${expandable.length})`}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {expandable.length === 1 ? "1 part is" : `${expandable.length} parts are`} drawn with a mesh traced around the
+                    original art, which hides anything painted outside it. Show their whole texture so reshaped parts aren't cut
+                    off. Turn on Mesh triangles under Look to see the outlines.
+                  </p>
+                </div>
+              )}
+
               <EditedList
                 label="Edited parts"
                 names={Object.keys(tweaks.parts)}
@@ -384,6 +415,26 @@ export function TweakPanel({
                     checked={part.hidden}
                     onChange={(hidden) => setPart(selectedPart, { hidden })}
                   />
+                  {selectedPart in meshes && (
+                    <div className="flex flex-col gap-1.5">
+                      <CheckField
+                        id="tw-part-full"
+                        label={
+                          <>
+                            <Expand className="size-4 text-muted-foreground" /> Show the full texture
+                          </>
+                        }
+                        checked={part.fullTexture}
+                        disabled={meshes[selectedPart] !== null}
+                        onChange={(fullTexture) => setPart(selectedPart, { fullTexture })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {meshes[selectedPart] === null
+                          ? "This part's mesh only shows the texture inside its original outline. Draw its whole atlas box instead, so a repainted part with a new shape isn't cut off."
+                          : `Not available for this part. ${MESH_REASONS[meshes[selectedPart]]}`}
+                      </p>
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Offsets follow the part's bone, so a fix stays aligned through every animation. Use them to line up a part the
                     image model shifted.
@@ -610,11 +661,23 @@ function SliderField({
   );
 }
 
-function CheckField({ id, label, checked, onChange }: { id: string; label: ReactNode; checked: boolean; onChange: (v: boolean) => void }) {
+function CheckField({
+  id,
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: ReactNode;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <div className="flex items-center gap-2">
-      <Checkbox id={id} checked={checked} onCheckedChange={(v) => onChange(v === true)} />
-      <Label htmlFor={id} className="min-w-0 font-normal">
+      <Checkbox id={id} checked={checked} disabled={disabled} onCheckedChange={(v) => onChange(v === true)} />
+      <Label htmlFor={id} className={cn("min-w-0 font-normal", disabled && "opacity-50")}>
         <span className="flex items-center gap-1.5 truncate">{label}</span>
       </Label>
     </div>

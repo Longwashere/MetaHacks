@@ -214,6 +214,169 @@ export async function fitToPage(
   return sharp(out, { raw: { width: page.width, height: page.height, channels: 4 } }).png().toBuffer();
 }
 
+/** Paint further than this from a part's box, as a share of the box's longer side, is stray, not part of it. */
+const SHRINK_REACH = 0.5;
+/** Blobs smaller than this many pixels are specks, not parts, and are left where they are. */
+const SHRINK_MIN_BLOB = 64;
+/** Rings of background-masked pixels around a part that move with it: the model's outlines blend into the key colour there. */
+const SHRINK_EDGE = 3;
+
+/**
+ * Shrinks parts the model painted bigger than their boxes (an axe in a sword's box) so all of
+ * each part fits, rather than being cut off at the box's edge when it's copied back. Each
+ * connected blob of paint belongs to the box most of it lies in, so an axe blade reaching into
+ * a neighbour's box stays with the axe (see partOwners); a part that spills out of its box is
+ * scaled down evenly about the box's centre until it fits. Returns the square as a PNG,
+ * and the scale applied to each placement (1 when it already fit).
+ */
+export async function shrinkPartsToBoxes(generated: Buffer, input: ModelInput): Promise<{ image: Buffer; scales: number[] }> {
+  const { side, layout, background } = input;
+  const rgb = await sharp(generated).resize(side, side, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const source = Buffer.from(rgb);
+  const key = hexToRgb(background.hex);
+  const isBg = backgroundMask(rgb, side, side, background);
+  const boxes = layout.placements.map((p) => toPixels(p, side));
+
+  const owner = partOwners(isBg, side, boxes);
+
+  const scales = boxes.map(() => 1);
+  for (const [i, b] of boxes.entries()) {
+    let x0 = side, x1 = -1, y0 = side, y1 = -1;
+    for (let p = 0; p < owner.length; p++) {
+      if (owner[p] !== i) continue;
+      const x = p % side, y = (p - x) / side;
+      x0 = Math.min(x0, x);
+      x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y);
+      y1 = Math.max(y1, y);
+    }
+    if (x1 < 0) continue;
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (x0 >= b.x && y0 >= b.y && x1 < b.x + b.width && y1 < b.y + b.height) continue;
+    const scale = Math.min(b.width / w, b.height / h, 1);
+    scales[i] = Math.round(scale * 1000) / 1000;
+
+    // The part on its own: its pixels within the extent, everything else background.
+    const crop = Buffer.alloc(w * h * 3);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = (y0 + y) * side + x0 + x;
+        const o = (y * w + x) * 3;
+        if (owner[p] === i) source.copy(crop, o, p * 3, p * 3 + 3);
+        else crop.set(key, o);
+      }
+    }
+    const nw = Math.max(1, Math.min(b.width, Math.floor(w * scale)));
+    const nh = Math.max(1, Math.min(b.height, Math.floor(h * scale)));
+    const small = await sharp(crop, { raw: { width: w, height: h, channels: 3 } }).resize(nw, nh, { fit: "fill" }).raw().toBuffer();
+
+    for (let p = 0; p < owner.length; p++) if (owner[p] === i) rgb.set(key, p * 3);
+    const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+    const nx = Math.min(Math.max(Math.round(cx + (x0 - cx) * scale), b.x), b.x + b.width - nw);
+    const ny = Math.min(Math.max(Math.round(cy + (y0 - cy) * scale), b.y), b.y + b.height - nh);
+    for (let y = 0; y < nh; y++) small.copy(rgb, ((ny + y) * side + nx) * 3, y * nw * 3, (y + 1) * nw * 3);
+  }
+
+  const image = await sharp(rgb, { raw: { width: side, height: side, channels: 3 } }).png().toBuffer();
+  return { image, scales };
+}
+
+/**
+ * Share (0–1) of the model's painted pixels that belong to a part: blobs of paint touching a
+ * part's box, however far they spill out of it. Paint that touches no box is stray, e.g. a
+ * part drawn again in empty space. Unlike layoutFit, a part drawn bigger than its box still
+ * counts, since shrinkPartsToBoxes fits it back in.
+ */
+export async function attachedFit(generated: Buffer, input: ModelInput): Promise<number> {
+  const side = LAYOUT_CHECK_SIDE;
+  const rgb = await sharp(generated).resize(side, side, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const isBg = backgroundMask(rgb, side, side, input.background);
+  const owner = partOwners(isBg, side, input.layout.placements.map((p) => toPixels(p, side)), false);
+  let painted = 0, attached = 0;
+  for (let p = 0; p < isBg.length; p++) {
+    if (isBg[p]) continue;
+    painted++;
+    if (owner[p] >= 0) attached++;
+  }
+  return painted === 0 ? 1 : attached / painted;
+}
+
+/** A blob counts as one part only if no other box holds more than this share of it. */
+const SHRINK_SPLIT_SHARE = 0.1;
+
+/**
+ * Which box (index) each pixel of the square belongs to, or -1 for background and specks.
+ * Connected blobs go whole to the box holding most of their pixels, or, with `nearby`, to the
+ * nearest box within SHRINK_REACH when none does (else they stay -1). A blob spread over several boxes (two parts drawn
+ * touching) is split pixel by pixel instead, each to its nearest box. Each part then takes
+ * SHRINK_EDGE rings of the surrounding background-masked pixels, its blended outline.
+ */
+function partOwners(isBg: Uint8Array, side: number, boxes: PageRect[], nearby = true): Int32Array {
+  const nearest = (x: number, y: number) => {
+    let best = -1, bestD = Infinity;
+    boxes.forEach((b, i) => {
+      const d = Math.max(b.x - x, x - (b.x + b.width - 1), b.y - y, y - (b.y + b.height - 1), 0);
+      if (d < bestD && d <= SHRINK_REACH * Math.max(b.width, b.height)) {
+        best = i;
+        bestD = d;
+      }
+    });
+    return best;
+  };
+  const owner = new Int32Array(side * side).fill(-1);
+  const seen = new Uint8Array(side * side);
+  const blob: number[] = [];
+  for (let start = 0; start < owner.length; start++) {
+    if (isBg[start] || seen[start]) continue;
+    blob.length = 0;
+    blob.push(start);
+    seen[start] = 1;
+    for (let k = 0; k < blob.length; k++) {
+      const p = blob[k], x = p % side;
+      for (const q of [x > 0 ? p - 1 : -1, x < side - 1 ? p + 1 : -1, p - side, p + side]) {
+        if (q < 0 || q >= owner.length || isBg[q] || seen[q]) continue;
+        seen[q] = 1;
+        blob.push(q);
+      }
+    }
+    if (blob.length < SHRINK_MIN_BLOB) continue;
+    const inside = boxes.map(() => 0);
+    let sx = 0, sy = 0;
+    for (const p of blob) {
+      const x = p % side, y = (p - x) / side;
+      sx += x;
+      sy += y;
+      boxes.forEach((b, i) => {
+        if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) inside[i]++;
+      });
+    }
+    const shared = inside.filter((n) => n > blob.length * SHRINK_SPLIT_SHARE).length > 1;
+    if (shared) {
+      for (const p of blob) owner[p] = nearest(p % side, Math.floor(p / side));
+      continue;
+    }
+    const most = inside.indexOf(Math.max(...inside));
+    const box = inside[most] > 0 ? most : nearby ? nearest(Math.round(sx / blob.length), Math.round(sy / blob.length)) : -1;
+    for (const p of blob) owner[p] = box;
+  }
+
+  let frontier: number[] = [];
+  for (let p = 0; p < owner.length; p++) if (owner[p] >= 0) frontier.push(p);
+  for (let ring = 0; ring < SHRINK_EDGE; ring++) {
+    const next: number[] = [];
+    for (const p of frontier) {
+      const x = p % side;
+      for (const q of [x > 0 ? p - 1 : -1, x < side - 1 ? p + 1 : -1, p - side, p + side]) {
+        if (q < 0 || q >= owner.length || owner[q] >= 0 || !isBg[q]) continue;
+        owner[q] = owner[p];
+        next.push(q);
+      }
+    }
+    frontier = next;
+  }
+  return owner;
+}
+
 /** Painted pixels this close to a part's box (a fraction of the square) still count as inside, to allow for drift. */
 const LAYOUT_MARGIN = 0.015;
 /** Side of the downscaled copy the layout check measures. */

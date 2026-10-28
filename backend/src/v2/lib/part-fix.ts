@@ -1,19 +1,29 @@
 import path from "node:path";
 import sharp from "sharp";
 import { type AtlasPage, type PageRect, isSafePageName, parseAtlas } from "./atlas.js";
-import { layoutParts } from "../../lib/layout.js";
-import { ContentPolicyError, repaintPage, summarizeLook } from "./meta.js";
+import { type PartLayout, layoutParts } from "../../lib/layout.js";
+import { ContentPolicyError, planPartFix, repaintPage } from "./meta.js";
 import { type RemixProgress, fetchBaseFile, withProgress } from "./remix.js";
 import { putFile } from "../../lib/storage.js";
-import { type PageImage, decodePage, fitToPage, layoutFit, pickBackground, toModelInput } from "./textures.js";
+import { type PageImage, attachedFit, decodePage, fitToPage, pickBackground, shrinkPartsToBoxes, toDataUrl, toModelInput } from "./textures.js";
 import type { PartFixInput } from "../../lib/types.js";
 
 /** Same limits as a full remix (see remix.ts). */
 const IMAGE_MAX_SIDE = 1536;
+/** Muse Spark only needs to see what the parts are. */
+const PLAN_MAX_SIDE = 768;
+const PLAN_EXPECTED_MS = 8_000;
 const PAGE_EXPECTED_MS = 10_000;
-const MIN_LAYOUT_FIT = 0.85;
+/**
+ * Least share of the painted pixels that must touch a chosen part (see attachedFit). A part may
+ * grow past its box, since it's shrunk to fit; paint elsewhere means the model drew the part
+ * again or rearranged the image.
+ */
+const MIN_ATTACHED_FIT = 0.85;
+/** Smallest shrink a part may need to fit its box; below this the model drew it far too big. */
+const MIN_PART_SCALE = 0.5;
 const LAYOUT_RETRY_NOTE =
-  "A previous attempt moved, enlarged and duplicated parts. Repaint each part exactly where it is in the input image, at the same size, and nowhere else.";
+  "A previous attempt drew the parts too big or away from where they are. Draw each new part over the old one, centred on it and no bigger than it, and nowhere else.";
 
 export interface PartFixRequest extends PartFixInput {
   /** The remix being fixed. Its pages sit next to its atlas. */
@@ -25,11 +35,18 @@ export interface PartFixRequest extends PartFixInput {
     editPrompt: string | null;
     style: string;
   };
+  /**
+   * True when a chosen part is drawn with a mesh that can't be boxed (see lib/mesh.ts): the game
+   * shows only what's inside its outline, so the model is asked to keep to it.
+   */
+  keepOutline: boolean;
   /** The rig it was remixed from, to start from the original parts; null when it's gone. */
   original: { atlasUrl: string; premultipliedAlpha: boolean } | null;
 }
 
 export interface PartFixResult {
+  /** Storage folder the files went to, for the job to add the skeleton next to them. */
+  folder: string;
   /** Storage keys of the new .atlas and every page, in atlas order. */
   atlas: string;
   textures: string[];
@@ -37,9 +54,10 @@ export interface PartFixResult {
 
 /**
  * Repaints only the chosen regions of a finished remix. The chosen parts are packed into a
- * square of their own (from the original rig, or the remix itself), Muse Image repaints them
- * to the remix's look, described in text, and the result is keyed and copied back into just
- * those regions. Every other pixel of the remix is kept.
+ * square of their own (from the original rig, or the remix itself). Muse Spark looks at that
+ * square and expands the user's request into the image prompt: the remix's art style in paint
+ * terms and what each part becomes, named by where it sits. Muse Image repaints the square, and
+ * the result is keyed and copied back into just those regions. Every other pixel is kept.
  *
  * Muse Image gets only the one image: given the rest of the remix as a second, reference
  * image, it repainted that busier image instead (see FRICTION_LOG.md, 2026-10-28).
@@ -51,6 +69,8 @@ export async function runPartFix(
   jobId: string,
   input: PartFixRequest,
   onProgress: RemixProgress,
+  /** Called with Muse's expanded prompt for the image model (pages joined by blank lines). */
+  onPrompt: (editPrompt: string) => void,
   signal: AbortSignal,
 ): Promise<PartFixResult> {
   onProgress(0.05, "Reading the remix");
@@ -68,11 +88,8 @@ export async function runPartFix(
   const sources = await sourcePages(input, atlasText, pages, selected, remixImages, signal);
   const source = sources ? "original" : "remix";
 
-  const look = input.remix.editPrompt
-    ? await withProgress(onProgress, 0.07, 0.1, "Reading the remix's look", 6_000, async () =>
-        (await summarizeLook(input.remix.editPrompt ?? "", signal)) ?? input.remix.prompt,
-      )
-    : input.remix.prompt;
+  // Spark's own plan for the remix describes its materials best; it's told to ignore the positions in it.
+  const look = input.remix.editPrompt ?? input.remix.prompt;
 
   const touched = selected.flatMap((s, i) => (s.length > 0 ? [i] : []));
   const background = pickBackground(
@@ -81,14 +98,17 @@ export async function runPartFix(
   );
 
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
-  const layoutChecks: { page: string; attempt: number; insideBoxes: number }[] = [];
+  const layoutChecks: { page: string; attempt: number; attached: number; scales: number[] }[] = [];
   const prompts: Record<string, string> = {};
+  /** Muse's expanded prompt per page, or null where its reply was unusable and the request went as-is. */
+  const plans: Record<string, string | null> = {};
+  const expanded: string[] = [];
   const writeLog = () =>
     putFile(
       folder,
       "prompts.json",
       JSON.stringify(
-        { jobId, createdAt: new Date().toISOString(), kind: "parts", request: { ...input, sourceUsed: source }, look, prompts, layoutChecks },
+        { jobId, createdAt: new Date().toISOString(), kind: "parts", request: { ...input, sourceUsed: source }, look, plans, prompts, layoutChecks },
         null,
         2,
       ),
@@ -99,38 +119,65 @@ export async function runPartFix(
     const page = pages[i];
     const rects = selected[i].map((j) => page.rects[j]);
     const sourceImage = sources?.[i] ?? remixImages[i];
-    const modelInput = await toModelInput(sourceImage, IMAGE_MAX_SIDE, background, layoutParts(rects, sourceImage));
-    const prompt = buildPrompt(input, look, rects.length, background.name, source);
+    const modelInput = await toModelInput(sourceImage, IMAGE_MAX_SIDE, background, centreLayout(layoutParts(rects, sourceImage)));
+    const from = 0.1 + (0.8 * step) / touched.length;
+    const to = 0.1 + (0.8 * (step + 1)) / touched.length;
+    const onPage = touched.length > 1 ? ` on page ${step + 1} of ${touched.length}` : "";
+
+    const plan = await withProgress(onProgress, from, from + (to - from) * 0.25, `Planning the fix${onPage}`, PLAN_EXPECTED_MS, async () =>
+      planPartFix(
+        {
+          image: await toDataUrl(Buffer.from(modelInput.dataUrl.slice(modelInput.dataUrl.indexOf(",") + 1), "base64"), PLAN_MAX_SIDE),
+          background: background.name,
+          parts: describeParts(selected[i].map((j) => page.regions[j]), modelInput.layout),
+          source,
+          look,
+          style: input.remix.style,
+          request: input.prompt,
+        },
+        signal,
+      ),
+    );
+    plans[page.name] = plan;
+    if (plan) {
+      expanded.push(plan);
+      onPrompt(expanded.join("\n\n"));
+    }
+    const prompt = buildPrompt(input, plan, rects.length, background.name, source);
     prompts[page.name] = prompt;
     await writeLog();
 
-    const generated = await withProgress(
+    const { generated, fitted } = await withProgress(
       onProgress,
-      0.1 + (0.8 * step) / touched.length,
-      0.1 + (0.8 * (step + 1)) / touched.length,
-      touched.length > 1 ? `Repainting parts on page ${step + 1} of ${touched.length}` : "Repainting the parts",
+      from + (to - from) * 0.25,
+      to,
+      `Repainting the parts${onPage}`,
       PAGE_EXPECTED_MS,
       async () => {
         const paint = async (note: string) => {
           try {
             return await repaintPage(modelInput, [prompt, note].filter(Boolean).join(" "), null, signal);
           } catch (error) {
-            // The user wrote this prompt themselves, so they re-word it rather than Muse.
             if (error instanceof ContentPolicyError) throw new Error("The image model declined this prompt. Try describing the fix differently.");
             throw error;
           }
         };
+        // Returns the image with every part shrunk into its box, or null to paint again.
         const check = async (image: Buffer, attempt: number) => {
-          const fit = await layoutFit(image, modelInput);
-          layoutChecks.push({ page: page.name, attempt, insideBoxes: Math.round(fit * 100) / 100 });
+          const fit = await attachedFit(image, modelInput);
+          // A part drawn bigger than its box (an axe for a sword) is shrunk to fit, not cut off.
+          const { image: shrunk, scales } = await shrinkPartsToBoxes(image, modelInput);
+          layoutChecks.push({ page: page.name, attempt, attached: Math.round(fit * 100) / 100, scales });
           await writeLog();
-          return fit >= MIN_LAYOUT_FIT;
+          return fit >= MIN_ATTACHED_FIT && Math.min(...scales) >= MIN_PART_SCALE ? { generated: image, fitted: shrunk } : null;
         };
         const first = await paint("");
-        if (await check(first, 1)) return first;
+        const firstFit = await check(first, 1);
+        if (firstFit) return firstFit;
         await putFile(folder, `${path.parse(page.name).name}.rejected.png`, first);
         const second = await paint(LAYOUT_RETRY_NOTE);
-        if (await check(second, 2)) return second;
+        const secondFit = await check(second, 2);
+        if (secondFit) return secondFit;
         await putFile(folder, `${path.parse(page.name).name}.generated.png`, second);
         throw new Error("The image model moved the parts out of place twice. Try again, or pick fewer parts.");
       },
@@ -139,14 +186,29 @@ export async function runPartFix(
     await putFile(folder, `${path.parse(page.name).name}.generated.png`, generated);
 
     // Parts take the model's new silhouettes, keyed out within their own regions.
-    const fixed = await fitToPage(generated, modelInput, sourceImage, input.remix.premultipliedAlpha, rects);
+    const fixed = await fitToPage(fitted, modelInput, sourceImage, input.remix.premultipliedAlpha, rects);
     out[i] = await replaceRegions(remixFiles[i], fixed, rects);
   }
 
   onProgress(0.95, "Saving the remix");
   const textures = await Promise.all(pages.map((p, i) => putFile(folder, p.name, out[i])));
   const atlas = await putFile(folder, "remix.atlas", atlasText);
-  return { atlas, textures };
+  return { folder, atlas, textures };
+}
+
+/**
+ * Moves the packed parts to the middle of the square. With one or two parts most of the square
+ * is empty, and Muse Image tends to draw in the middle whatever the input shows (see
+ * FRICTION_LOG.md, 2026-10-28), so a centred part is where it draws anyway.
+ */
+function centreLayout(layout: PartLayout): PartLayout {
+  const { placements } = layout;
+  if (placements.length === 0) return layout;
+  const left = Math.min(...placements.map((p) => p.x));
+  const top = Math.min(...placements.map((p) => p.y));
+  const dx = (1 - (Math.max(...placements.map((p) => p.x + p.width)) - left)) / 2 - left;
+  const dy = (1 - (Math.max(...placements.map((p) => p.y + p.height)) - top)) / 2 - top;
+  return { ...layout, placements: placements.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })) };
 }
 
 function dirOf(url: string): string {
@@ -183,18 +245,39 @@ async function sourcePages(
   }
 }
 
-function buildPrompt(input: PartFixRequest, look: string | null, count: number, background: string, source: "original" | "remix"): string {
+/**
+ * The image prompt: Muse's expanded `plan`, or, when its reply was unusable, the user's request
+ * as-is with the remix's own prompt for the look, wrapped in the fixed layout rules.
+ */
+function buildPrompt(input: PartFixRequest, plan: string | null, count: number, background: string, source: "original" | "remix"): string {
   return [
     `This image shows ${count === 1 ? "one part" : `${count} separate parts`} cut from a 2D game character's sprite atlas, on a solid ${background} background.`,
-    source === "original" ? "They are the character's original parts, before restyling." : "They are the character's current parts, which need fixing.",
-    look ? `The rest of the character has already been restyled, and these parts must match it: ${look}` : "",
-    `Repaint ${count === 1 ? "this part" : "these parts"}: ${input.prompt}.`,
-    `Art style: ${input.remix.style}.`,
+    ...(plan
+      ? [plan]
+      : [
+          source === "original" ? "They are the character's original parts, before restyling." : "They are the character's current parts, which need fixing.",
+          input.remix.prompt ? `The rest of the character has been restyled as: ${input.remix.prompt}.` : "",
+          `Repaint ${count === 1 ? "this part" : "these parts"}: ${input.prompt}.`,
+          `Art style: ${input.remix.style}.`,
+        ]),
+    input.keepOutline ? "Keep each part inside its original outline: the game only shows what's inside it." : "",
     `Repaint every part in place, at the same size. Do not add or merge parts. Keep the background solid ${background}, and leave the empty ${background} areas empty.`,
     "Each part is a separate cut-out piece. Don't complete it into a whole object: no heads inside helmets, no legs inside boots or greaves, no hands or feet on limb segments.",
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+/**
+ * One line per chosen part for Muse, e.g. "sward: x 38–62%, y 9–91%": where it sits in the
+ * square both models see, as percentages from the left and top.
+ */
+function describeParts(names: string[], layout: PartLayout): string[] {
+  const pct = (v: number) => Math.round(100 * v);
+  return names.flatMap((name, k) => {
+    const p = layout.placements[layout.regionPlacement[k]];
+    return p ? [`${name}: x ${pct(p.x)}–${pct(p.x + p.width)}%, y ${pct(p.y)}–${pct(p.y + p.height)}%`] : [];
+  });
 }
 
 /**

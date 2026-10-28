@@ -1,4 +1,4 @@
-import { Download, Maximize2, Minimize2, Tags } from "lucide-react";
+import { Download, Maximize2, Minimize2, RefreshCw, Tags } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
@@ -26,10 +26,13 @@ export interface SpriteSheetSelection {
 export function SpriteSheet({
   sources,
   selection,
+  refresh,
   className,
 }: {
   sources: SpriteSheetSource[];
   selection?: SpriteSheetSelection;
+  /** Shows a reload button, e.g. after a part fix has changed the pages. */
+  refresh?: { onRefresh: () => void; pending: boolean };
   className?: string;
 }) {
   const available = sources.filter((s) => s.asset.files && s.asset.files.textureUrls.length > 0);
@@ -79,6 +82,18 @@ export function SpriteSheet({
           {atlasPage && ` · ${atlasPage.regions.length} regions`}
         </CardDescription>
         <CardAction className="flex items-center gap-2">
+          {refresh && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={refresh.onRefresh}
+              disabled={refresh.pending}
+              aria-label="Reload the sprite sheet"
+              title="Reload the sprite sheet"
+            >
+              <RefreshCw className={cn(refresh.pending && "animate-spin")} />
+            </Button>
+          )}
           <Button
             variant={showLabels ? "secondary" : "outline"}
             size="icon"

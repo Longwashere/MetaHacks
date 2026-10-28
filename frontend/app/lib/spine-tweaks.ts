@@ -1,6 +1,8 @@
 // Live, in-browser edits to a Spine rig on the remix page. Nothing here calls a model:
 // the runtime applies these on top of the loaded skeleton every frame.
 
+import type { MeshReason } from "~/lib/spine-mesh";
+
 /** Wind and gravity sliders run from -1 to 1; this times the rig's size is the force at the ends. */
 export const PHYSICS_FORCE_SCALE = 0.2;
 
@@ -20,6 +22,11 @@ export interface PartTweak {
   /** Hex for the part's darks (two-color tint), or null to use the global shadow. */
   shadow: string | null;
   blend: TweakBlendMode;
+  /**
+   * Draw the part's whole atlas region instead of only the inside of its mesh outline, so a
+   * repainted part with a new shape isn't cut off. Only rigid meshes can (see RigInfo.meshes).
+   */
+  fullTexture: boolean;
 }
 
 /** Changes a bone's setup pose; animations play relative to it, so they keep working. */
@@ -105,6 +112,7 @@ export const DEFAULT_PART: PartTweak = {
   color: null,
   shadow: null,
   blend: "rig",
+  fullTexture: false,
 };
 
 export const DEFAULT_BONE: BoneTweak = { scaleX: 1, scaleY: 1, rotation: 0 };
@@ -124,6 +132,11 @@ export interface RigInfo {
   baseSkin: string | null;
   /** Slots that draw a region or mesh in some skin. */
   parts: string[];
+  /**
+   * Parts drawn with a mesh, which only shows the texture inside its outline. Null when the part
+   * can show its full texture (`PartTweak.fullTexture`), else why not (see MESH_REASONS).
+   */
+  meshes: Record<string, MeshReason | null>;
   bones: string[];
   animations: string[];
   physics: number;

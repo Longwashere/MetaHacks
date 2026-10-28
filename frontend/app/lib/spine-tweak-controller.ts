@@ -4,6 +4,7 @@ import type {
   BlendMode,
   BoneData,
   Color,
+  MeshAttachment,
   NumberArrayLike,
   Physics,
   Skeleton,
@@ -12,6 +13,7 @@ import type {
   SpinePlayer,
   TextureAtlas,
 } from "@esotericsoftware/spine-player";
+import { type MeshReason, QUAD_EDGES, QUAD_TRIANGLES, QUAD_UVS, quadFromMesh } from "~/lib/spine-mesh";
 import type { SetupPose } from "~/lib/spine-tweak-bake";
 import { DEFAULT_BONE, PHYSICS_FORCE_SCALE, type RigInfo, type SpineTweaks, type TweakBlendMode } from "~/lib/spine-tweaks";
 
@@ -27,6 +29,25 @@ interface SavedSlot {
   blend: BlendMode;
 }
 
+/** The fields that give a mesh its shape, swapped as a set. */
+interface MeshShape {
+  regionUVs: NumberArrayLike;
+  vertices: NumberArrayLike;
+  triangles: number[];
+  hullLength: number;
+  worldVerticesLength: number;
+  edges: number[];
+}
+
+/** A rigid mesh that can show its whole region: its own shape, and a box over the region. */
+interface MeshPlan {
+  mesh: MeshAttachment;
+  slot: string;
+  original: MeshShape;
+  box: MeshShape;
+  boxed: boolean;
+}
+
 /**
  * Applies `SpineTweaks` to a running SpinePlayer. The runtime is only imported on the
  * client, so the module is passed in rather than imported here.
@@ -36,6 +57,7 @@ interface SavedSlot {
  * - Part offsets are applied to the world vertices each attachment computes, so they work for
  *   regions, weighted meshes and deformed meshes alike.
  * - Bone sculpting edits the setup pose, which animations are keyed relative to.
+ * - "Full texture" swaps a rigid mesh's shape for a box over its whole atlas region.
  */
 export class TweakController {
   tweaks: SpineTweaks;
@@ -53,6 +75,8 @@ export class TweakController {
   private readonly saved: SavedSlot[] = [];
   private constraintsTouched = false;
   private readonly vertices: number[] = [];
+  private readonly meshPlans: MeshPlan[] = [];
+  private readonly meshReasons = new Map<string, MeshReason | null>();
 
   constructor(
     private readonly spine: Spine,
@@ -72,10 +96,11 @@ export class TweakController {
     this.rigSize = Number.isFinite(extent) && extent > 0 ? extent : 100;
 
     this.patchAttachments();
+    this.planMeshes();
     this.wrapDraw();
 
     // Start from the rig's own state so the first sync applies everything that differs.
-    this.applied = { ...initial, skins: null, flipX: false, scaleX: 1, scaleY: 1, pixelated: false, layer: null, bones: {}, kick: initial.kick };
+    this.applied = { ...initial, skins: null, flipX: false, scaleX: 1, scaleY: 1, pixelated: false, layer: null, bones: {}, parts: {}, kick: initial.kick };
     this.tweaks = this.applied;
     this.sync(initial);
   }
@@ -92,6 +117,7 @@ export class TweakController {
       skins: data.skins.map((s) => s.name),
       baseSkin: this.baseSkin?.name ?? null,
       parts: data.slots.filter((s) => drawn.has(s.index)).map((s) => s.name),
+      meshes: Object.fromEntries(this.meshReasons),
       bones: data.bones.map((b) => b.name),
       animations: data.animations.map((a) => a.name),
       physics: this.skeleton.physicsConstraints.length,
@@ -147,6 +173,7 @@ export class TweakController {
     }
 
     if (prev.bones !== next.bones) this.applyBones(next.bones);
+    if (prev.parts !== next.parts) this.applyMeshes(next.parts);
     if (prev.kick !== next.kick) this.shake(next.kick);
 
     this.onAnimationChanged();
@@ -221,6 +248,70 @@ export class TweakController {
 
   private isDrawable(att: Attachment) {
     return att instanceof this.spine.RegionAttachment || att instanceof this.spine.MeshAttachment;
+  }
+
+  /**
+   * Finds the meshes that can show their whole region. Only rigid ones qualify: unweighted (one
+   * bone moves them), never deformed by an animation, not shared with linked meshes, and still
+   * mapped straight from the image. A part can show its full texture if any of its meshes can.
+   */
+  private planMeshes() {
+    const { spine } = this;
+    const data = this.skeleton.data;
+    const deformed = new Set<Attachment>();
+    for (const animation of data.animations) {
+      for (const timeline of animation.timelines) {
+        if (timeline instanceof spine.DeformTimeline) deformed.add(timeline.attachment);
+      }
+    }
+    const entries = data.skins.flatMap((skin) => skin.getAttachments());
+    const parents = new Set<Attachment>();
+    for (const { attachment } of entries) {
+      const parent = attachment instanceof spine.MeshAttachment ? attachment.getParentMesh() : null;
+      if (parent) parents.add(parent);
+    }
+
+    const done = new Set<Attachment>();
+    for (const { slotIndex, attachment: mesh } of entries) {
+      if (!(mesh instanceof spine.MeshAttachment) || done.has(mesh)) continue;
+      done.add(mesh);
+      const slot = data.slots[slotIndex].name;
+      let reason: MeshReason | null = mesh.bones
+        ? "weighted"
+        : deformed.has(mesh)
+          ? "deformed"
+          : mesh.getParentMesh() || parents.has(mesh)
+            ? "linked"
+            : null;
+      const quad = reason ? null : quadFromMesh(mesh.regionUVs, mesh.vertices);
+      if (!reason && !quad) reason = "distorted";
+      if (reason === null || !this.meshReasons.has(slot)) this.meshReasons.set(slot, reason);
+      if (!quad) continue;
+      this.meshPlans.push({
+        mesh,
+        slot,
+        original: {
+          regionUVs: mesh.regionUVs,
+          vertices: mesh.vertices,
+          triangles: mesh.triangles,
+          hullLength: mesh.hullLength,
+          worldVerticesLength: mesh.worldVerticesLength,
+          edges: mesh.edges,
+        },
+        box: { regionUVs: [...QUAD_UVS], vertices: quad, triangles: [...QUAD_TRIANGLES], hullLength: 8, worldVerticesLength: 8, edges: [...QUAD_EDGES] },
+        boxed: false,
+      });
+    }
+  }
+
+  private applyMeshes(parts: SpineTweaks["parts"]) {
+    for (const plan of this.meshPlans) {
+      const boxed = parts[plan.slot]?.fullTexture === true;
+      if (boxed === plan.boxed || !plan.mesh.region) continue;
+      Object.assign(plan.mesh, boxed ? plan.box : plan.original);
+      plan.mesh.updateRegion();
+      plan.boxed = boxed;
+    }
   }
 
   /** Wraps each drawable attachment so part offsets apply to its world vertices. */

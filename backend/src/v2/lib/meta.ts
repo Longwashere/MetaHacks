@@ -225,42 +225,90 @@ export async function rewordForContentPolicy(editPrompt: string, signal: AbortSi
   return reworded;
 }
 
-const LOOK_SYSTEM_PROMPT = `You are given the instructions an image model followed to repaint a 2D game character's sprite sheet.
-Describe the resulting look in one or two sentences: materials, colours, surface detail and art style.
-Leave out positions, part names, counts and anything about outlines, layout or the background. Don't give instructions.
-Reply with the description only, no quotes or markdown.`;
+const PART_FIX_SYSTEM_PROMPT = `You are the art director for a 2D game character whose sprite parts are being repainted a few at a time. You are given one image: the parts to repaint, cut out of the character's sprite atlas and placed on a plain solid-colour background (the user message names the colour; ignore it). An image-editing model will repaint exactly this image using only your editPrompt.
+
+The user message lists the parts in the image and where each sits (percent of the image, x from the left, y from the top), says whether they show the character's original parts or its current remixed ones, describes how the rest of the character already looks, and gives the art style and the user's request.
+
+Rules:
+1. Work out what each part is from the picture and its position; names can mislead (a scarf-wrapped torso can look like a head). In editPrompt, name every part by where it sits and what it is, e.g. "the tall blade on the left".
+2. Say what each part becomes, following the request. Turn vague words into paint: shape, materials, colours, patterns, surface detail. If the request is about one part ("the body"), apply it to that part and keep the others what they are, restyled to match.
+3. Each part is one cut-out piece of the character and becomes the matching piece and nothing more: a torso piece is a torso with no head or face, a limb segment has no hand or foot, armour stays empty, a head is one head. Never ask for a whole body, a second head, or anything inside armour.
+4. Each part stays where it is and no bigger than it is now; it may change shape within that.
+5. Match the rest of the character. Start with one sentence describing its art style in paint terms (line weight, shading, colour, amount of texture, lighting), and use its materials and palette unless the request says otherwise. The description of the rest of the character was written for the whole sprite sheet: ignore any positions or part lists in it.
+6. Paintable language only, imperative voice, one paragraph, at most 900 characters. Nothing about the model, the rig, the atlas or the background.
+
+Reply with JSON only, no markdown: {"editPrompt": "..."}`;
+
+export interface PartFixPlanInput {
+  /** The packed parts as Muse Image will see them. */
+  image: string;
+  background: string;
+  /** One line per part, e.g. "body: x 35–65%, y 30–62%". */
+  parts: string[];
+  source: "original" | "remix";
+  /** How the rest of the character looks: the remix's edit prompt, or the user's remix prompt. */
+  look: string | null;
+  style: string;
+  request: string;
+}
 
 /**
- * Condenses a remix's edit prompt into a short description of its look, for repainting single
- * parts to match. The edit prompt itself names positions on the full page and gives orders
- * for every part, which would conflict with the part being fixed. Returns null when the reply
- * is unusable.
+ * Asks Muse Spark to expand a part-fix request into the image prompt: the remix's art style in
+ * paint terms, and what each chosen part becomes, named by where it sits in the image Muse
+ * Image gets. Returns null when the reply is unusable, so the caller can use the request as-is.
  */
-export async function summarizeLook(editPrompt: string, signal: AbortSignal): Promise<string | null> {
-  logPrompt(`chat/completions (${MUSE_MODEL}) summarize look`, editPrompt);
+export async function planPartFix(input: PartFixPlanInput, signal: AbortSignal): Promise<string | null> {
+  const request = [
+    `Parts in the image:\n${input.parts.map((p) => `- ${p}`).join("\n")}`,
+    input.source === "original"
+      ? "They show the character's original parts, from before the remix."
+      : "They show the remix's current parts, which need fixing.",
+    input.look ? `How the rest of the character looks: ${input.look}` : "",
+    `Art style: ${input.style}`,
+    `Background: solid ${input.background}`,
+    `Request: ${input.request}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  logPrompt(`chat/completions (${MUSE_MODEL}) part fix + 1 image`, request);
   const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
     body: JSON.stringify({
       model: MUSE_MODEL,
       messages: [
-        { role: "system", content: LOOK_SYSTEM_PROMPT },
-        { role: "user", content: editPrompt },
+        { role: "system", content: PART_FIX_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: request },
+            { type: "image_url", image_url: { url: input.image } },
+          ],
+        },
       ],
     }),
     timeoutMs: MUSE_TIMEOUT_MS,
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse look summary request failed (${res.status})`, await res.text());
+    console.error(`Muse part-fix plan request failed (${res.status})`, await res.text());
     return null;
   }
   const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
   if (typeof content !== "string") return null;
-  const look = content.replace(/^["'`\s]+|["'`\s]+$/g, "").replace(/\s+/g, " ").trim().slice(0, 600);
-  if (look.length < 20) return null;
-  logPrompt(`chat/completions (${MUSE_MODEL}) look`, look);
-  return look;
+  const start = content.indexOf("{");
+  const end = content.lastIndexOf("}");
+  let editPrompt: unknown = null;
+  try {
+    editPrompt = start >= 0 && end > start ? getPath(JSON.parse(content.slice(start, end + 1)), ["editPrompt"]) : null;
+  } catch {
+    return null;
+  }
+  if (typeof editPrompt !== "string") return null;
+  const clean = editPrompt.replace(/\s+/g, " ").trim().slice(0, 1200);
+  if (clean.length < 20) return null;
+  logPrompt(`chat/completions (${MUSE_MODEL}) part fix plan`, clean);
+  return clean;
 }
 
 /** Logs a prompt sent to (or plan returned by) the Meta API. Images are never logged. */

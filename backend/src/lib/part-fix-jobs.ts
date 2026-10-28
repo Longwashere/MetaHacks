@@ -3,14 +3,18 @@ import { getAssetRow } from "./assets.js";
 import { REMIX_JOB_TIMEOUT_MS } from "./config.js";
 import { ASSET_COLUMNS, REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
 import { newRemixJobId } from "./jobs.js";
+import { boxMeshes, checkMeshes } from "./mesh.js";
 import { allowanceError } from "./remix-jobs.js";
-import { objectUrl } from "./storage.js";
+import { objectUrl, putFile } from "./storage.js";
 import { PART_FIX_SOURCES, type PartFixInput, type RemixStatus } from "./types.js";
 import { runPartFix } from "../v2/lib/part-fix.js";
 
 // Part fixes repaint a few regions of a finished remix and update it in place. Each one is a
 // remix_jobs row (input.kind = "parts", asset_id = the remix), so it counts toward the monthly
 // allowance like a remix; live progress is kept here and resets on restart.
+//
+// Rigid meshes drawing the fixed parts are swapped for boxes over their regions (lib/mesh.ts), so a
+// part repainted with a new shape isn't cut off at the old outline.
 
 /** The job shape the frontend expects (PartFixJob in frontend/app/lib/types.ts). */
 export interface PartFixJobView {
@@ -21,6 +25,8 @@ export interface PartFixJobView {
   stage: string;
   input: PartFixInput;
   createdAt: string;
+  /** Muse's expanded prompt for the image model; null until it's planned, or when its reply was unusable. */
+  editPrompt: string | null;
   /** The updated remix once the fix succeeds. */
   asset: SpineAsset | null;
   error: string | null;
@@ -31,6 +37,7 @@ interface LiveFix {
   status: RemixStatus;
   progress: number;
   stage: string;
+  editPrompt: string | null;
 }
 
 const live = new Map<string, LiveFix>();
@@ -60,7 +67,7 @@ export async function startPartFix(userId: string, assetId: string, input: PartF
     }),
   );
 
-  const job: LiveFix = { assetId: asset.id, status: "queued", progress: 0, stage: "Queued" };
+  const job: LiveFix = { assetId: asset.id, status: "queued", progress: 0, stage: "Queued", editPrompt: null };
   live.set(id, job);
   void runJob(id, job, asset, original, editPrompt, input);
 
@@ -91,16 +98,21 @@ async function runJob(id: string, job: LiveFix, asset: AssetRow, original: Asset
   const deadline = AbortSignal.timeout(REMIX_JOB_TIMEOUT_MS);
   let error: string | null = null;
   try {
+    const meshChecks = checkMeshes(await loadSkeleton(asset.files.skeleton, deadline), input.regions);
     const result = await runPartFix(
       id,
       {
         ...input,
+        keepOutline: meshChecks.some((c) => c.reason !== null),
         remix: { atlasUrl: objectUrl(asset.files.atlas), premultipliedAlpha: asset.files.premultipliedAlpha, prompt: asset.prompt, editPrompt, style: asset.style },
         original: original?.files ? { atlasUrl: objectUrl(original.files.atlas), premultipliedAlpha: original.files.premultipliedAlpha } : null,
       },
       (progress, stage) => {
         job.progress = Math.min(Math.max(progress, 0), 0.99);
         job.stage = stage;
+      },
+      (editPrompt) => {
+        job.editPrompt = editPrompt;
       },
       deadline,
     );
@@ -110,10 +122,14 @@ async function runJob(id: string, job: LiveFix, asset: AssetRow, original: Asset
     // Re-read the row so a skeleton saved from the tweak panel meanwhile isn't overwritten.
     const current = await getAssetRow(asset.id, asset.owner_id);
     if (!current?.files) throw new Error("The remix was deleted while its parts were being fixed.");
+    const skeleton = await loadSkeleton(current.files.skeleton, deadline);
+    const boxed = boxMeshes(skeleton, input.regions);
+    await putFile(result.folder, "meshes.json", JSON.stringify({ checks: meshChecks, boxed }, null, 2));
+    const skeletonKey = boxed.length > 0 ? await putFile(result.folder, "skeleton.json", JSON.stringify(skeleton)) : current.files.skeleton;
     check(
       await db()
         .from("assets")
-        .update({ files: { ...current.files, atlas: result.atlas, textures: result.textures } })
+        .update({ files: { ...current.files, skeleton: skeletonKey, atlas: result.atlas, textures: result.textures } })
         .eq("id", asset.id)
         .select(ASSET_COLUMNS)
         .single(),
@@ -127,11 +143,25 @@ async function runJob(id: string, job: LiveFix, asset: AssetRow, original: Asset
         : "Something went wrong. Try again with a different prompt.";
   }
   try {
-    check(await db().from("remix_jobs").update({ status: error ? "failed" : "succeeded", error }).eq("id", id));
+    check(await db().from("remix_jobs").update({ status: error ? "failed" : "succeeded", error, edit_prompt: job.editPrompt }).eq("id", id));
   } catch (e) {
     console.error(`Recording part fix ${id} failed`, e);
   }
   live.delete(id);
+}
+
+/** The remix's skeleton JSON, or null for a binary .skel or one that can't be read (meshes are then left as they are). */
+async function loadSkeleton(key: string, signal: AbortSignal): Promise<unknown> {
+  if (!key.toLowerCase().endsWith(".json")) return null;
+  try {
+    const res = await fetch(objectUrl(key), { signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (error) {
+    signal.throwIfAborted();
+    console.error(`Couldn't read skeleton ${key} for a part fix`, error);
+    return null;
+  }
 }
 
 /** The part fix if it's the user's, with live progress while it runs. */
@@ -166,6 +196,7 @@ export async function getPartFixView(userId: string, jobId: string): Promise<Par
       source: PART_FIX_SOURCES.find((s) => s === source) ?? "original",
     },
     createdAt: row.created_at,
+    editPrompt: job ? job.editPrompt : row.edit_prompt,
     asset: row.status === "succeeded" && asset ? toSpineAsset(asset) : null,
     error: lost ? "The remix service restarted. Try again." : job ? null : row.error,
   };

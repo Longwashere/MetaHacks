@@ -158,6 +158,8 @@ export interface PartFixJob {
   stage: string;
   input: PartFixInput;
   createdAt: string;
+  /** Muse's expanded prompt for the image model; null until it's planned, or when its reply was unusable. */
+  editPrompt: string | null;
   /** The updated remix once the fix succeeds. */
   asset: SpineAsset | null;
   error: string | null;

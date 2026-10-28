@@ -51,15 +51,43 @@ Add the entry in the same task, not later.
 - **Edit strength can only be set through prompt text.** We haven't found a strength or fidelity parameter for `/images/edits`; check the API reference before building more on prompt wording. (2026-10-27)
 - **Muse Image moves and resizes parts** by a few percent, so we need a pixel-alignment step after every call. (2026-10-27)
 - **Muse Image sometimes redraws the whole layout** on big changes, moving and duplicating parts. We check every page and repaint once, which costs an extra image call. (2026-10-28)
+- **Ambiguous atlas pieces get the wrong content:** Spark called the scarf-wrapped torso a helm, and Muse Image painted a face into it. (2026-10-28)
 
 ### Log
+
+### 2026-10-28 — Muse Image drew a repainted head cut off by a straight edge
+- **What happened:** a part fix ("give his head some ugly teeth", `job_62c62f80`, Mossy Grove Guardian) came back with the head's right side cut off in a straight vertical line, through the ear, leaves and cheek.
+- **Evidence (verified, one run):** `POST /images/edits`, `muse-image-1.0`, 1536×1536, one part (the original skull) centred on cyan. The raw output (`SkeletonWarrior.generated.png`) already has the straight cut, so our steps didn't cause it (the shrink was 0.987). The input has no visible box: every pixel around the part's box is pure cyan, alpha 255. The cut still lies within 6 px of the box's right edge, as the model drew the head larger and further right than the skull. Separately, the head is a mesh weighted to several bones, so it can't be boxed, and 3.2% of the new head falls outside its outline and is hidden in the game. Run in R2 under `remixes/2026-10-28T09-43-30-563Z_job_62c62f80/`.
+- **Cost:** one part fix and the user's time.
+- **Cause:** not known. Inferred: the model keeps to the original part's frame even when it draws a bigger part.
+- **Workaround / status:** open. Options: ask for every part whole with background all around it, detect straight cuts in the output and paint again, and have Spark plan within the original silhouette for meshes that can't be boxed.
+- **Lesson:** a part can come back cropped even when the checks pass. Look at the raw output, not only the layout scores.
+
+
+### 2026-10-28 — Muse Image drew a one-part fix in the middle of the empty square
+- **What happened:** a part fix turning the Valkyrie remix's sword into an axe (`job_a502cf78`) failed with "The image model moved the parts out of place twice."
+- **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`, 1536×1536. The only part (a 186×516 sword) was packed at the left of the square, leaving about two thirds of it empty cyan. Attempt 1 drew a good axe in the centre of the image: 21% inside the box. Attempt 2, with the "keep it where it is" note, kept the handle in the box but swung the axe head out to the right: 72%. Run in R2 under `remixes/2026-10-28T09-21-14-603Z_job_a502cf78/`.
+- **Cost:** two image calls, one Spark call, and the user's time (failed jobs don't count toward the allowance).
+- **Cause:** the same pull toward empty space as the Goblin padding entry, plus a new shape wider than its box. Our check counts any paint outside the box as moved parts.
+- **Workaround / status:** part fixes now centre their parts in the square, and judge the result by paint attached to a chosen part (`attachedFit`), not by the box. A part that's too big is shrunk to fit, and the model only paints again if a part would need shrinking below 50%. Replayed offline against this run's saved outputs: both axes now pass (shrunk to 74% and 79%), and the scrambled reference-image run (`job_de86b8ba`) still fails. Not yet checked in a live run.
+- **Lesson:** with one or two parts, the model's input is mostly empty space. Put the parts where the model tends to draw, in the middle.
+
+
+### 2026-10-28 — Muse Spark planned the torso as a helmet, and Muse Image painted a face into it
+- **What happened:** a Skeleton Warrior → "female warrior" remix (`job_1a016422`) came out with a second face, wrapped in a scarf, painted into the torso piece. A part fix asking to turn it back into a body (`job_f09c9247`) changed almost nothing.
+- **Evidence (verified):** `POST /chat/completions`, `muse-spark-1.3`. On the remix just before (`job_547a07e6`, same rig), Spark's `editPrompt` named the `body` region (a chest piece wrapped in a red scarf) "the cloth-wrapped helm at center". `POST /images/edits`, `muse-image-1.0` then painted a face there. In the part fix, attempt 1 drew a full bust (face plus armoured torso) that grew past the box: `layoutFit` 0.74, rejected. Attempt 2, with the "same size, exactly where it is" retry note, only re-detailed the face. Runs are under `remixes/2026-10-28T09-12-08-725Z_job_f09c9247/` in R2.
+- **Cost:** one remix plus one part fix (three image calls, two Spark calls) and the user's time.
+- **Cause:** an ambiguous atlas piece; Spark reads it by silhouette, as in the orc jaw entry. In the part fix: the image prompt doesn't say which part is which, Muse Image completes a fragment into a whole object (a bust), and our layout retry pushed it back to the old shape.
+- **Workaround / status:** open. Proposed: name each part by its position in the image the model receives, have the layout check ignore paint that's attached to a chosen part, and add a planning rule that torso pieces stay torsos.
+- **Lesson:** a part that can be mistaken for a head will be. Say what each part is, in the coordinates of the image the model actually receives.
+
 
 ### 2026-10-28 — Muse Image repainted the reference image instead of the parts to fix
 - **What happened:** the first real part fix (Forest Troll Warrior remix: `sward` → an axe, `head` → a troll head) failed with "The image model moved the parts out of place twice."
 - **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`, 1536×1536. Image 1 was the two original parts (a sword and a skull) packed on cyan. Image 2 was the remix's other ~25 parts as a style reference, also on cyan. The prompt said image 1 holds the parts to repaint and image 2 only shows the style. Both attempts returned image 2's layout, with every reference part redrawn and a new axe and troll head placed in the reference's top row. Only 53% and 56% of painted pixels fell inside image 1's part boxes (the minimum is 85%). The axe and head themselves looked right. Run in R2 under `remixes/2026-10-28T08-33-26-568Z_job_de86b8ba/`.
 - **Cost:** two image calls, one part-fix run, and the user's time.
 - **Cause:** with two inputs, Muse Image picked the busier image as the canvas, whatever the prompt said each one was for. The full remix only sends a reference on multi-page rigs, so this hadn't shown up before.
-- **Workaround / status:** part fixes now send Muse Image only the parts being fixed (`backend/src/v2/lib/part-fix.ts`). The look comes through text instead: Muse Spark condenses the remix job's stored `editPrompt` into a description of materials, colours and style (`summarizeLook` in `backend/src/v2/lib/meta.ts`), because the raw edit prompt names full-page positions and gives orders for every part. Checked once against `muse-spark-1.3` on this run's remix: 5.6 s, a clean two-sentence look with no positions. The next full part fix on the same remix (`remixes/2026-10-28T08-39-43-292Z_job_5b54cf31/`) scored 1.00 inside the boxes on the first attempt.
+- **Workaround / status:** part fixes now send Muse Image only the parts being fixed (`backend/src/v2/lib/part-fix.ts`). The look came through text instead: at first Muse Spark condensed the remix job's stored `editPrompt` into a style summary. That has since been replaced by `planPartFix`, which sees the packed parts and writes the whole image prompt, ignoring the positions in the stored prompt. Checked once against `muse-spark-1.3` on this run's remix: 5.6 s, a clean two-sentence look with no positions. The next full part fix on the same remix (`remixes/2026-10-28T08-39-43-292Z_job_5b54cf31/`) scored 1.00 inside the boxes on the first attempt.
 - **Ask for Meta:** a way to mark which input image is edited and which is reference only, e.g. a separate `reference_images` field on `/images/edits`.
 - **Lesson:** don't count on the prompt to say which image is the canvas. Send one image, or make the reference much less like a canvas than the input.
 

@@ -4,6 +4,7 @@
 // Not saved (preview only): crossfade, reverse, hold frame, layered animation,
 // pixel-crisp filtering and debug overlays.
 
+import { QUAD_EDGES, QUAD_TRIANGLES, QUAD_UVS, quadFromMesh } from "~/lib/spine-mesh";
 import { PHYSICS_FORCE_SCALE, type SpineTweaks, type TweakBlendMode } from "~/lib/spine-tweaks";
 
 /** The rig's setup pose with the current tweaks applied, read from the live runtime. */
@@ -56,6 +57,11 @@ interface AttachmentJson {
   scaleY?: number;
   vertices?: number[];
   uvs?: number[];
+  triangles?: number[];
+  hull?: number;
+  edges?: number[];
+  /** A linked mesh's parent attachment. */
+  parent?: string;
 }
 type SkinAttachments = Record<string, Record<string, AttachmentJson>>;
 interface SkinJson {
@@ -255,7 +261,7 @@ function bakeConstraints(json: SkeletonJson, t: SpineTweaks, rigSize: number) {
   }
 }
 
-/** Hides parts by removing their attachments, and moves, scales and rotates them. */
+/** Hides parts by removing their attachments, shows their full texture, and moves, scales and rotates them. */
 function bakeParts(json: SkeletonJson, t: SpineTweaks, pose: SetupPose) {
   for (const slot of json.slots ?? []) {
     const part = t.parts[slot.name];
@@ -276,7 +282,11 @@ function bakeParts(json: SkeletonJson, t: SpineTweaks, pose: SetupPose) {
           for (const animation of Object.values(json.animations ?? {})) {
             delete animation.attachments?.[skin.name]?.[slot.name]?.[name];
           }
-        } else if (moved && boneIndex >= 0) {
+          continue;
+        }
+        // Before the nudge, so the nudge moves the box.
+        if (part.fullTexture && type === "mesh") boxMesh(json, slot.name, name, att, deforms);
+        if (moved && boneIndex >= 0) {
           const nudge = partNudge(pose, boneIndex, part.dx, part.dy, part.scale, part.rotation);
           if (type === "region") nudgeRegion(att, nudge);
           else if (type === "mesh") nudgeMesh(att, deforms, nudge, pose, boneIndex);
@@ -285,6 +295,24 @@ function bakeParts(json: SkeletonJson, t: SpineTweaks, pose: SetupPose) {
       }
     }
   }
+}
+
+/**
+ * Swaps a rigid mesh for a box over its whole region, the same as TweakController does live.
+ * Leaves weighted, deformed, linked and distorted meshes alone.
+ */
+function boxMesh(json: SkeletonJson, slot: string, name: string, att: AttachmentJson, deforms: DeformKey[]) {
+  if (!att.uvs || !att.vertices || att.vertices.length !== att.uvs.length || deforms.length > 0) return;
+  const linked = (json.skins ?? []).some((skin) =>
+    Object.values(skin.attachments?.[slot] ?? {}).some((a) => a.type === "linkedmesh" && a.parent === name),
+  );
+  const quad = linked ? null : quadFromMesh(att.uvs, att.vertices);
+  if (!quad) return;
+  att.uvs = [...QUAD_UVS];
+  att.vertices = quad;
+  att.triangles = [...QUAD_TRIANGLES];
+  att.hull = 4;
+  att.edges = [...QUAD_EDGES];
 }
 
 interface Nudge {

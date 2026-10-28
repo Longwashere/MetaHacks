@@ -251,7 +251,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
   const { revalidate } = useRevalidator();
   const tweak = useTweakSession(base?.id ?? null);
-  const savedRemix = job?.status === "succeeded" ? job.asset : null;
+  // A finished part fix carries the remix as it saved it. The loader reads the remix job first, so
+  // on the poll where the fix finishes, job.asset can still have the files from before the fix.
+  const fixedRemix = fix?.status === "succeeded" && fix.asset?.id === job?.asset?.id ? fix.asset : null;
+  const savedRemix = job?.status === "succeeded" ? (fixedRemix ?? job.asset) : null;
   const previewAnimation = anim ?? (savedRemix ?? base)?.animations[0]?.name ?? "idle";
   const tweakPanel = {
     ...tweak.panel,
@@ -417,26 +420,26 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                     <ExpandedPrompt job={job} />
                   </AlertDescription>
                 </Alert>
-              ) : job.status === "succeeded" && job.asset ? (
+              ) : savedRemix ? (
                 <>
                   <AssetPlayer
-                    asset={job.asset}
-                    animation={anim ?? job.asset.animations[0]?.name ?? "idle"}
+                    asset={savedRemix}
+                    animation={anim ?? savedRemix.animations[0]?.name ?? "idle"}
                     animationHref={(name) => withParams({ anim: name })}
                     tweaks={playerTweaks}
                   />
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="mr-auto">
-                      <h2 className="text-lg font-semibold">{job.asset.name}</h2>
+                      <h2 className="text-lg font-semibold">{savedRemix.name}</h2>
                       <p className="text-xs text-muted-foreground">
                         Remix of {base.name} · API {job.apiVersion}
                         {job.promptStatus === "reworded" && " · prompt re-worded for content policy"}
                       </p>
                     </div>
-                    <SaveButton assetId={job.asset.id} assetName={job.asset.name} saved={savedIds.includes(job.asset.id)} />
-                    <VisibilityToggle assetId={job.asset.id} assetName={job.asset.name} visibility={job.asset.visibility} />
+                    <SaveButton assetId={savedRemix.id} assetName={savedRemix.name} saved={savedIds.includes(savedRemix.id)} />
+                    <VisibilityToggle assetId={savedRemix.id} assetName={savedRemix.name} visibility={savedRemix.visibility} />
                     <Button asChild variant="outline">
-                      <Link to={assetPath(job.asset)}>
+                      <Link to={assetPath(savedRemix)}>
                         <ExternalLink /> Open
                       </Link>
                     </Button>
@@ -527,6 +530,7 @@ function PartFixSection({
   const navigation = useNavigation();
   const submitting = navigation.state === "submitting" && navigation.formData?.get("intent") === "fix-parts";
   const fixing = fix?.status === "queued" || fix?.status === "running";
+  const revalidator = useRevalidator();
 
   const onToggle = (region: string) => {
     if (selected.includes(region)) {
@@ -651,6 +655,12 @@ function PartFixSection({
         className="lg:col-span-2"
         sources={[...(remix ? [{ label: "Remix", asset: remix }] : []), { label: "Original", asset: base }]}
         selection={remix ? { selected, onToggle, disabled: fixing } : undefined}
+        // After a part fix, reloads the remix's files in case the sheet still shows the old pages.
+        refresh={
+          fix?.status === "succeeded"
+            ? { onRefresh: () => void revalidator.revalidate(), pending: revalidator.state === "loading" }
+            : undefined
+        }
       />
     </div>
   );
@@ -658,34 +668,38 @@ function PartFixSection({
 
 function PartFixStatus({ fix }: { fix: PartFixJob }) {
   const parts = fix.input.regions.join(", ");
-  if (fix.status === "failed") {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle />
-        <AlertTitle>Fix failed</AlertTitle>
-        <AlertDescription>{fix.error ?? "Something went wrong. Try again with a different prompt."}</AlertDescription>
-      </Alert>
-    );
-  }
-  if (fix.status === "succeeded") {
-    return (
-      <Alert>
-        <CircleCheck />
-        <AlertTitle>Repainted {parts}</AlertTitle>
-        <AlertDescription>The remix and its download now use the new parts. Not right? Pick them again and try another prompt.</AlertDescription>
-      </Alert>
-    );
-  }
   const percent = Math.round(fix.progress * 100);
   return (
-    <div className="flex flex-col gap-2" aria-live="polite">
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span className="truncate">
-          {fix.stage}: {parts}
-        </span>
-        <span className="tabular-nums">{percent}%</span>
-      </div>
-      <Progress value={percent} aria-label="Fix progress" />
+    <div className="flex flex-col gap-3">
+      {fix.status === "failed" ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>Fix failed</AlertTitle>
+          <AlertDescription>{fix.error ?? "Something went wrong. Try again with a different prompt."}</AlertDescription>
+        </Alert>
+      ) : fix.status === "succeeded" ? (
+        <Alert>
+          <CircleCheck />
+          <AlertTitle>Repainted {parts}</AlertTitle>
+          <AlertDescription>The remix and its download now use the new parts. Not right? Pick them again and try another prompt.</AlertDescription>
+        </Alert>
+      ) : (
+        <div className="flex flex-col gap-2" aria-live="polite">
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span className="truncate">
+              {fix.stage}: {parts}
+            </span>
+            <span className="tabular-nums">{percent}%</span>
+          </div>
+          <Progress value={percent} aria-label="Fix progress" />
+        </div>
+      )}
+      {fix.editPrompt && (
+        <div className="flex flex-col gap-1.5 text-xs">
+          <span className="font-medium text-foreground">Expanded prompt</span>
+          <p className="max-h-32 overflow-y-auto whitespace-pre-line text-muted-foreground">{fix.editPrompt}</p>
+        </div>
+      )}
     </div>
   );
 }
