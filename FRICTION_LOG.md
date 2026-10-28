@@ -53,6 +53,24 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Muse Image painted a new layout into the padding of a wide page
+- **What happened:** the Goblin remix (`job_cec7f55e`) came back without its spear.
+- **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`. The 1024×128 page was padded to a square, so the parts filled only the top 13%. Our new per-part label line placed parts using the page's own height, so it said "long spear shaft (bottom left)", "round wooden shield (middle center)", and so on. Muse Image painted full-size parts at exactly those spots in the empty padding and left the spear's real spot as background. Once the parts were cut back out of their atlas areas, the spear was empty. Run in R2 under `remixes/2026-10-28T06-37-32-750Z_job_cec7f55e/`.
+- **Cost:** one remix run and the user's time. The bug was ours (the label positions); Muse Image followed the text over the input image.
+- **Cause:** wrong position words in our prompt, plus Muse Image's readiness to fill empty padding with new content.
+- **Workaround / status:** pages are no longer padded. Each page's parts are packed into a square of their own, all scaled by the same factor and as large as fits, and copied back after painting (`backend/src/lib/layout.ts`; `toModelInput` and `fitToPage` in both `textures.ts`). The Goblin's parts are now 2.5× bigger and nothing is left empty. Labels and the part list use positions in that square. Offline round trips over all 72 bundled pages showed no failures and no loss in quality from packing. Not yet checked against a real model run.
+- **Ask for Meta:** honour the input's aspect ratio on edits, so atlas strips don't need padding.
+- **Lesson:** anything in the prompt about where things are has to use the coordinates of the image the model actually receives.
+
+### 2026-10-27 — Muse Image painted the orc's jaw as a foot
+- **What happened:** in an Orc Berserker remix, `head_2` (the lower jaw with two tusks) came back as a green foot with a spiked cuff.
+- **Evidence (inferred):** `POST /images/edits`, `muse-image-1.0`. Cut out of the head, the jaw is a rounded green block with a red wrap and two points, and it sits next to `legL`, which has the same cuff. Muse Image sees only the page and Muse Spark's `editPrompt`, never part names. Muse Spark got the names but no positions, so it couldn't tie a name to a shape. This run's `prompts.json` wasn't kept locally, so we can't tell which model got it wrong.
+- **Cost:** one remix run, plus the user's time.
+- **Cause:** nothing tells Muse Image what an ambiguous part is, so it goes by the silhouette.
+- **Workaround / status:** Muse Spark now gets each part's page and position (`describeParts` in `backend/src/lib/remix.ts` and `backend/src/v2/lib/remix.ts`). It's told to name parts in `editPrompt` by what they are and where they sit, and the list is saved to `prompts.json`. Not yet checked against a real run.
+- **Ask for Meta:** a way to pass region labels or masks to `/images/edits`, so atlas parts can be named without going through prompt text.
+- **Lesson:** an atlas part shown on its own can look like a different body part; tell the image model what each one is.
+
 ### 2026-10-28 — Muse Spark takes ~47 s to review two snapshot images
 - **What happened:** the first auto-tweak test waited 47 s for Muse Spark's review, so the user would watch "Muse is reviewing the fixes…" for most of a minute. Snapshotting and measuring in the browser took about 0.5 s.
 - **Evidence (verified):** `POST /chat/completions`, `muse-spark-1.3`, a ~2.4 KB system prompt, a text part listing 16 parts, and two 1200×426 JPEG data URLs (`image_url`). `200` after 46.9 s with a valid JSON reply. Run saved in `backend/data/auto-tweaks/2026-10-28T05-32-35-885Z_test_skeleton-archer-orc/` (local only).
@@ -86,7 +104,7 @@ Add the entry in the same task, not later.
 - **What happened:** we asked for `1024x1024` and `1536x1536` and got `1600x1600` back both times.
 - **Evidence (verified):** this session's test calls, and the `*.generated.png` files in `backend/data/remixes/`. The docs say quality is high up to 1600px; the default output is WebP.
 - **Cost:** code has to resize every result back to the input's size, and can't trust pixel positions.
-- **Workaround / status:** `fitToPage` resizes the result to the padded square and crops it. Pages are sent padded to a square because the model only roughly keeps other aspect ratios.
+- **Workaround / status:** `fitToPage` resizes the result back to the square it sent. Pages go out as a square of packed parts (`layout.ts`), because the model only roughly keeps other aspect ratios.
 - **Ask for Meta:** honour `size` on edits, or document that it's a hint and what sizes come back.
 
 ### 2026-10-27 — Muse Image shifts and stretches the parts

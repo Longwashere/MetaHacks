@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import type { PageRect } from "./atlas.js";
+import { type PartLayout, toPixels } from "../../lib/layout.js";
 
 /** A solid colour the transparent parts of a page are flattened onto before the models see it. */
 export interface Background {
@@ -129,38 +130,41 @@ export async function decodePage(file: Buffer, premultipliedAlpha: boolean): Pro
   return { width: info.width, height: info.height, rgba: data };
 }
 
-/** A page prepared for the models: a square PNG with the page in its top-left corner. */
+/** A page prepared for the models: its parts laid out in a square PNG (see layout.ts). */
 export interface ModelInput {
   dataUrl: string;
   /** Square side in pixels. */
   side: number;
-  /** Size of the page inside the square. */
-  content: { width: number; height: number };
+  layout: PartLayout;
   background: Background;
 }
 
 /**
- * The page flattened onto `background`, scaled to fit `maxSide` and padded to a square. The
- * image model only honours aspect ratios loosely, and a square comes back square, so
+ * The page's parts drawn into a `side`-pixel square as `layout` places them, on `background`.
+ * The image model only honours aspect ratios loosely, and a square comes back square, so
  * the parts stay where they were.
  */
-export async function toModelInput(page: PageImage, maxSide: number, background: Background): Promise<ModelInput> {
-  const { data, info } = await sharp(page.rgba, { raw: { width: page.width, height: page.height, channels: 4 } })
+export async function toModelInput(page: PageImage, side: number, background: Background, layout: PartLayout): Promise<ModelInput> {
+  const flat = await sharp(page.rgba, { raw: { width: page.width, height: page.height, channels: 4 } })
     .flatten({ background: background.hex })
-    .resize({ width: maxSide, height: maxSide, fit: "inside" })
-    .png()
-    .toBuffer({ resolveWithObject: true });
-  const side = Math.max(info.width, info.height);
-  const square = await sharp(data)
-    .extend({ right: side - info.width, bottom: side - info.height, background: background.hex })
+    .raw()
+    .toBuffer();
+  const parts = await Promise.all(
+    layout.placements.map(async (p) => {
+      const to = toPixels(p, side);
+      const input = await sharp(flat, { raw: { width: page.width, height: page.height, channels: 3 } })
+        .extract({ left: p.src.x, top: p.src.y, width: p.src.width, height: p.src.height })
+        .resize(to.width, to.height, { fit: "fill" })
+        .png()
+        .toBuffer();
+      return { input, left: to.x, top: to.y };
+    }),
+  );
+  const square = await sharp({ create: { width: side, height: side, channels: 3, background: background.hex } })
+    .composite(parts)
     .png()
     .toBuffer();
-  return {
-    dataUrl: `data:image/png;base64,${square.toString("base64")}`,
-    side,
-    content: { width: info.width, height: info.height },
-    background,
-  };
+  return { dataUrl: `data:image/png;base64,${square.toString("base64")}`, side, layout, background };
 }
 
 export async function toDataUrl(image: Buffer, maxSide: number): Promise<string> {
@@ -170,7 +174,8 @@ export async function toDataUrl(image: Buffer, maxSide: number): Promise<string>
 
 /**
  * Fits a repainted page back onto the original at the same pixel size. The image model
- * only returns opaque images at roughly the requested aspect ratio.
+ * only returns opaque images at roughly the requested aspect ratio. The model's drift is
+ * undone in the square it painted, then each part is copied back to its area on the page.
  *
  * With `keyedRects` null, every region keeps its exact silhouette: the original alpha
  * is reused and the repainted colour is grown to fill it. Otherwise the parts take the
@@ -184,14 +189,11 @@ export async function fitToPage(
   premultipliedAlpha: boolean,
   keyedRects: PageRect[] | null,
 ): Promise<Buffer> {
-  const square = await sharp(generated).resize(input.side, input.side, { fit: "fill" }).toBuffer();
-  const rgb = await sharp(square)
-    .extract({ left: 0, top: 0, ...input.content })
-    .resize(page.width, page.height, { fit: "fill" })
-    .removeAlpha()
-    .raw()
-    .toBuffer();
-  const aligned = alignToPage(rgb, page, input.background, keyedRects);
+  const { side, layout } = input;
+  const square = await sharp(generated).resize(side, side, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const original = await layoutPage(page, layout, side);
+  const alignedSquare = alignToPage(square, original, input.background, keyedRects && layout.placements.map((p) => toPixels(p, side)));
+  const aligned = await unpackSquare(alignedSquare, side, layout, page, input.background);
   let alpha: Uint8Array;
   if (keyedRects) {
     alpha = keyOut(aligned, page.width, page.height, input.background, keyedRects);
@@ -210,6 +212,46 @@ export async function fitToPage(
     out[p + 3] = a;
   }
   return sharp(out, { raw: { width: page.width, height: page.height, channels: 4 } }).png().toBuffer();
+}
+
+/** The original page's parts drawn into the model's square as `layout` places them, for alignment. */
+async function layoutPage(page: PageImage, layout: PartLayout, side: number): Promise<PageImage> {
+  const parts = await Promise.all(
+    layout.placements.map(async (p) => {
+      const to = toPixels(p, side);
+      const input = await sharp(page.rgba, { raw: { width: page.width, height: page.height, channels: 4 } })
+        .extract({ left: p.src.x, top: p.src.y, width: p.src.width, height: p.src.height })
+        .resize(to.width, to.height, { fit: "fill" })
+        .png()
+        .toBuffer();
+      return { input, left: to.x, top: to.y };
+    }),
+  );
+  const rgba = await sharp({ create: { width: side, height: side, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite(parts)
+    .raw()
+    .toBuffer();
+  return { width: side, height: side, rgba };
+}
+
+/** Copies each part from the painted square back to its area on a page-sized image; the rest is background. */
+async function unpackSquare(square: Buffer, side: number, layout: PartLayout, page: PageImage, background: Background): Promise<Buffer> {
+  const out = Buffer.alloc(page.width * page.height * 3);
+  const key = hexToRgb(background.hex);
+  for (let i = 0; i < out.length; i += 3) out.set(key, i);
+  for (const p of layout.placements) {
+    const from = toPixels(p, side);
+    const part = await sharp(square, { raw: { width: side, height: side, channels: 3 } })
+      .extract({ left: from.x, top: from.y, width: from.width, height: from.height })
+      .resize(p.src.width, p.src.height, { fit: "fill" })
+      .raw()
+      .toBuffer();
+    for (let row = 0; row < p.src.height; row++) {
+      const start = ((p.src.y + row) * page.width + p.src.x) * 3;
+      part.copy(out, start, row * p.src.width * 3, (row + 1) * p.src.width * 3);
+    }
+  }
+  return out;
 }
 
 /** Largest stretch (as a fraction) and shift (as a fraction of the page) the alignment tries. */

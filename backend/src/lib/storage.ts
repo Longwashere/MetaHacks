@@ -67,3 +67,34 @@ export async function putR2Object(key: string, body: Buffer | string, cacheContr
     throw new Error(`Couldn't save ${key} to R2 (${res.status}): ${detail}`);
   }
 }
+
+/** Lists keys under `prefix` in R2. With `delimiter`, returns the next-level "folders" (common prefixes) instead. */
+export async function listR2(prefix: string, delimiter?: string): Promise<string[]> {
+  if (!r2) throw new Error("R2 isn't configured; set every R2_* variable in .env.");
+  const found: string[] = [];
+  let token: string | undefined;
+  do {
+    const params = new URLSearchParams({ "list-type": "2", prefix });
+    if (delimiter) params.set("delimiter", delimiter);
+    if (token) params.set("continuation-token", token);
+    const res = await r2.client.fetch(`${r2.bucketUrl}?${params}`);
+    if (!res.ok) throw new Error(`Couldn't list ${prefix} in R2 (${res.status}): ${(await res.text()).slice(0, 300)}`);
+    const xml = await res.text();
+    const tag = delimiter ? /<CommonPrefixes><Prefix>(.*?)<\/Prefix><\/CommonPrefixes>/g : /<Key>(.*?)<\/Key>/g;
+    for (const m of xml.matchAll(tag)) found.push(decodeXml(m[1]));
+    token = /<IsTruncated>true<\/IsTruncated>/.test(xml) ? xml.match(/<NextContinuationToken>(.*?)<\/NextContinuationToken>/)?.[1] : undefined;
+    if (token) token = decodeXml(token);
+  } while (token);
+  return found;
+}
+
+/** Downloads one R2 object. */
+export async function getR2Object(key: string): Promise<Buffer> {
+  if (!r2) throw new Error("R2 isn't configured; set every R2_* variable in .env.");
+  const res = await r2.client.fetch(`${r2.bucketUrl}/${encodeKey(key)}`);
+  if (!res.ok) throw new Error(`Couldn't read ${key} from R2 (${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+const decodeXml = (s: string) =>
+  s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");

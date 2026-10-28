@@ -11,6 +11,8 @@ export interface RemixPlan {
   name: string;
   /** Instructions for the image model describing the new look. */
   editPrompt: string;
+  /** What each part is in the original art, by region name, e.g. head_2 → "tusked lower jaw". May be incomplete. */
+  parts: Record<string, string>;
 }
 
 function apiKey(): string {
@@ -33,23 +35,26 @@ Hard rules, in priority order:
 How to write editPrompt:
 - Translate abstract requests into concrete visuals. Do not repeat vague words like "modern", "cool", or "lawyer". Say what that means in paint: materials, colors, patterns, and surface details, for example charcoal wool suit fabric with subtle pinstripes, white shirt, burgundy tie pattern.
 - Cover the major visible parts and explicitly mention thin or small parts, like straps, bones, shafts, and buckles, so the image model does not drop them.
+- The Parts list gives each part's page and where it sits, as percentages of that page image (x from the left edge, y from the top). Use it to work out what each part is from its picture; names can mislead (e.g. "head_2" may be a jaw). In editPrompt, name parts by what they are and where they sit (e.g. "the tusked lower jaw at bottom left"), especially small or odd-shaped parts that could pass for something else.
+- When the requested look or the Art style line names an art style that differs from the pages (a studio, game, artist or medium, e.g. "Studio Ghibli", "MapleStory", "watercolor"), the style change matters as much as the subject. Start editPrompt with one sentence saying what that style looks like in paint (line weight, colour and shading, amount of texture, lighting), end it with a short reminder of the same, and describe every material in that style's terms. For a soft or clean style, don't ask for grit like fine cracks, scratches, pitting or weathering; for Studio Ghibli, for example: clean thin outlines, soft flat colours with gentle gradients, simple texture, warm light.
 - Use specific, paintable language only. No instructions about the model, the rig, or the atlas itself.
 - One paragraph, imperative voice, at most 1000 characters.
 
-Reply with JSON only, no markdown, no extra fields: {"name": "...", "editPrompt": "..."}
+Reply with JSON only, no markdown, no extra fields: {"name": "...", "editPrompt": "...", "parts": {...}}
 - name: 2 to 5 words naming the remixed asset, Title Case, based on the new look, not the original asset name.
-- editPrompt: one paragraph, at most 1000 characters, as described above.`;
+- editPrompt: one paragraph, at most 1000 characters, as described above.
+- parts: an object with one entry per part in the Parts list, keyed by its exact name: 1 to 5 words saying what that shape is in the original art, judged from the picture, not the name, e.g. {"head_2": "tusked lower jaw", "legL": "left foot with fur cuff"}. The image model gets these labels with each part's position.`;
 
 /** Asks Muse Spark to turn the user's prompt into instructions for the image model. */
 export async function planRemix(
   input: RemixInput,
-  base: { name: string; regions: string[]; pageImages: string[]; background: string },
+  base: { name: string; parts: string[]; pageImages: string[]; background: string },
   signal: AbortSignal,
 ): Promise<RemixPlan> {
   const kept = keptPartProperties(input);
   const request = [
     `Asset: ${base.name}`,
-    `Parts: ${base.regions.slice(0, 120).join(", ")}`,
+    `Parts:\n${base.parts.slice(0, 120).join("\n")}`,
     `Page background: solid ${base.background}`,
     `Requested look: ${input.prompt}`,
     input.style === "auto"
@@ -94,7 +99,7 @@ export async function planRemix(
   }
   // Muse's reply is untrusted; if it's unusable, fall back to the user's own words.
   console.warn("Muse returned an unusable plan; using the prompt as-is.");
-  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.` };
+  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.`, parts: {} };
 }
 
 function strengthHint(strength: number, keepOutline: boolean): string {
@@ -134,7 +139,19 @@ function parsePlan(body: unknown): RemixPlan | null {
   const cleanName = name.replace(/[^\p{L}\p{N} '\-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 60);
   const cleanPrompt = editPrompt.replace(/\s+/g, " ").trim().slice(0, 1500);
   if (!cleanName || cleanPrompt.length < 20) return null;
-  return { name: cleanName, editPrompt: cleanPrompt };
+  return { name: cleanName, editPrompt: cleanPrompt, parts: parsePartLabels(getPath(parsed, ["parts"])) };
+}
+
+/** Keeps short plain-text labels only; they go into the image prompt as-is. */
+function parsePartLabels(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const labels: Record<string, string> = {};
+  for (const [name, label] of Object.entries(value).slice(0, 120)) {
+    if (typeof label !== "string") continue;
+    const clean = label.replace(/[^\p{L}\p{N} '\-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+    if (clean) labels[name] = clean;
+  }
+  return labels;
 }
 
 /**

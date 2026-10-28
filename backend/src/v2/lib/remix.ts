@@ -1,5 +1,6 @@
 import path from "node:path";
-import { isSafePageName, parseAtlas } from "./atlas.js";
+import { type AtlasPage, isSafePageName, parseAtlas } from "./atlas.js";
+import { type PartLayout, layoutParts } from "../../lib/layout.js";
 import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy } from "./meta.js";
 import { putFile } from "../../lib/storage.js";
 import { decodePage, fitToPage, pickBackground, toDataUrl, toModelInput } from "./textures.js";
@@ -57,13 +58,18 @@ export async function runRemix(
 
   // One background for every page, so the reference page matches the one being painted.
   const background = pickBackground(images, input.prompt);
+  // Every model call sees the parts in the same square layout, so positions match across them.
+  const layouts = pages.map((p, i) => layoutParts(p.rects, images[i]));
   const pageImages = await Promise.all(
-    images.slice(0, PLAN_MAX_PAGES).map(async (img) => (await toModelInput(img, PLAN_MAX_SIDE, background)).dataUrl),
+    images
+      .slice(0, PLAN_MAX_PAGES)
+      .map(async (img, i) => (await toModelInput(img, PLAN_MAX_SIDE, background, layouts[i])).dataUrl),
   );
+  const parts = describeParts(pages.slice(0, PLAN_MAX_PAGES), layouts);
   const plan = await withProgress(onProgress, 0.1, 0.2, "Planning the new look", PLAN_EXPECTED_MS, () =>
     planRemix(
       input,
-      { name: base.name, regions: pages.flatMap((p) => p.regions), pageImages, background: background.name },
+      { name: base.name, parts, pageImages, background: background.name },
       signal,
     ),
   );
@@ -71,7 +77,8 @@ export async function runRemix(
   onPrompt(plan.editPrompt, "original");
 
   const kept = keptPartProperties(input);
-  const buildImagePrompt = (editPrompt: string) => [
+  const pageParts = pages.map((page, i) => labelParts(page, layouts[i], plan.parts));
+  const buildImagePrompt = (editPrompt: string, pageIndex: number) => [
     editPrompt,
     // With "auto", the plan already carries the style (the original one, or the prompt's).
     input.style === "auto" ? "" : `Art style: ${input.style}.`,
@@ -79,6 +86,8 @@ export async function runRemix(
     `Every shape that is not the ${background.name} background is a part; repaint all of them, including thin ones like bones, shafts and straps.`,
     kept ? `Keep every part in exactly the same ${kept}.` : "",
     `Do not add or merge parts. Keep the background solid ${background.name}.`,
+    `Leave the empty ${background.name} areas empty; don't paint anything new there.`,
+    pageParts[pageIndex] ? `Parts on this page, by position: ${pageParts[pageIndex]}.` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -98,8 +107,9 @@ export async function runRemix(
           createdAt: new Date().toISOString(),
           base: base.name,
           request,
+          parts,
           plan,
-          imagePrompt: buildImagePrompt(editPrompt),
+          imagePrompt: buildImagePrompt(editPrompt, 0),
           ...(reworded ? { rewordedForContentPolicy: true } : {}),
         },
         null,
@@ -111,7 +121,7 @@ export async function runRemix(
   let reference: string | null = null;
   const pageKeys: string[] = [];
   for (const [i, page] of pages.entries()) {
-    const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background);
+    const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background, layouts[i]);
     const generated = await withProgress(
       onProgress,
       0.2 + (0.75 * i) / pages.length,
@@ -120,7 +130,7 @@ export async function runRemix(
       PAGE_EXPECTED_MS,
       async () => {
         const paint = () => {
-          const prompt = buildImagePrompt(editPrompt);
+          const prompt = buildImagePrompt(editPrompt, i);
           return repaintPage(
             modelInput,
             reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
@@ -205,4 +215,42 @@ async function withProgress<T>(
   } finally {
     clearInterval(timer);
   }
+}
+
+/**
+ * One line per region for Muse, e.g. "head_2: page 1, x 0–11%, y 75–83%". Positions are
+ * percentages of the square image Muse sees, where `layouts` drew the parts.
+ */
+function describeParts(pages: AtlasPage[], layouts: PartLayout[]): string[] {
+  const pct = (v: number) => Math.round(100 * v);
+  return pages.flatMap((page, i) =>
+    page.regions.flatMap((name, j) => {
+      const p = layouts[i].placements[layouts[i].regionPlacement[j]];
+      if (!p) return [];
+      return [`${name}: page ${i + 1}, x ${pct(p.x)}–${pct(p.x + p.width)}%, y ${pct(p.y)}–${pct(p.y + p.height)}%`];
+    }),
+  );
+}
+
+/**
+ * Muse's part labels with rough positions in the square Muse Image sees, in reading order,
+ * e.g. "tusked lower jaw (bottom left), left foot with fur cuff (bottom left)". Empty when
+ * Muse labelled none of this page's parts.
+ */
+function labelParts(page: AtlasPage, layout: PartLayout, labels: Record<string, string>): string {
+  const third = (v: number) => Math.min(2, Math.floor(3 * v));
+  return page.regions
+    .flatMap((name, j) => {
+      const label = labels[name];
+      const p = layout.placements[layout.regionPlacement[j]];
+      if (!label || !p) return [];
+      const cx = p.x + p.width / 2;
+      const cy = p.y + p.height / 2;
+      const where = `${["top", "middle", "bottom"][third(cy)]} ${["left", "center", "right"][third(cx)]}`;
+      return [{ text: `${label} (${where})`, cx, cy }];
+    })
+    // Rows of roughly a tenth of the image, then left to right.
+    .sort((a, b) => Math.floor(10 * a.cy) - Math.floor(10 * b.cy) || a.cx - b.cx)
+    .map((p) => p.text)
+    .join(", ");
 }

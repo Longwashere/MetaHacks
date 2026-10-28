@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "upload:spine": "tsx --env-file-if-exists=.env src/scripts/upload-spine.ts",
     "create-judge": "tsx --env-file-if-exists=.env src/scripts/create-judge.ts",
-    "set-admin": "tsx --env-file-if-exists=.env src/scripts/set-admin.ts"
+    "set-admin": "tsx --env-file-if-exists=.env src/scripts/set-admin.ts",
+    "pull:remixes": "tsx --env-file-if-exists=.env src/scripts/pull-remixes.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
