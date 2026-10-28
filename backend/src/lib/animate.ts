@@ -28,6 +28,8 @@ export interface AnimateResult {
   asset: ReturnType<typeof toSpineAsset>;
   animation: AssetRow["animations"][number];
   notes: string;
+  /** Muse's choreography: the request expanded into timed beats and poses, which the keys follow. */
+  plan: string;
   /** Bones Muse keyed that were left out, with the reason. */
   dropped: string[];
 }
@@ -208,32 +210,57 @@ function maxTime(value: unknown): number {
 // Asking Muse
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `You are a senior 2D game animator keyframing a Spine skeleton. You write a new animation for an existing rig from the user's request. You can't add bones or change art; you only key the bones listed.
+// Two calls. Asked to key an animation in one go, Spark wrote small, evenly timed, softly eased
+// motion (every bone keyed on the same beats, punches with no snap). Planning the beats first, on
+// their own, and then keying them with per-key eases gives it room to be bold.
+
+const PLAN_SYSTEM_PROMPT = `You are the animation director on a stylish 2D action game. Turn the user's request into a punchy beat sheet for this exact rig; a keyframer will follow it to the letter. Be bold: weak, floaty, evenly timed motion is the failure to avoid.
+
+Write, in plain text under 250 words, no JSON:
+1. FEEL: one line on the energy and weight (heavy, explosive, sloppy, proud, twitchy…).
+2. BEATS: 4–8 lines, each "start–end s · BEAT · what happens", naming the bones to move with concrete numbers (degrees, units). For actions use: anticipation (wind up opposite to the action, 20–35% of the time, slower), the action itself (fast: 0.06–0.2 s), an impact hold on the strongest pose (0.08–0.2 s), follow-through past the end pose, then a settle. For dances and idles, name the accent beats and a groove with rhythm and variation, not a plain back-and-forth.
+3. HERO POSES: the 2–4 extreme poses as strong silhouettes with big numbers. Exaggerate: the rig's own attack and hit ranges are a floor for action, not a ceiling. Weapons travel in wide arcs (90–180°), jumps leave the ground by 20–40% of the rig's height, and the body squashes (scale about 1.1 x, 0.85 y) on crouches and landings and stretches at launch.
+4. OVERLAP: which bone leads and how the rest follow (hips → chest → shoulder → elbow → hand or weapon, 0.03–0.08 s apart; hair, cloth and tails 0.08–0.15 s behind with a bigger swing and an overshoot).
+
+Use only bones from the list. Bones marked DRIVEN BY can't be keyed; use the bone the note names instead (an IK target moves a whole leg or arm). For a loop, the last beat must flow back into the first pose.`;
+
+const SYSTEM_PROMPT = `You are a senior 2D game animator keyframing a Spine skeleton. You turn the director's beat sheet into keyframes for an existing rig. You can't add bones or change art; you only key the bones listed.
 
 How Spine animation works here:
-- Each bone has a setup (rest) pose. Keys are offsets from that rest pose; the runtime interpolates smoothly between keys, so 3–8 well-placed keys per bone is plenty.
-- Bones are a hierarchy: rotating a bone swings all its children with it. Children don't need keys just to follow their parent.
-- Bones marked DRIVEN BY are controlled by a constraint; never key them. For IK chains (legs, sometimes arms), move the named target bone instead: moving a foot target bends the leg.
+- Each bone has a setup (rest) pose. Keys are offsets from that rest pose, and the runtime interpolates between keys.
+- Bones are a hierarchy: rotating a bone swings all its children with it.
+- Bones marked DRIVEN BY are controlled by a constraint; never key them. Key the bone the note names instead: moving an IK target bends the whole leg or arm.
 
 Units (screen space, the same as the bone positions you're given):
 - rotate: degrees counter-clockwise on screen, added to the rest pose. 0 = rest.
 - move: offset from the rest position in skeleton units, +x right, +y up. 0, 0 = rest.
-- scale: multiplier on the bone's own axes. 1, 1 = rest.
+- scale: multiplier on the bone's width (x) and height (y) as seen on screen. 1, 1 = rest. Use it for squash and stretch.
 
-Make it read well:
-- Key the big body masses first (hips/torso, then head, then limbs), then add overlap: tails, hair, cloth, capes and weapons lag their parent by 0.03–0.1 s and overshoot a little.
-- Use anticipation before big actions and a settle after them. Vary timing between bones so nothing moves in perfect lockstep.
-- Keep amplitudes plausible for this rig. The rig's own animations below show the ranges its bones normally move in; go bigger only when the request asks for it.
-- Keep the character in place unless the request asks it to travel: a hop moves the hips or body bone up, not the root.
-- For a looping animation, every bone's last key (at the full duration) must equal its first key (at time 0). Start every timeline with a key at time 0.
+Each key has an ease: how the motion arrives at that key from the previous one. This is where the energy comes from:
+- "snap": accelerates hard into this key. The hit of a punch or slash, throws, drops, landings.
+- "settle": arrives fast and slows into this key. Wind-ups, arriving in a pose, recoils, returning from an overshoot.
+- "smooth": flows through this key. Continuous motion: grooves, waves, cloth and hair.
+- "linear": constant speed. Spins and mechanical motion.
+To hold a pose, repeat the same values on a second key later (e.g. impact at 0.52 s, same values at 0.66 s).
+
+Rules:
+- Follow the beat sheet: hit its timings, poses and numbers. Key the hero poses first, then breakdowns between them.
+- Contrast is everything: slow wind-ups ("settle"), fast actions ("snap", 0.06–0.2 s), short holds on impact, then a decelerating follow-through.
+- Never key all bones on the same times. Offset chained bones 0.03–0.08 s so motion ripples through the body; secondary parts (hair, cloth, tails, capes, loose gear) 0.08–0.15 s behind, swinging wider, then overshooting the rest pose once or twice before settling.
+- After every big move, overshoot the target by 10–25% and settle back.
+- Main bones get 5–12 keys; secondary bones as many as their follow-through needs.
+- Don't shrink the director's numbers. Bold and readable beats safe and small.
+- Keep the root still unless the request travels; hops and lunges move the hips or body bone.
+- Start every timeline with a key at time 0. For a looping animation, every bone's last key (at the full duration) must equal its first key.
 
 Reply with JSON only, no markdown:
-{"name": "<short animation name, 1–3 words>", "notes": "<one or two sentences for the user on what you animated>", "bones": [{"bone": "<bone name>", "rotate": [{"t": 0, "deg": 0}], "move": [{"t": 0, "x": 0, "y": 0}], "scale": [{"t": 0, "x": 1, "y": 1}], "ease": "smooth"}]}
-Each bone entry needs at least one of rotate, move or scale; leave out the ones it doesn't use. "t" is seconds from 0 to the duration. "ease" is "smooth" (default), "linear" for mechanical motion, or "stepped" for snaps and holds.`;
+{"name": "<short animation name, 1–3 words>", "notes": "<one or two sentences for the user on what you animated>", "bones": [{"bone": "<bone name>", "rotate": [{"t": 0, "deg": 0}, {"t": 0.4, "deg": 35, "ease": "settle"}, {"t": 0.52, "deg": -90, "ease": "snap"}], "move": [{"t": 0, "x": 0, "y": 0}], "scale": [{"t": 0, "x": 1, "y": 1, "ease": "smooth"}]}]}
+Each bone entry needs at least one of rotate, move or scale; leave out the ones it doesn't use. "t" is seconds from 0 to the duration. "ease" is optional and defaults to "smooth"; the first key's ease is ignored.`;
 
-function userMessage(input: AnimateInput, rig: Rig, skeleton: Record<string, unknown>): string {
+function userMessage(input: AnimateInput, rig: Rig, skeleton: Record<string, unknown>, plan: string | null): string {
   return [
     `Request: ${input.prompt}`,
+    ...(plan ? ["", "Director's beat sheet:", plan, ""] : []),
     `Duration: ${input.durationSec} s. ${input.loop ? "Loops: yes, the last key of every timeline must match its first." : "Loops: no, it plays once."}`,
     `Rig size: ${r1(rig.width)} × ${r1(rig.height)} skeleton units.`,
     "",
@@ -253,7 +280,7 @@ export async function generateAnimation(asset: AssetRow, input: AnimateInput, si
 }
 
 /**
- * Has Muse Spark write an animation for `skeleton` and checks it, then hands it to `keep`
+ * Has Muse Spark plan and key an animation for `skeleton` and checks it, then hands it to `keep`
  * (generateAnimation saves it; scripts can just look at it). Every run is saved to
  * ANIMATION_LOG_DIR (see saveRun), including failed ones.
  */
@@ -267,19 +294,22 @@ export async function animateSkeleton<T>(
   const rig = readRig(skeleton);
   if (rig.bones.size === 0) throw new AnimateError("This rig has no bones to animate.");
 
-  const request = userMessage(input, rig, skeleton);
-  logPrompt(`chat/completions (${MUSE_MODEL}) animate system`, SYSTEM_PROMPT);
-  logPrompt(`chat/completions (${MUSE_MODEL}) animate user`, request);
-  const run: RunLog = { assetId: logId, startedAt: new Date().toISOString(), model: MUSE_MODEL, input: { ...input, skeleton: null }, request, attempts: [] };
+  const run: RunLog = { assetId: logId, startedAt: new Date().toISOString(), model: MUSE_MODEL, input: { ...input, skeleton: null }, attempts: [] };
   const started = Date.now();
   try {
+    run.planRequest = userMessage(input, rig, skeleton, null);
+    const plan = (await callMuse("plan", PLAN_SYSTEM_PROMPT, run.planRequest, signal, run))?.trim().slice(0, 4000);
+    if (!plan) throw new AnimateError("Muse couldn't plan the animation. Try again.", 502);
+    run.plan = plan;
+
+    const request = (run.request = userMessage(input, rig, skeleton, plan));
     const existing = new Set(Object.keys(record(skeleton.animations)));
     let built = null;
     // One retry when the reply can't be used: a text call is cheap, and a bad JSON reply is the common failure.
     for (let attempt = 0; attempt < 2 && !built; attempt++) {
       const retryNote = attempt > 0 ? "\n\nYour last reply couldn't be used (not valid JSON, or no listed bone was keyed). Reply with the JSON object only." : "";
-      const content = await callMuse(request + retryNote, signal, run);
-      built = content === null ? null : buildAnimation(content, rig, input, existing);
+      const content = await callMuse("keys", SYSTEM_PROMPT, request + retryNote, signal, run);
+      built = content === null ? null : buildAnimation(content, rig, input, existing, plan);
     }
     if (!built) throw new AnimateError("Muse's animation came back unreadable. Try again or reword the request.", 502);
     run.result = { name: built.name, notes: built.notes, dropped: built.dropped, animation: built.animation };
@@ -307,14 +337,16 @@ async function loadSkeleton(key: string, sent: Record<string, unknown> | null, s
   return skeleton;
 }
 
-async function callMuse(request: string, signal: AbortSignal, run: RunLog): Promise<string | null> {
+async function callMuse(step: "plan" | "keys", system: string, request: string, signal: AbortSignal, run: RunLog): Promise<string | null> {
+  logPrompt(`chat/completions (${MUSE_MODEL}) animate ${step} system`, system);
+  logPrompt(`chat/completions (${MUSE_MODEL}) animate ${step} user`, request);
   const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
     body: JSON.stringify({
       model: MUSE_MODEL,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: system },
         { role: "user", content: request },
       ],
     }),
@@ -323,14 +355,14 @@ async function callMuse(request: string, signal: AbortSignal, run: RunLog): Prom
   });
   if (!res.ok) {
     const body = await res.text();
-    run.attempts.push({ status: res.status, responseBody: body });
+    run.attempts.push({ step, status: res.status, responseBody: body });
     console.error(`Muse animate request failed (${res.status})`, body);
     throw new AnimateError("Muse couldn't write the animation. Try again.", 502);
   }
   const body: unknown = await res.json();
-  run.attempts.push({ status: res.status, responseBody: body });
+  run.attempts.push({ step, status: res.status, responseBody: body });
   const content = getPath(body, ["choices", 0, "message", "content"]);
-  logPrompt(`chat/completions (${MUSE_MODEL}) animate reply`, typeof content === "string" ? content : "(no content)");
+  logPrompt(`chat/completions (${MUSE_MODEL}) animate ${step} reply`, typeof content === "string" ? content : "(no content)");
   return typeof content === "string" ? content : null;
 }
 
@@ -338,21 +370,35 @@ async function callMuse(request: string, signal: AbortSignal, run: RunLog): Prom
 // Turning Muse's keys into a Spine animation
 // ---------------------------------------------------------------------------
 
-type Ease = "smooth" | "linear" | "stepped";
+const EASES = ["smooth", "snap", "settle", "linear"] as const;
+type Ease = (typeof EASES)[number];
 interface Key {
   t: number;
   v: number[];
+  /**
+   * How the value arrives at this key from the previous one. Spark read a "from this key to the
+   * next" ease as "arriving here", and its holds froze the rest pose, so the ease is on the arrival.
+   */
+  ease: Ease;
+}
+
+/** Normalised Bézier handles (x1, y1, x2, y2) for the eased curves: cubic ease-in and ease-out. */
+const EASE_HANDLES = { snap: [0.55, 0, 0.9, 0.35], settle: [0.1, 0.65, 0.45, 1] } as const;
+
+function readEase(value: unknown, fallback: Ease): Ease {
+  return EASES.find((e) => e === value) ?? fallback;
 }
 
 export interface BuiltAnimation {
   name: string;
   notes: string;
+  plan: string;
   dropped: string[];
   animation: { bones: Record<string, Record<string, unknown[]>> };
 }
 
 /** Muse's reply is untrusted: keep only animatable bones, clamp every value, and close loops. */
-function buildAnimation(content: string, rig: Rig, input: AnimateInput, existing: Set<string>): BuiltAnimation | null {
+function buildAnimation(content: string, rig: Rig, input: AnimateInput, existing: Set<string>, plan: string): BuiltAnimation | null {
   const start = content.indexOf("{");
   const end = content.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
@@ -378,23 +424,28 @@ function buildAnimation(content: string, rig: Rig, input: AnimateInput, existing
       dropped.push(`${bone.name}: driven by ${bone.drivenBy.split(":")[0]}`);
       continue;
     }
-    const ease: Ease = e.ease === "linear" || e.ease === "stepped" ? e.ease : "smooth";
+    // A bone-wide ease (the old reply format) is the default for keys that don't set their own.
+    const ease = readEase(e.ease, "smooth");
     const flip = bone.parent && det(bone.parent.m) < 0 ? -1 : 1;
     const parentInverse = invert(bone.parent?.m ?? [1, 0, 0, 1]);
     const timelines: Record<string, unknown[]> = {};
 
-    const rotate = readKeys(e.rotate, ["deg"], [0], input, (v) => [clamp(v[0], -360, 360)]);
-    if (rotate) timelines.rotate = toTimeline(rotate, ease, input.loop, (k) => ({ value: round(k[0] * flip) }), (k) => [k[0] * flip]);
+    const rotate = readKeys(e.rotate, ["deg"], [0], ease, input, (v) => [clamp(v[0], -360, 360)]);
+    if (rotate) timelines.rotate = toTimeline(rotate, input.loop, (k) => ({ value: round(k[0] * flip) }), (k) => [k[0] * flip]);
 
-    const move = readKeys(e.move, ["x", "y"], [0, 0], input, (v) => [clamp(v[0], -maxMove, maxMove), clamp(v[1], -maxMove, maxMove)]);
+    const move = readKeys(e.move, ["x", "y"], [0, 0], ease, input, (v) => [clamp(v[0], -maxMove, maxMove), clamp(v[1], -maxMove, maxMove)]);
     if (move && parentInverse) {
       // Screen-space offsets → the parent's local space, which is what Spine's translate keys are in.
       const local = (k: number[]) => [parentInverse[0] * k[0] + parentInverse[1] * k[1], parentInverse[2] * k[0] + parentInverse[3] * k[1]];
-      timelines.translate = toTimeline(move, ease, input.loop, (k) => { const [x, y] = local(k); return { x: round(x), y: round(y) }; }, local);
+      timelines.translate = toTimeline(move, input.loop, (k) => { const [x, y] = local(k); return { x: round(x), y: round(y) }; }, local);
     }
 
-    const scale = readKeys(e.scale, ["x", "y"], [1, 1], input, (v) => v.map((s) => clamp(s, SCALE_LIMITS.min, SCALE_LIMITS.max)));
-    if (scale) timelines.scale = toTimeline(scale, ease, input.loop, (k) => ({ x: round(k[0]), y: round(k[1]) }), (k) => k);
+    const scale = readKeys(e.scale, ["x", "y"], [1, 1], ease, input, (v) => v.map((s) => clamp(s, SCALE_LIMITS.min, SCALE_LIMITS.max)));
+    // Spine scales along the bone's own axes. For a bone that points more up or down than sideways
+    // (a torso), its x axis is screen height, so the screen-space pair swaps.
+    const upright = Math.abs(bone.m[2]) > Math.abs(bone.m[0]);
+    const boneAxes = (k: number[]) => (upright ? [k[1], k[0]] : k);
+    if (scale) timelines.scale = toTimeline(scale, input.loop, (k) => { const [x, y] = boneAxes(k); return { x: round(x), y: round(y) }; }, boneAxes);
 
     if (Object.keys(timelines).length > 0) bones[bone.name] = timelines;
   }
@@ -404,6 +455,7 @@ function buildAnimation(content: string, rig: Rig, input: AnimateInput, existing
   return {
     name: uniqueName(getPath(parsed, ["name"]), existing),
     notes: typeof notes === "string" ? notes.replace(/\s+/g, " ").trim().slice(0, 400) : "",
+    plan,
     dropped,
     animation: { bones },
   };
@@ -413,32 +465,34 @@ function buildAnimation(content: string, rig: Rig, input: AnimateInput, existing
  * Sorted keys with times clamped to the duration, a key at 0 (rest when Muse left it out) and, for
  * loops, a last key at the duration equal to the first. Null when the timeline never leaves rest.
  */
-function readKeys(value: unknown, fields: string[], rest: number[], input: AnimateInput, clampValues: (v: number[]) => number[]): Key[] | null {
-  const byTime = new Map<number, number[]>();
+function readKeys(value: unknown, fields: string[], rest: number[], ease: Ease, input: AnimateInput, clampValues: (v: number[]) => number[]): Key[] | null {
+  const byTime = new Map<number, { v: number[]; ease: Ease }>();
   for (const raw of list(value).slice(0, MAX_KEYS * 2)) {
     const k = record(raw);
     const t = num(k.t, Number.NaN);
     if (Number.isNaN(t)) continue;
     const time = Math.round(clamp(t, 0, input.durationSec) * 10000) / 10000;
-    byTime.set(time, clampValues(fields.map((f, i) => num(k[f], rest[i]))));
+    byTime.set(time, { v: clampValues(fields.map((f, i) => num(k[f], rest[i]))), ease: readEase(k.ease, ease) });
   }
-  const keys = [...byTime].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t).slice(0, MAX_KEYS);
+  const keys = [...byTime].map(([t, k]) => ({ t, ...k })).sort((a, b) => a.t - b.t).slice(0, MAX_KEYS);
   if (keys.length === 0 || keys.every((k) => k.v.every((v, i) => Math.abs(v - rest[i]) < 1e-3))) return null;
-  if (keys[0].t > 0) keys.unshift({ t: 0, v: rest });
+  if (keys[0].t > 0) keys.unshift({ t: 0, v: rest, ease: "smooth" });
   if (input.loop) {
     const last = keys[keys.length - 1];
     if (last.t >= input.durationSec) last.v = keys[0].v;
-    else keys.push({ t: input.durationSec, v: keys[0].v });
+    else keys.push({ t: input.durationSec, v: keys[0].v, ease: "settle" });
   }
   return keys;
 }
 
 /**
- * Spine 4.2 keys. Smooth eases use a bezier per segment with Catmull-Rom tangents, so motion flows
- * through keys instead of stopping at each one; a loop's ends share one tangent so it doesn't hitch.
+ * Spine 4.2 keys with one Bézier curve per segment, set by the ease of the key it arrives at. Spine
+ * stores a segment's curve on its first key. "smooth" uses Catmull-Rom tangents so motion flows
+ * through keys (a loop's ends share one tangent so it doesn't hitch); "snap" and "settle" are cubic
+ * ease-in and ease-out.
  * `channels` maps a key to the values the curve interpolates (after any conversion to local space).
  */
-function toTimeline(keys: Key[], ease: Ease, loop: boolean, fields: (v: number[]) => Record<string, number>, channels: (v: number[]) => number[]): unknown[] {
+function toTimeline(keys: Key[], loop: boolean, fields: (v: number[]) => Record<string, number>, channels: (v: number[]) => number[]): unknown[] {
   const times = keys.map((k) => k.t);
   const values = keys.map((k) => channels(k.v));
   const n = keys.length;
@@ -453,9 +507,18 @@ function toTimeline(keys: Key[], ease: Ease, loop: boolean, fields: (v: number[]
 
   return keys.map((k, i) => {
     const key: Record<string, unknown> = { time: k.t, ...fields(k.v) };
-    if (i === n - 1 || ease === "linear") return key;
-    if (ease === "stepped") return { ...key, curve: "stepped" };
+    if (i === n - 1) return key;
+    const ease = keys[i + 1].ease;
+    if (ease === "linear") return key;
     const dt = times[i + 1] - times[i];
+    if (ease === "snap" || ease === "settle") {
+      const [x1, y1, x2, y2] = EASE_HANDLES[ease];
+      key.curve = values[i].flatMap((v0, c) => {
+        const dv = values[i + 1][c] - v0;
+        return [round4(times[i] + x1 * dt), round(v0 + y1 * dv), round4(times[i] + x2 * dt), round(v0 + y2 * dv)];
+      });
+      return key;
+    }
     key.curve = tangents.flatMap((m, c) => [
       round4(times[i] + dt / 3),
       round(values[i][c] + (m[i] * dt) / 3),
@@ -512,7 +575,7 @@ async function save(asset: AssetRow, skeleton: Record<string, unknown>, built: B
       .single()
       .overrideTypes<AssetRow, { merge: false }>(),
   );
-  return { asset: toSpineAsset(row), animation, notes: built.notes, dropped: built.dropped };
+  return { asset: toSpineAsset(row), animation, notes: built.notes, plan: built.plan, dropped: built.dropped };
 }
 
 /** One run, as saved to run.json. */
@@ -521,17 +584,20 @@ interface RunLog {
   startedAt: string;
   model: string;
   input: AnimateInput;
-  request: string;
+  /** The user messages of the planning call and the keyframing call. */
+  planRequest?: string;
+  request?: string;
+  plan?: string;
   /** HTTP status and full body (parsed JSON, or text on errors) of each Muse response. */
-  attempts: { status: number; responseBody: unknown }[];
-  result?: Omit<BuiltAnimation, "animation"> & { animation: unknown };
+  attempts: { step: "plan" | "keys"; status: number; responseBody: unknown }[];
+  result?: Omit<BuiltAnimation, "animation" | "plan"> & { animation: unknown };
   error?: string;
   durationMs?: number;
 }
 
 /**
- * Writes <ANIMATION_LOG_DIR>/<time>_<assetId>/: system-prompt.txt and run.json (input, the rig
- * description Muse saw, its raw replies, the built animation or the error). Logging must never
+ * Writes <ANIMATION_LOG_DIR>/<time>_<assetId>/: system-prompts.txt and run.json (input, the rig
+ * description and beat sheet Muse saw, its raw replies, the built animation or the error). Logging must never
  * fail the request, so errors are only reported.
  */
 async function saveRun(run: RunLog) {
@@ -539,7 +605,7 @@ async function saveRun(run: RunLog) {
     const folder = path.join(ANIMATION_LOG_DIR, `${run.startedAt.replace(/[:.]/g, "-")}_${run.assetId.replace(/[^\w-]/g, "_").slice(0, 80)}`);
     await mkdir(folder, { recursive: true });
     await Promise.all([
-      writeFile(path.join(folder, "system-prompt.txt"), SYSTEM_PROMPT),
+      writeFile(path.join(folder, "system-prompts.txt"), `PLAN\n\n${PLAN_SYSTEM_PROMPT}\n\nKEYS\n\n${SYSTEM_PROMPT}`),
       writeFile(path.join(folder, "run.json"), JSON.stringify(run, null, 2)),
     ]);
     console.log(`[animate] saved run to ${folder}`);

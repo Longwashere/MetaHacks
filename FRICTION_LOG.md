@@ -56,6 +56,14 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Muse Spark's one-shot animations were weak, and it read key eases backwards
+- **What happened:** the first version of generated animations asked `muse-spark-1.3` for the keyframes in one call. The user found the results weak: a "jumping slash… make it look epic" and a "one-two punch" on the orc came back small and mushy.
+- **Evidence (verified, `POST /chat/completions`, `muse-spark-1.3`, text only; runs in `backend/data/animations/`, local):** replies took 22–45 s. In the jump-slash, about 30 bones were keyed on the same six times (35 distinct key times in total), with a mean rotation of 10° per key against the rig's own Attack swinging the arm through 150°. In the punch, 13 distinct key times. Every curve was smooth. After splitting into a planning call and a keying call with per-key eases: mean rotation 29° and 26°, and 64 and 97 distinct key times. A second problem showed up then: given eases defined as "the move from this key to the next", Spark used `hold` 36 times as if it meant "arrive here and hold", which froze the punch's first 0.4 s.
+- **Cost:** five user test runs, about eight Spark calls testing changes in a script, and the user's time.
+- **Cause (inferred):** in one call Spark goes straight to the JSON and plays safe (our prompt also told it to keep amplitudes "plausible"). It reads an ease on a key as describing how the motion arrives at that key.
+- **Workaround / status:** fixed in `backend/src/lib/animate.ts`: a planning call writes a beat sheet first, eases are defined on arrival (`snap`, `settle`, `smooth`, `linear`; no `hold`), and the prompt asks for bold poses and staggered timing. Checked by drawing the bones at sampled times, not yet with textures in the viewer. Each run now takes 60–116 s.
+- **Lesson:** have Spark plan in plain text before it writes structured output, and define every field in the direction the model naturally reads it.
+
 ### 2026-10-28 — Muse Code can't be called from the backend
 - **What happened:** while planning prompt-generated animations around Muse Code, we found there's no Muse Code model to call.
 - **Evidence (verified):** `GET https://api.meta.ai/v1/models` with our key returns `muse-wonder-1.0`, `sam-3.1`, `muse-spark-1.3`, `muse-spark-1.3-contributor`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.1`, `muse-image-1.0` and `muse-voice-transcribe-1.0`. No Muse Code ID.

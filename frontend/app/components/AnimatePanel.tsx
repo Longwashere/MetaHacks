@@ -140,7 +140,9 @@ export function AnimatePanel({ remix, onAnimated }: AnimatePanelProps) {
           {pending ? "Muse is keyframing…" : "Animate"}
         </Button>
         <p className="text-center text-xs text-muted-foreground">
-          {pending ? "This usually takes under a minute." : "One Muse Spark call. Doesn't use your monthly remixes."}
+          {pending
+            ? "Muse plans the beats, then keys them. This takes a minute or two."
+            : "Two Muse Spark calls. Doesn't use your monthly remixes."}
         </p>
       </div>
 
@@ -150,6 +152,12 @@ export function AnimatePanel({ remix, onAnimated }: AnimatePanelProps) {
           <AlertTitle>Added "{result.animation.name}"</AlertTitle>
           <AlertDescription className="flex flex-col gap-2">
             {result.notes && <p>{result.notes}</p>}
+            {result.plan && (
+              <details className="text-xs">
+                <summary className="cursor-pointer font-medium text-foreground">Choreography</summary>
+                <p className="mt-1 max-h-48 overflow-y-auto whitespace-pre-line">{result.plan}</p>
+              </details>
+            )}
             {result.dropped.length > 0 && (
               <div className="flex flex-col gap-1 text-xs">
                 <span className="font-medium text-foreground">Left out</span>

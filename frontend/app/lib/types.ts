@@ -231,6 +231,8 @@ export interface AnimateResult {
   asset: SpineAsset;
   animation: SpineAnimation;
   notes: string;
+  /** Muse's choreography: the request expanded into timed beats and poses, which the keys follow. */
+  plan: string;
   /** Bones Muse keyed that were left out, with the reason. */
   dropped: string[];
 }
