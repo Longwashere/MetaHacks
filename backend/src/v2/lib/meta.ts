@@ -11,8 +11,6 @@ export interface RemixPlan {
   name: string;
   /** Instructions for the image model describing the new look. */
   editPrompt: string;
-  /** What each part is in the original art, by region name, e.g. head_2 → "tusked lower jaw". May be incomplete. */
-  parts: Record<string, string>;
 }
 
 function apiKey(): string {
@@ -28,9 +26,10 @@ An image-editing model will repaint every page into a new look using only your e
 Hard rules, in priority order:
 1. Preserve geometry over novelty. Every part must keep exactly the same position, size, outline, and pose. Only what is painted inside each part changes. If a requested look conflicts with this, preserve the geometry and adapt the look to fit inside the existing parts.
 2. Only use parts you can see in the images and in the Parts list in the user message. Never invent, rename, merge, split, move, or resize a part, and never ask for text, backgrounds, scenery, shadows, or a new background colour.
-3. Map accessories onto existing parts. If the requested look needs a suit, tie, glasses, or other accessory with no dedicated part, paint it as a pattern or detail inside the closest existing part, for example a tie pattern on the torso, not as a new shape.
-4. Keep the character recognizable unless the user explicitly asks to change identity. Keep species features, horns, tusks, ears, and overall silhouette unless the requested look says otherwise.
-5. Respect the Change amount and Keep palette flag in the user message. Light = recolor and small details only. Moderate = restyle materials and details, keep silhouette. Heavy = bold restyle, still same outline. If Keep palette is on, keep the original colors and change materials and details only.
+3. Each part is one cut-out piece of the character; it becomes the matching piece of the new character and nothing more. A bone segment becomes the same segment of a limb (an upper-arm bone becomes an upper arm, with no hand or foot added); a helmet, boot, greave or other armour piece stays an empty piece with nobody inside it; a head stays one head. Never ask for whole limbs, bodies or heads inside a part that is only a piece of one.
+4. Map accessories onto existing parts. If the requested look needs a suit, tie, glasses, or other accessory with no dedicated part, paint it as a pattern or detail inside the closest existing part, for example a tie pattern on the torso, not as a new shape.
+5. Keep the character recognizable unless the user explicitly asks to change identity. Keep species features, horns, tusks, ears, and overall silhouette unless the requested look says otherwise.
+6. Respect the Change amount and Keep palette flag in the user message. Light = recolor and small details only. Moderate = restyle materials and details, keep silhouette. Heavy = bold restyle, still same outline. If Keep palette is on, keep the original colors and change materials and details only.
 
 How to write editPrompt:
 - Translate abstract requests into concrete visuals. Do not repeat vague words like "modern", "cool", or "lawyer". Say what that means in paint: materials, colors, patterns, and surface details, for example charcoal wool suit fabric with subtle pinstripes, white shirt, burgundy tie pattern.
@@ -40,10 +39,9 @@ How to write editPrompt:
 - Use specific, paintable language only. No instructions about the model, the rig, or the atlas itself.
 - One paragraph, imperative voice, at most 1000 characters.
 
-Reply with JSON only, no markdown, no extra fields: {"name": "...", "editPrompt": "...", "parts": {...}}
+Reply with JSON only, no markdown, no extra fields: {"name": "...", "editPrompt": "..."}
 - name: 2 to 5 words naming the remixed asset, Title Case, based on the new look, not the original asset name.
-- editPrompt: one paragraph, at most 1000 characters, as described above.
-- parts: an object with one entry per part in the Parts list, keyed by its exact name: 1 to 5 words saying what that shape is in the original art, judged from the picture, not the name, e.g. {"head_2": "tusked lower jaw", "legL": "left foot with fur cuff"}. The image model gets these labels with each part's position.`;
+- editPrompt: one paragraph, at most 1000 characters, as described above.`;
 
 /** Asks Muse Spark to turn the user's prompt into instructions for the image model. */
 export async function planRemix(
@@ -99,7 +97,7 @@ export async function planRemix(
   }
   // Muse's reply is untrusted; if it's unusable, fall back to the user's own words.
   console.warn("Muse returned an unusable plan; using the prompt as-is.");
-  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.`, parts: {} };
+  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.` };
 }
 
 function strengthHint(strength: number, keepOutline: boolean): string {
@@ -139,19 +137,7 @@ function parsePlan(body: unknown): RemixPlan | null {
   const cleanName = name.replace(/[^\p{L}\p{N} '\-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 60);
   const cleanPrompt = editPrompt.replace(/\s+/g, " ").trim().slice(0, 1500);
   if (!cleanName || cleanPrompt.length < 20) return null;
-  return { name: cleanName, editPrompt: cleanPrompt, parts: parsePartLabels(getPath(parsed, ["parts"])) };
-}
-
-/** Keeps short plain-text labels only; they go into the image prompt as-is. */
-function parsePartLabels(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const labels: Record<string, string> = {};
-  for (const [name, label] of Object.entries(value).slice(0, 120)) {
-    if (typeof label !== "string") continue;
-    const clean = label.replace(/[^\p{L}\p{N} '\-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 40);
-    if (clean) labels[name] = clean;
-  }
-  return labels;
+  return { name: cleanName, editPrompt: cleanPrompt };
 }
 
 /**

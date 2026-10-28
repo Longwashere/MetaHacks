@@ -3,7 +3,7 @@ import { type AtlasPage, isSafePageName, parseAtlas } from "./atlas.js";
 import { type PartLayout, layoutParts } from "../../lib/layout.js";
 import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy } from "./meta.js";
 import { putFile } from "../../lib/storage.js";
-import { decodePage, fitToPage, pickBackground, toDataUrl, toModelInput } from "./textures.js";
+import { decodePage, fitToPage, layoutFit, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
 
 export interface RemixProgress {
@@ -23,6 +23,10 @@ const PLAN_MAX_PAGES = 4;
 /** Rough durations of the model calls, used to keep the progress bar moving while they run. */
 const PLAN_EXPECTED_MS = 6_000;
 const PAGE_EXPECTED_MS = 10_000;
+/** A page whose painted pixels fall less inside the parts' boxes than this was rearranged by the model (see layoutFit). */
+const MIN_LAYOUT_FIT = 0.85;
+const LAYOUT_RETRY_NOTE =
+  "A previous attempt moved, enlarged and duplicated parts. Repaint each part exactly where it is in the input image, at the same size, and nowhere else.";
 
 /**
  * Re-textures the base rig: fetches its atlas pages, has Muse plan the new look,
@@ -77,8 +81,7 @@ export async function runRemix(
   onPrompt(plan.editPrompt, "original");
 
   const kept = keptPartProperties(input);
-  const pageParts = pages.map((page, i) => labelParts(page, layouts[i], plan.parts));
-  const buildImagePrompt = (editPrompt: string, pageIndex: number) => [
+  const buildImagePrompt = (editPrompt: string) => [
     editPrompt,
     // With "auto", the plan already carries the style (the original one, or the prompt's).
     input.style === "auto" ? "" : `Art style: ${input.style}.`,
@@ -87,12 +90,14 @@ export async function runRemix(
     kept ? `Keep every part in exactly the same ${kept}.` : "",
     `Do not add or merge parts. Keep the background solid ${background.name}.`,
     `Leave the empty ${background.name} areas empty; don't paint anything new there.`,
-    pageParts[pageIndex] ? `Parts on this page, by position: ${pageParts[pageIndex]}.` : "",
+    "Each part is a separate cut-out piece. Don't complete it into a whole object: no heads inside helmets, no legs inside boots or greaves, no hands or feet on limb segments.",
   ]
     .filter(Boolean)
     .join(" ");
   let editPrompt = plan.editPrompt;
   let reworded: string | null = null;
+  /** Each painted page's layoutFit, rounded, so failed and retried pages can be told apart afterwards. */
+  const layoutChecks: { page: string; attempt: number; insideBoxes: number }[] = [];
 
   // Timestamp first so folders sort by creation time when browsing the output.
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
@@ -109,8 +114,9 @@ export async function runRemix(
           request,
           parts,
           plan,
-          imagePrompt: buildImagePrompt(editPrompt, 0),
+          imagePrompt: buildImagePrompt(editPrompt),
           ...(reworded ? { rewordedForContentPolicy: true } : {}),
+          layoutChecks,
         },
         null,
         2,
@@ -129,8 +135,8 @@ export async function runRemix(
       pages.length > 1 ? `Painting page ${i + 1} of ${pages.length}` : "Painting new textures",
       PAGE_EXPECTED_MS,
       async () => {
-        const paint = () => {
-          const prompt = buildImagePrompt(editPrompt, i);
+        const paint = (note: string) => {
+          const prompt = [buildImagePrompt(editPrompt), note].filter(Boolean).join(" ");
           return repaintPage(
             modelInput,
             reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
@@ -138,22 +144,39 @@ export async function runRemix(
             signal,
           );
         };
-        try {
-          return await paint();
-        } catch (error) {
-          // Re-word once per job; a second rejection reaches the user.
-          if (!(error instanceof ContentPolicyError) || reworded) throw error;
-          onPrompt(editPrompt, "rewording");
-          reworded = await rewordForContentPolicy(editPrompt, signal);
-          if (!reworded) {
-            onPrompt(editPrompt, "original");
-            throw error;
+        const paintOnce = async (note: string) => {
+          try {
+            return await paint(note);
+          } catch (error) {
+            // Re-word once per job; a second rejection reaches the user.
+            if (!(error instanceof ContentPolicyError) || reworded) throw error;
+            onPrompt(editPrompt, "rewording");
+            reworded = await rewordForContentPolicy(editPrompt, signal);
+            if (!reworded) {
+              onPrompt(editPrompt, "original");
+              throw error;
+            }
+            editPrompt = reworded;
+            onPrompt(editPrompt, "reworded");
+            await writePrompts();
+            return await paint(note);
           }
-          editPrompt = reworded;
-          onPrompt(editPrompt, "reworded");
+        };
+        // Muse Image sometimes draws a new layout instead of repainting the parts in place;
+        // fitting that back would scramble the sheet, so the page is painted once more.
+        const check = async (image: Buffer, attempt: number) => {
+          const fit = await layoutFit(image, modelInput);
+          layoutChecks.push({ page: page.name, attempt, insideBoxes: Math.round(fit * 100) / 100 });
           await writePrompts();
-          return await paint();
-        }
+          return fit >= MIN_LAYOUT_FIT;
+        };
+        const first = await paintOnce("");
+        if (await check(first, 1)) return first;
+        await putFile(folder, `${path.parse(page.name).name}.rejected.png`, first);
+        const second = await paintOnce(LAYOUT_RETRY_NOTE);
+        if (await check(second, 2)) return second;
+        await putFile(folder, `${path.parse(page.name).name}.generated.png`, second);
+        throw new Error("The image model moved the parts out of place twice. Try a smaller change or a lower strength.");
       },
     );
     signal.throwIfAborted();
@@ -230,27 +253,4 @@ function describeParts(pages: AtlasPage[], layouts: PartLayout[]): string[] {
       return [`${name}: page ${i + 1}, x ${pct(p.x)}–${pct(p.x + p.width)}%, y ${pct(p.y)}–${pct(p.y + p.height)}%`];
     }),
   );
-}
-
-/**
- * Muse's part labels with rough positions in the square Muse Image sees, in reading order,
- * e.g. "tusked lower jaw (bottom left), left foot with fur cuff (bottom left)". Empty when
- * Muse labelled none of this page's parts.
- */
-function labelParts(page: AtlasPage, layout: PartLayout, labels: Record<string, string>): string {
-  const third = (v: number) => Math.min(2, Math.floor(3 * v));
-  return page.regions
-    .flatMap((name, j) => {
-      const label = labels[name];
-      const p = layout.placements[layout.regionPlacement[j]];
-      if (!label || !p) return [];
-      const cx = p.x + p.width / 2;
-      const cy = p.y + p.height / 2;
-      const where = `${["top", "middle", "bottom"][third(cy)]} ${["left", "center", "right"][third(cx)]}`;
-      return [{ text: `${label} (${where})`, cx, cy }];
-    })
-    // Rows of roughly a tenth of the image, then left to right.
-    .sort((a, b) => Math.floor(10 * a.cy) - Math.floor(10 * b.cy) || a.cx - b.cx)
-    .map((p) => p.text)
-    .join(", ");
 }

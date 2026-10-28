@@ -11,8 +11,6 @@ export interface RemixPlan {
   name: string;
   /** Instructions for the image model describing the new look. */
   editPrompt: string;
-  /** What each part is in the original art, by region name, e.g. head_2 → "tusked lower jaw". May be incomplete. */
-  parts: Record<string, string>;
 }
 
 export function apiKey(): string {
@@ -27,11 +25,11 @@ An image-editing model will repaint every page into a new look. Write its instru
 - The user message lists every part with its page and where it sits, as percentages of that page image (x from the left edge, y from the top). Use it to work out what each part is from its picture; names can mislead (e.g. "head_2" may be a jaw).
 - In editPrompt, name parts by what they are and where they sit (e.g. "the tusked lower jaw at bottom left"), especially small or odd-shaped parts that could pass for something else.
 - When the requested look or the Art style line names an art style that differs from the pages (a studio, game, artist or medium, e.g. "Studio Ghibli", "MapleStory", "watercolor"), the style change matters as much as the subject. Start editPrompt with one sentence saying what that style looks like in paint (line weight, colour and shading, amount of texture, lighting), end it with a short reminder of the same, and describe every material in that style's terms. For a soft or clean style, don't ask for grit like fine cracks, scratches, pitting or weathering; for Studio Ghibli, for example: clean thin outlines, soft flat colours with gentle gradients, simple texture, warm light.
+- Each part is one cut-out piece of the character; it becomes the matching piece of the new character and nothing more. A bone segment becomes the same segment of a limb (an upper-arm bone becomes an upper arm, with no hand or foot added); a helmet, boot, greave or other armour piece stays an empty piece with nobody inside it; a head stays one head. Never ask for whole limbs, bodies or heads inside a part that is only a piece of one.
 - Never ask for new parts, text, backgrounds or scenery.
-Reply with JSON only, no markdown: {"name": "...", "editPrompt": "...", "parts": {...}}
+Reply with JSON only, no markdown: {"name": "...", "editPrompt": "..."}
 - name: 2 to 5 words naming the remixed asset, Title Case.
-- editPrompt: one paragraph, at most 1000 characters.
-- parts: an object with one entry per part in the Parts list, keyed by its exact name: 1 to 5 words saying what that shape is in the original art, judged from the picture, not the name, e.g. {"head_2": "tusked lower jaw", "legL": "left foot with fur cuff"}. The image model gets these labels with each part's position.`;
+- editPrompt: one paragraph, at most 1000 characters.`;
 
 /** Asks Muse Spark to turn the user's prompt into instructions for the image model. */
 export async function planRemix(
@@ -87,7 +85,7 @@ export async function planRemix(
   }
   // Muse's reply is untrusted; if it's unusable, fall back to the user's own words.
   console.warn("Muse returned an unusable plan; using the prompt as-is.");
-  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.`, parts: {} };
+  return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.` };
 }
 
 function strengthHint(strength: number, keepOutline: boolean): string {
@@ -127,19 +125,7 @@ function parsePlan(body: unknown): RemixPlan | null {
   const cleanName = name.replace(/[^\p{L}\p{N} '\-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 60);
   const cleanPrompt = editPrompt.replace(/\s+/g, " ").trim().slice(0, 1500);
   if (!cleanName || cleanPrompt.length < 20) return null;
-  return { name: cleanName, editPrompt: cleanPrompt, parts: parsePartLabels(getPath(parsed, ["parts"])) };
-}
-
-/** Keeps short plain-text labels only; they go into the image prompt as-is. */
-function parsePartLabels(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const labels: Record<string, string> = {};
-  for (const [name, label] of Object.entries(value).slice(0, 120)) {
-    if (typeof label !== "string") continue;
-    const clean = label.replace(/[^\p{L}\p{N} '\-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 40);
-    if (clean) labels[name] = clean;
-  }
-  return labels;
+  return { name: cleanName, editPrompt: cleanPrompt };
 }
 
 /**

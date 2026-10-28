@@ -50,15 +50,33 @@ Add the entry in the same task, not later.
 - **The key colour bleeds into the repainted art** (e.g. a teal axe on cyan runs), and Muse Image has no setting to stop it. (2026-10-27)
 - **Edit strength can only be set through prompt text.** We haven't found a strength or fidelity parameter for `/images/edits`; check the API reference before building more on prompt wording. (2026-10-27)
 - **Muse Image moves and resizes parts** by a few percent, so we need a pixel-alignment step after every call. (2026-10-27)
+- **Muse Image sometimes redraws the whole layout** on big changes, moving and duplicating parts. We check every page and repaint once, which costs an extra image call. (2026-10-28)
 
 ### Log
+
+### 2026-10-28 — Muse Image completes fragments into whole objects
+- **What happened:** two Skeleton Warrior → "human warrior, Simpsons style" remixes came back with extra parts: five boots, two heads, and limbs with hands and feet. These spilled out of their boxes and scrambled the sheet (layout scores 70% and 87%).
+- **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`. The extras were completed versions of fragments: bone segments drawn as whole legs with feet, greaves and a boot with legs inside, an empty helmet with a head in it. Muse Spark's plans had asked for it ("repaint all horizontal bone shafts as yellow human arms and legs"). Our per-part label line also listed about 34 nouns such as "left leg bone", "tall armored boot" and "left shin plate".
+- **Cost:** two remix runs and the user's time.
+- **Cause:** image models are trained on whole characters and finish partial objects. Skeleton → human is the worst case because none of the parts contain flesh. Our prompts encouraged it.
+- **Workaround / status:** Muse Spark is told that each part becomes the matching piece and nothing more: bone segments without hands or feet, armour left empty, one head. The image prompt adds: "Don't complete it into a whole object: no heads inside helmets, no legs inside boots or greaves, no hands or feet on limb segments." The label line is gone, and Spark no longer returns labels. One v2 test run with the same prompt (`remixes/2026-10-28T07-33-41-088Z_test_piece_rule_mvrssggh/`) kept every part in place, with one head and empty armour. A few small extras were drawn in empty space, where they get cut off anyway.
+- **Lesson:** describe parts as pieces ("upper-arm segment", "empty helmet"), never as whole objects, and don't list nouns the model might draw.
+
+### 2026-10-28 — Muse Image redrew the sprite sheet's layout on a big restyle
+- **What happened:** a Skeleton Warrior remix ("human warrior, Simpsons style", `job_7470ab50`) came back with every part out of its box. The sheet showed pieces of the wrong parts.
+- **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`. Overlaying the part boxes on the returned image showed Muse Image had drawn a new layout: parts were enlarged, spread into the empty right quarter of the page, and duplicated (five boots, two heads). Only 70% of its painted pixels fell inside the part boxes; 22 earlier runs scored 90–100%. Our own fitting cut the boxes in the right places. Run in R2 under `remixes/2026-10-28T07-10-47-960Z_job_7470ab50/`.
+- **Cost:** one remix run and the user's time.
+- **Cause:** a large change (thin bones turned into whole arms and legs, in a new style) and empty space on the page. The prompt's "keep every part where it is" and "leave empty areas empty" didn't hold.
+- **Workaround / status:** after each page, `layoutFit` (`textures.ts`) measures the share of painted pixels inside the part boxes. Under 85%, the page is saved as `<page>.rejected.png` and painted once more with a note about the moved parts. If the second attempt also fails, the job fails with a clear message (failed jobs don't count toward the user's quota). Scores are saved as `layoutChecks` in `prompts.json`. The retry hasn't been tested against a live run yet.
+- **Ask for Meta:** an edit mode that keeps the input's layout, or masks/regions on `/images/edits`, so the model can only paint inside given areas.
+- **Lesson:** check the model's output geometry before using it; a cheap pixel check catches what the prompt can't prevent.
 
 ### 2026-10-28 — Muse Image painted a new layout into the padding of a wide page
 - **What happened:** the Goblin remix (`job_cec7f55e`) came back without its spear.
 - **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`. The 1024×128 page was padded to a square, so the parts filled only the top 13%. Our new per-part label line placed parts using the page's own height, so it said "long spear shaft (bottom left)", "round wooden shield (middle center)", and so on. Muse Image painted full-size parts at exactly those spots in the empty padding and left the spear's real spot as background. Once the parts were cut back out of their atlas areas, the spear was empty. Run in R2 under `remixes/2026-10-28T06-37-32-750Z_job_cec7f55e/`.
 - **Cost:** one remix run and the user's time. The bug was ours (the label positions); Muse Image followed the text over the input image.
 - **Cause:** wrong position words in our prompt, plus Muse Image's readiness to fill empty padding with new content.
-- **Workaround / status:** pages are no longer padded. Each page's parts are packed into a square of their own, all scaled by the same factor and as large as fits, and copied back after painting (`backend/src/lib/layout.ts`; `toModelInput` and `fitToPage` in both `textures.ts`). The Goblin's parts are now 2.5× bigger and nothing is left empty. Labels and the part list use positions in that square. Offline round trips over all 72 bundled pages showed no failures and no loss in quality from packing. Not yet checked against a real model run.
+- **Workaround / status:** pages are no longer padded. Each page's parts are packed into a square of their own, all scaled by the same factor and as large as fits, and copied back after painting (`backend/src/lib/layout.ts`; `toModelInput` and `fitToPage` in both `textures.ts`). The Goblin's parts are now 2.5× bigger and nothing is left empty. The part list sent to Muse Spark uses positions in that square (the per-part label line was later removed). Offline round trips over all 72 bundled pages showed no failures and no loss in quality from packing. Not yet checked against a real model run.
 - **Ask for Meta:** honour the input's aspect ratio on edits, so atlas strips don't need padding.
 - **Lesson:** anything in the prompt about where things are has to use the coordinates of the image the model actually receives.
 

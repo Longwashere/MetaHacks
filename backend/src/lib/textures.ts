@@ -214,6 +214,36 @@ export async function fitToPage(
   return sharp(out, { raw: { width: page.width, height: page.height, channels: 4 } }).png().toBuffer();
 }
 
+/** Painted pixels this close to a part's box (a fraction of the square) still count as inside, to allow for drift. */
+const LAYOUT_MARGIN = 0.015;
+/** Side of the downscaled copy the layout check measures. */
+const LAYOUT_CHECK_SIDE = 512;
+
+/**
+ * Share (0–1) of the model's painted pixels that land inside a part's box. Muse Image
+ * sometimes ignores the layout and draws a new one, moving and duplicating parts; good
+ * pages score 0.9 or more, rearranged ones well under (0.64 and 0.10 on two real runs).
+ */
+export async function layoutFit(generated: Buffer, input: ModelInput): Promise<number> {
+  const side = LAYOUT_CHECK_SIDE;
+  const rgb = await sharp(generated).resize(side, side, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const isBg = backgroundMask(rgb, side, side, input.background);
+  const margin = Math.round(LAYOUT_MARGIN * side);
+  const inBox = new Uint8Array(side * side);
+  for (const p of input.layout.placements) {
+    const r = toPixels(p, side);
+    const x0 = Math.max(0, r.x - margin), x1 = Math.min(side, r.x + r.width + margin);
+    for (let y = Math.max(0, r.y - margin); y < Math.min(side, r.y + r.height + margin); y++) inBox.fill(1, y * side + x0, y * side + x1);
+  }
+  let painted = 0, inside = 0;
+  for (let p = 0; p < isBg.length; p++) {
+    if (isBg[p]) continue;
+    painted++;
+    inside += inBox[p];
+  }
+  return painted === 0 ? 1 : inside / painted;
+}
+
 /** The original page's parts drawn into the model's square as `layout` places them, for alignment. */
 async function layoutPage(page: PageImage, layout: PartLayout, side: number): Promise<PageImage> {
   const parts = await Promise.all(
