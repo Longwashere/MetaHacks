@@ -1,6 +1,25 @@
 import { aiFetch } from "../../lib/ai-fetch.js";
 import { IMAGE_MODEL, IMAGE_TIMEOUT_MS, META_API_BASE_URL, MUSE_MODEL, MUSE_TIMEOUT_MS } from "../../lib/config.js";
-import type { RemixInput } from "./types.js";
+import type { ArtStyle, RemixInput } from "./types.js";
+
+/**
+ * What each preset art style looks like in paint, for both models. A bare style name was too weak:
+ * asked for "painterly", Muse Image kept an already hand-painted orc's crisp outlines and fine
+ * texture (job_72ff8499), so each style names the rendering to replace as well as the new one.
+ */
+export const STYLE_LOOKS: Record<ArtStyle, string> = {
+  cartoon: "bold clean dark outlines, flat bright colours with simple two-tone cel shading, smooth surfaces with almost no texture",
+  anime: "clean thin dark outlines, flat cel colours with crisp one- or two-step shading and soft highlights, minimal texture",
+  pixel: "crisp pixel art: hard square pixels, a limited palette, 1px dark outlines and stepped shading, no blur, gradients or anti-aliasing",
+  painterly:
+    "a loose oil painting: visible thick brush strokes and impasto texture, soft blended edges with no hard dark outlines, colours mixed on the surface and rich tonal variation",
+  flat: "flat vector art: solid colour shapes with no gradients or texture, minimal or no outlines, simple geometric shading",
+};
+
+/** The image prompt's art-style line: the style, what it looks like, and that the current rendering goes. */
+export function styleInstruction(style: ArtStyle): string {
+  return `Art style: ${style}, meaning ${STYLE_LOOKS[style]}. Repaint every part fully in this style, replacing its current line work, shading and texture; the result must not look like the original rendering.`;
+}
 
 // Meta Model API: Muse Spark (chat completions) plans the look, Muse Image repaints
 // the atlas pages. Both are OpenAI-compatible. Throw Errors with user-facing
@@ -35,7 +54,8 @@ How to write editPrompt:
 - Translate abstract requests into concrete visuals. Do not repeat vague words like "modern", "cool", or "lawyer". Say what that means in paint: materials, colors, patterns, and surface details, for example charcoal wool suit fabric with subtle pinstripes, white shirt, burgundy tie pattern.
 - Cover the major visible parts and explicitly mention thin or small parts, like straps, bones, shafts, and buckles, so the image model does not drop them.
 - The Parts list gives each part's page and where it sits, as percentages of that page image (x from the left edge, y from the top). Use it to work out what each part is from its picture; names can mislead (e.g. "head_2" may be a jaw). In editPrompt, name parts by what they are and where they sit (e.g. "the tusked lower jaw at bottom left"), especially small or odd-shaped parts that could pass for something else.
-- When the requested look or the Art style line names an art style that differs from the pages (a studio, game, artist or medium, e.g. "Studio Ghibli", "MapleStory", "watercolor"), the style change matters as much as the subject. Start editPrompt with one sentence saying what that style looks like in paint (line weight, colour and shading, amount of texture, lighting), end it with a short reminder of the same, and describe every material in that style's terms. For a soft or clean style, don't ask for grit like fine cracks, scratches, pitting or weathering; for Studio Ghibli, for example: clean thin outlines, soft flat colours with gentle gradients, simple texture, warm light.
+- When the requested look or the Art style line names an art style that differs from the pages (a studio, game, artist or medium, e.g. "Studio Ghibli", "MapleStory", "watercolor"), the style change matters as much as the subject. Start editPrompt with one sentence saying what that style looks like in paint (line weight, colour and shading, amount of texture, lighting), end it with a short reminder of the same, and describe every material in that style's terms.
+- When the Art style line says it's a style change, the style is the main change, whatever the Change amount, even if the requested look says "same character". The image model holds on to the pages' current rendering unless told plainly to drop it, so: in the opening sentence, also name what goes (for example "replace the crisp dark outlines and fine noisy texture with ..."), describe every part in the new style's terms rather than as it looks now ("brushy blended green skin", not "green skin with brown straps"), and keep the part list short so the style words aren't drowned out. For a soft or clean style, don't ask for grit like fine cracks, scratches, pitting or weathering; for Studio Ghibli, for example: clean thin outlines, soft flat colours with gentle gradients, simple texture, warm light.
 - Use specific, paintable language only. No instructions about the model, the rig, or the atlas itself.
 - One paragraph, imperative voice, at most 1000 characters.
 
@@ -57,8 +77,8 @@ export async function planRemix(
     `Requested look: ${input.prompt}`,
     input.style === "auto"
       ? "Art style: keep the original art style of the pages, unless the requested look names a different one"
-      : `Art style: ${input.style}`,
-    `Change amount: ${strengthHint(input.strength, input.keepOutline)}`,
+      : `Art style: ${input.style} (${STYLE_LOOKS[input.style]}). This is a style change: unless the pages already look like this, every part must clearly end up in this style.`,
+    `Change amount: ${strengthHint(input.strength, input.keepOutline, input.style !== "auto")}`,
     `Keep palette: ${input.keepPalette ? "on" : "off"}`,
     kept ? `Every part must keep exactly the same ${kept}.` : "",
     input.keepOutline ? "Only what is painted inside each part changes." : "",
@@ -100,8 +120,13 @@ export async function planRemix(
   return { name: `${base.name} Remix`, editPrompt: `Repaint the character as: ${input.prompt}.` };
 }
 
-function strengthHint(strength: number, keepOutline: boolean): string {
-  if (strength < 0.34) return "Light — keep the shading, line work and shapes; change colors and materials only";
+function strengthHint(strength: number, keepOutline: boolean, styleChange: boolean): string {
+  if (strength < 0.34) {
+    // A chosen art style replaces the line work and shading, so Light can only keep the subject.
+    return styleChange
+      ? "Light — keep the colors, materials and shapes; change only the rendering, to the art style"
+      : "Light — keep the shading, line work and shapes; change colors and materials only";
+  }
   if (strength < 0.67) return "Moderate — restyle materials and details, keep the overall character recognizable";
   return keepOutline ? "Heavy — reimagine the surface details freely, but keep every part's silhouette" : "Heavy — reimagine the surface details freely";
 }

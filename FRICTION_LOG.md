@@ -55,6 +55,15 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Muse Image kept the original rendering when asked for a painterly style
+- **What happened:** "same orc but give it to me in painterly art style" (`job_72ff8499`, Orc Berserker, style `painterly`, strength 0.6) came back looking like the original: the same crisp dark outlines and fine noisy texture, with only small colour changes (fur, axe grip, tuft) and slight softening. No brush strokes.
+- **Evidence (verified, one run):** `POST /images/edits`, `muse-image-1.0`, one 1536×1536 page on cyan. The prompt opened "Paint in loose painterly style with soft broken outlines, thick oil-brush blending…" and ended "keep painterly blending throughout". The rest listed every part's materials as they already were, then our suffix added only `Art style: painterly.` The original is already a detailed hand-painted texture. Output in R2 under `remixes/2026-10-28T12-17-03-853Z_job_72ff8499/`.
+- **Cost:** one remix (Spark plan + one image call) that didn't deliver the asked-for style.
+- **Cause (inferred):** Muse Image holds on to the input's rendering unless told plainly to replace it, and there's no strength parameter to push it (see Open). A style close to the input's, plus a prompt mostly describing the parts as they are, read as "keep it".
+- **Workaround / status:** changed, untested. Each preset style now has a concrete paint description (`STYLE_LOOKS` in `backend/src/v2/lib/meta.ts`). The image prompt names it and says to replace the current line work, shading and texture. Spark is told an explicit style is the main change at any strength, to name what goes, and to describe parts in the new style's terms. Needs a rerun to confirm.
+- **Ask for Meta:** an edit-strength or style-strength parameter on `/images/edits`, so a style change doesn't depend on wording.
+- **Lesson:** name the rendering to drop, not just the style to add.
+
 ### 2026-10-28 — Muse Image drew a repainted head cut off by a straight edge
 - **What happened:** a part fix ("give his head some ugly teeth", `job_62c62f80`, Mossy Grove Guardian) came back with the head's right side cut off in a straight vertical line, through the ear, leaves and cheek.
 - **Evidence (verified, one run):** `POST /images/edits`, `muse-image-1.0`, 1536×1536, one part (the original skull) centred on cyan. The raw output (`SkeletonWarrior.generated.png`) already has the straight cut, so our steps didn't cause it (the shrink was 0.987). The input has no visible box: every pixel around the part's box is pure cyan, alpha 255. The cut still lies within 6 px of the box's right edge, as the model drew the head larger and further right than the skull. Separately, the head is a mesh weighted to several bones, so it can't be boxed, and 3.2% of the new head falls outside its outline and is hidden in the game. Run in R2 under `remixes/2026-10-28T09-43-30-563Z_job_62c62f80/`.
@@ -216,6 +225,20 @@ Add the entry in the same task, not later.
 - **API keys appeared in plain text in chat sessions.** The Meta key and the Cloudflare API token (which the R2 credentials are derived from) are stored in `backend/.env` (gitignored), but rotate both before the repo goes public. Rolling the Cloudflare token changes `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` too. (2026-10-27)
 
 ### Log
+
+### 2026-10-28 — Part fix threw away two good paintings because they didn't fit the old mesh outline
+- **What happened:** `job_de04cbc1` ("change the axe into a wrench", `ARM_L2`, steampunk orc) failed with "The image model moved the parts out of place twice", spending two Muse Image calls and the user's remix.
+- **Cost:** two image runs (credits) and a used allowance, with nothing to show for it.
+- **Cause:** not the model. Both outputs were well placed (`attached` 1.0). `ARM_L2` is a mesh that can't be swapped for a box, so the new art had to fit inside its axe-shaped outline. A wrench can't fit at any size, so the shrink hit its 0.3 floor and was rejected (minimum 0.5). The error message blamed placement.
+- **Workaround / status:** fixed. When an outline would shrink a part below 0.5, the part now keeps its size and fits only its atlas region. The game clips it to the old outline until the user grows it (Tweak → Line up parts, or Grow outline), and the run log notes `clippedByOutline` (`backend/src/v2/lib/textures.ts`, `part-fix.ts`). Replaying the saved outputs offline, the first one now passes at 0.886 scale with the whole wrench kept. Still open: the backend could grow the outline in the saved skeleton itself.
+- **Lesson:** a check that rejects paid model output should have a fallback that keeps the result. And name the real reason in the error.
+
+### 2026-10-28 — .skel → JSON converter misread deform timelines on the first pass
+- **What happened:** the new browser-side converter (`frontend/app/lib/spine-skel-json.ts`), which lets binary `.skel` rigs be tweaked and saved, failed on 7 of the 20 sample rigs in `frontend/public/spine/`. No public converter exists for Spine 4.2 (community tools stop at 2.1 and 3.1; the Spine editor CLI needs a licence), so it mirrors spine-core's `SkeletonBinary`.
+- **Cost:** one debugging round.
+- **Cause:** in the binary format a deform key's vertices come *after* the curve leading into it, not with its time like every other timeline. A generic key reader got the order wrong and drifted out of step with the bytes. Separately, spine-core's `BinaryInput` reads `data.buffer` from offset 0, so a Node `Buffer` from the shared pool fed it garbage in the test.
+- **Workaround / status:** fixed. Deform keys have their own reader. A round-trip test (`.skel` → `SkeletonBinary` vs `.skel` → converter → `SkeletonJson`, deep-compared, curves included) passes on all 20 rigs, as does baking tweaks into each converted rig and reloading it.
+- **Lesson:** when mirroring a binary reader, diff the sequence of strings each side reads to find the first divergence. And always hand spine-core a fresh `Uint8Array` copy.
 
 ### 2026-10-28 — Couldn't apply or test the asset-copies migration
 - **What happened:** Remix copies need two new `assets` columns. The migration was written, but nothing in the dev environment can apply DDL to the hosted Supabase project, so the copy flow and the `?asset=` workspace couldn't be run end to end.

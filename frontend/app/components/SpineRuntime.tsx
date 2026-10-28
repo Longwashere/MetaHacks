@@ -2,6 +2,7 @@ import "@esotericsoftware/spine-player/dist/spine-player.css";
 import type { SpinePlayer, SpinePlayerConfig } from "@esotericsoftware/spine-player";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useInView } from "~/hooks/use-in-view";
+import { skelToJson } from "~/lib/spine-skel-json";
 import { bakeTweaks } from "~/lib/spine-tweak-bake";
 import { TweakController } from "~/lib/spine-tweak-controller";
 import { DEFAULT_TWEAKS, type SpineTweakBinding } from "~/lib/spine-tweaks";
@@ -284,7 +285,9 @@ export function SpineRuntime({
             exportSkeleton: async (values) => {
               const res = await fetch(files.skeletonUrl);
               if (!res.ok) throw new Error(`Couldn't load the skeleton file (${res.status}).`);
-              return bakeTweaks(await res.json(), values, controller.setupPose(values));
+              // Binary rigs are converted to JSON, which the bake edits; the remix then saves as JSON.
+              const skeleton = files.skeletonUrl.toLowerCase().endsWith(".skel") ? skelToJson(await res.arrayBuffer()) : await res.json();
+              return bakeTweaks(skeleton, values, controller.setupPose(values));
             },
           });
 

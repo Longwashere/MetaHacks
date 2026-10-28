@@ -1,7 +1,7 @@
 import path from "node:path";
 import { type AtlasPage, isSafePageName, parseAtlas } from "./atlas.js";
 import { type PartLayout, layoutParts } from "../../lib/layout.js";
-import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy } from "./meta.js";
+import { ContentPolicyError, keptPartProperties, planRemix, repaintPage, rewordForContentPolicy, styleInstruction } from "./meta.js";
 import { putFile } from "../../lib/storage.js";
 import { decodePage, fitToPage, layoutFit, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
@@ -84,7 +84,7 @@ export async function runRemix(
   const buildImagePrompt = (editPrompt: string) => [
     editPrompt,
     // With "auto", the plan already carries the style (the original one, or the prompt's).
-    input.style === "auto" ? "" : `Art style: ${input.style}.`,
+    input.style === "auto" ? "" : styleInstruction(input.style),
     `This image is a sprite atlas of separate character parts on a solid ${background.name} background.`,
     `Every shape that is not the ${background.name} background is a part; repaint all of them, including thin ones like bones, shafts and straps.`,
     kept ? `Keep every part in exactly the same ${kept}.` : "",

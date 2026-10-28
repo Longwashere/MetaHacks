@@ -110,7 +110,7 @@ export async function runPartFix(
   );
 
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
-  const layoutChecks: { page: string; attempt: number; attached: number; scales: number[] }[] = [];
+  const layoutChecks: { page: string; attempt: number; attached: number; scales: number[]; clippedByOutline?: string[] }[] = [];
   const prompts: Record<string, string> = {};
   /** Muse's expanded prompt per page, or null where its reply was unusable and the request went as-is. */
   const plans: Record<string, string | null> = {};
@@ -179,8 +179,15 @@ export async function runPartFix(
         const check = async (image: Buffer, attempt: number) => {
           const fit = await attachedFit(image, modelInput);
           // A part drawn bigger than its box (an axe for a sword) is shrunk to fit, not cut off.
-          const { image: shrunk, scales } = await shrinkPartsToBoxes(image, modelInput, { inset: FIT_INSET, outlines });
-          layoutChecks.push({ page: page.name, attempt, attached: Math.round(fit * 100) / 100, scales });
+          // A part too big for its mesh outline keeps its size and is clipped in the game until the
+          // outline is grown, rather than failing a run the user has paid for.
+          const { image: shrunk, scales, outlineDropped } = await shrinkPartsToBoxes(image, modelInput, {
+            inset: FIT_INSET,
+            outlines,
+            minOutlineScale: MIN_PART_SCALE,
+          });
+          const clipped = selected[i].filter((_, k) => outlineDropped[modelInput.layout.regionPlacement[k]]).map((j) => page.regions[j]);
+          layoutChecks.push({ page: page.name, attempt, attached: Math.round(fit * 100) / 100, scales, ...(clipped.length > 0 && { clippedByOutline: clipped }) });
           await writeLog();
           return fit >= MIN_ATTACHED_FIT && Math.min(...scales) >= MIN_PART_SCALE ? { generated: image, fitted: shrunk } : null;
         };

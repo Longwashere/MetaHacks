@@ -233,6 +233,12 @@ export interface FitTargets {
    * of the square, or null for the box alone. Used for meshes the game clips to their outline.
    */
   outlines?: (number[] | null)[];
+  /**
+   * When fitting a part inside its outline would shrink it below this, the outline is dropped and
+   * the part fits its box alone at full size. The game then clips it to the old outline until the
+   * outline is grown (the tweak panel's "Grow outline", or auto-tweak).
+   */
+  minOutlineScale?: number;
 }
 
 /** Smallest scale tried when fitting a part inside an outline; the caller rejects anything this small. */
@@ -251,13 +257,14 @@ const OUTLINE_SPILL = 0.01;
  * `inset`, and, where `outlines` gives one, also the inside of that outline, of which up to
  * OUTLINE_SPILL may be missed. A part already inside its target is left alone; otherwise it's
  * scaled down evenly, by the largest factor that fits, and centred in the target.
- * Returns the square as a PNG, and the scale applied to each placement (1 when it already fit).
+ * Returns the square as a PNG, the scale applied to each placement (1 when it already fit), and
+ * which placements dropped their outline (see FitTargets.minOutlineScale).
  */
 export async function shrinkPartsToBoxes(
   generated: Buffer,
   input: ModelInput,
   targets: FitTargets = { inset: 0 },
-): Promise<{ image: Buffer; scales: number[] }> {
+): Promise<{ image: Buffer; scales: number[]; outlineDropped: boolean[] }> {
   const { side, layout, background } = input;
   const rgb = await sharp(generated).resize(side, side, { fit: "fill" }).removeAlpha().raw().toBuffer();
   const source = Buffer.from(rgb);
@@ -268,6 +275,7 @@ export async function shrinkPartsToBoxes(
   const owner = partOwners(isBg, side, boxes, false);
 
   const scales = boxes.map(() => 1);
+  const outlineDropped = boxes.map(() => false);
   for (const [i, b] of boxes.entries()) {
     const pixels: number[] = [];
     let x0 = side, x1 = -1, y0 = side, y1 = -1;
@@ -286,7 +294,7 @@ export async function shrinkPartsToBoxes(
     const inner = { x: b.x + margin, y: b.y + margin, width: b.width - 2 * margin, height: b.height - 2 * margin };
     if (inner.width < 2 || inner.height < 2) continue;
     const outline = targets.outlines?.[i];
-    const mask = outline ? await outlineMask(outline, side, inner, margin) : null;
+    let mask = outline ? await outlineMask(outline, side, inner, margin) : null;
     const inside = (x: number, y: number) =>
       mask ? x >= 0 && y >= 0 && x < side && y < side && mask[y * side + x] === 1 : x >= inner.x && y >= inner.y && x < inner.x + inner.width && y < inner.y + inner.height;
     const missed = (s: number, at: (p: number) => [number, number]) => {
@@ -328,6 +336,15 @@ export async function shrinkPartsToBoxes(
         }
         scale = lo;
       }
+      // Too small to be any use: keep the art at full size in its box instead.
+      if (scale < (targets.minOutlineScale ?? 0)) {
+        mask = null;
+        outlineDropped[i] = true;
+        if (missed(1, (p) => [p % side, Math.floor(p / side)]) === 0) continue;
+        scale = Math.min(inner.width / w, inner.height / h, 1);
+        cx = inner.x + inner.width / 2;
+        cy = inner.y + inner.height / 2;
+      }
     }
     scales[i] = Math.round(scale * 1000) / 1000;
 
@@ -352,7 +369,7 @@ export async function shrinkPartsToBoxes(
   }
 
   const image = await sharp(rgb, { raw: { width: side, height: side, channels: 3 } }).png().toBuffer();
-  return { image, scales };
+  return { image, scales, outlineDropped };
 }
 
 /**

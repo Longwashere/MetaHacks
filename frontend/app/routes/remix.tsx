@@ -281,10 +281,8 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
     save: useSaveTweaks(savedRemix?.id ?? null, tweak),
     autoTweak: useAutoTweak(base, savedRemix, previewAnimation, tweak),
   };
-  // Tweaks need a rig on screen: the original before a remix, or the finished remix. Binary .skel
-  // rigs can't take them: the bake that saves them only edits skeleton JSON.
-  const binaryRig = (savedRemix ?? base)?.files?.skeletonUrl.toLowerCase().endsWith(".skel") ?? false;
-  const canTweak = (!job || savedRemix !== null) && !binaryRig;
+  // Tweaks need a rig on screen: the original before a remix, or the finished remix.
+  const canTweak = !job || savedRemix !== null;
   const [panelTab, setPanelTab] = useState<"generate" | "tweak">("generate");
   const tweaking = canTweak && panelTab === "tweak";
   // Picking and the part outline only make sense while the Tweak tab is open.
@@ -395,20 +393,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       <TabsTrigger value="generate">
                         <Sparkles /> Generate
                       </TabsTrigger>
-                      <TabsTrigger
-                        value="tweak"
-                        disabled={!canTweak}
-                        title={canTweak ? undefined : binaryRig ? "Not available for binary .skel rigs" : "Available once the remix finishes"}
-                      >
+                      <TabsTrigger value="tweak" disabled={!canTweak} title={canTweak ? undefined : "Available once the remix finishes"}>
                         <SlidersHorizontal /> Tweak
                       </TabsTrigger>
                     </TabsList>
-                    {binaryRig && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Tweaks aren't available for this rig: its skeleton is a binary .skel file, and edits can only be saved into JSON.
-                        Re-export it from Spine as JSON to tweak it.
-                      </p>
-                    )}
                   </div>
                   {/* Both tabs stay mounted so the prompt and the tweak panel keep their state. */}
                   <TabsContent value="generate" forceMount className="flex flex-col gap-6 data-[state=inactive]:hidden">
@@ -708,7 +696,10 @@ function PartFixStatus({ fix }: { fix: PartFixJob }) {
         <Alert>
           <CircleCheck />
           <AlertTitle>Repainted {parts}</AlertTitle>
-          <AlertDescription>The remix and its download now use the new parts. Not right? Pick them again and try another prompt.</AlertDescription>
+          <AlertDescription>
+            The remix and its download now use the new parts. If a new part looks cut off, open Tweak and run Line up parts: it grows
+            the part's outline until it all shows. Not right? Pick them again and try another prompt.
+          </AlertDescription>
         </Alert>
       ) : (
         <div className="flex flex-col gap-2" aria-live="polite">
