@@ -225,6 +225,44 @@ export async function rewordForContentPolicy(editPrompt: string, signal: AbortSi
   return reworded;
 }
 
+const LOOK_SYSTEM_PROMPT = `You are given the instructions an image model followed to repaint a 2D game character's sprite sheet.
+Describe the resulting look in one or two sentences: materials, colours, surface detail and art style.
+Leave out positions, part names, counts and anything about outlines, layout or the background. Don't give instructions.
+Reply with the description only, no quotes or markdown.`;
+
+/**
+ * Condenses a remix's edit prompt into a short description of its look, for repainting single
+ * parts to match. The edit prompt itself names positions on the full page and gives orders
+ * for every part, which would conflict with the part being fixed. Returns null when the reply
+ * is unusable.
+ */
+export async function summarizeLook(editPrompt: string, signal: AbortSignal): Promise<string | null> {
+  logPrompt(`chat/completions (${MUSE_MODEL}) summarize look`, editPrompt);
+  const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: MUSE_MODEL,
+      messages: [
+        { role: "system", content: LOOK_SYSTEM_PROMPT },
+        { role: "user", content: editPrompt },
+      ],
+    }),
+    timeoutMs: MUSE_TIMEOUT_MS,
+    signal,
+  });
+  if (!res.ok) {
+    console.error(`Muse look summary request failed (${res.status})`, await res.text());
+    return null;
+  }
+  const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
+  if (typeof content !== "string") return null;
+  const look = content.replace(/^["'`\s]+|["'`\s]+$/g, "").replace(/\s+/g, " ").trim().slice(0, 600);
+  if (look.length < 20) return null;
+  logPrompt(`chat/completions (${MUSE_MODEL}) look`, look);
+  return look;
+}
+
 /** Logs a prompt sent to (or plan returned by) the Meta API. Images are never logged. */
 function logPrompt(label: string, text: string) {
   console.log(`[meta] ${label}:\n${text}\n`);

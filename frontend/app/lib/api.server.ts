@@ -3,7 +3,7 @@
 // token the backend verifies. See BACKEND.md for the endpoint contract.
 
 import type { Session } from "~/lib/auth.server";
-import type { AssetQuery, AutoTweakInput, AutoTweakReview, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AssetQuery, AutoTweakInput, AutoTweakReview, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -179,6 +179,29 @@ export async function createRemixJob(
 /** GET /me/remix-jobs/:id — null if it isn't the user's. */
 export async function getRemixJob(session: Session, jobId: string): Promise<RemixJob | null> {
   return backendOrNull<RemixJob>(`/me/remix-jobs/${id(jobId)}`, { session });
+}
+
+/**
+ * POST /me/remixes/:assetId/part-fixes — repaints the chosen regions of one of the user's remixes
+ * in place. Returns right away with a running job; the UI polls getPartFix. Counts as a remix.
+ */
+export async function createPartFix(
+  session: Session,
+  assetId: string,
+  input: PartFixInput,
+): Promise<{ ok: true; job: PartFixJob } | { ok: false; error: string }> {
+  try {
+    const job = await backend<PartFixJob>(`/me/remixes/${id(assetId)}/part-fixes`, { session, method: "POST", body: input });
+    return { ok: true, job };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status === 401 || error.status >= 500) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't start the fix.") };
+  }
+}
+
+/** GET /me/part-fixes/:id — null if it isn't the user's. */
+export async function getPartFix(session: Session, jobId: string): Promise<PartFixJob | null> {
+  return backendOrNull<PartFixJob>(`/me/part-fixes/${id(jobId)}`, { session });
 }
 
 /**

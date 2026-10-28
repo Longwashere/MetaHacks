@@ -12,8 +12,26 @@ export interface SpriteSheetSource {
   asset: SpineAsset;
 }
 
-/** Atlas page PNGs for one or more rigs, e.g. a remix next to the rig it came from. */
-export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource[]; className?: string }) {
+/** Clickable regions: each box toggles its region name in `selected`. */
+export interface SpriteSheetSelection {
+  selected: string[];
+  onToggle: (region: string) => void;
+  disabled?: boolean;
+}
+
+/**
+ * Atlas page PNGs for one or more rigs, e.g. a remix next to the rig it came from. With
+ * `selection`, the region boxes are buttons and the labels toggle only hides their names.
+ */
+export function SpriteSheet({
+  sources,
+  selection,
+  className,
+}: {
+  sources: SpriteSheetSource[];
+  selection?: SpriteSheetSelection;
+  className?: string;
+}) {
   const available = sources.filter((s) => s.asset.files && s.asset.files.textureUrls.length > 0);
   const [sourceLabel, setSourceLabel] = useState(available[0]?.label);
   const [pageIndex, setPageIndex] = useState(0);
@@ -48,7 +66,7 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
   const atlasPage = atlasPages.find((p) => p.name === fileName) ?? atlasPages[page];
   const pageW = atlasPage?.width ?? dims?.w;
   const pageH = atlasPage?.height ?? dims?.h;
-  const regions = showLabels && atlasPage && pageW && pageH ? atlasPage.regions : [];
+  const regions = (showLabels || selection) && atlasPage && pageW && pageH ? atlasPage.regions : [];
 
   return (
     <Card className={className}>
@@ -132,7 +150,7 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
               onLoad={(e) => setSize({ url, w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
               className={cn("block", actualSize ? "max-w-none" : "h-auto max-w-full")}
             />
-            {pageW && pageH && regions.length > 0 && (
+            {pageW && pageH && regions.length > 0 && !selection && (
               // Atlas coordinates are page pixels from the top-left, so percentages keep the
               // boxes aligned at any zoom.
               <div className="absolute inset-0" aria-hidden>
@@ -153,6 +171,49 @@ export function SpriteSheet({ sources, className }: { sources: SpriteSheetSource
                     </span>
                   </div>
                 ))}
+              </div>
+            )}
+            {pageW && pageH && regions.length > 0 && selection && (
+              <div className="absolute inset-0">
+                {regions.map((r, i) => {
+                  const selected = selection.selected.includes(r.name);
+                  return (
+                    <button
+                      key={`${r.name}:${i}`}
+                      type="button"
+                      onClick={() => selection.onToggle(r.name)}
+                      disabled={selection.disabled}
+                      aria-pressed={selected}
+                      aria-label={r.name}
+                      title={r.rotate ? `${r.name} (rotated ${r.rotate}°)` : r.name}
+                      className={cn(
+                        "group absolute cursor-pointer border outline-none hover:z-10 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",
+                        selected
+                          ? "z-[5] border-2 border-primary bg-primary/30"
+                          : "border-primary/60 hover:border-primary hover:bg-primary/15",
+                      )}
+                      style={{
+                        left: `${(r.x / pageW) * 100}%`,
+                        top: `${(r.y / pageH) * 100}%`,
+                        width: `${(r.width / pageW) * 100}%`,
+                        height: `${(r.height / pageH) * 100}%`,
+                      }}
+                    >
+                      {(showLabels || selected) && (
+                        <span
+                          className={cn(
+                            "absolute top-0 left-0 block max-w-full truncate px-0.5 text-left text-[10px] leading-tight group-hover:w-max group-hover:max-w-none",
+                            selected
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-background/80 text-foreground group-hover:bg-primary group-hover:text-primary-foreground",
+                          )}
+                        >
+                          {r.name}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

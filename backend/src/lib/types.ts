@@ -28,6 +28,19 @@ export interface RemixInput {
   visibility: "public" | "private";
 }
 
+/** Where a part fix starts: the original rig's part, or the remix's current one. */
+export const PART_FIX_SOURCES = ["original", "remix"] as const;
+export type PartFixSource = (typeof PART_FIX_SOURCES)[number];
+
+/** Repaints a few regions of a finished remix, leaving the rest of it as it is. */
+export interface PartFixInput {
+  /** Atlas region names to repaint. */
+  regions: string[];
+  /** How the chosen parts should look, e.g. "a lower jaw with two tusks". */
+  prompt: string;
+  source: PartFixSource;
+}
+
 /** The base rig's files the remix repaints, looked up by the backend from `baseAssetId`. */
 export interface RemixBase {
   name: string;

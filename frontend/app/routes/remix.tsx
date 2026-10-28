@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Globe, Loader2, Lock, Palette, Search, SlidersHorizontal, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Globe, Loader2, Lock, Paintbrush, Palette, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -50,24 +50,28 @@ import { Slider } from "~/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Textarea } from "~/components/ui/textarea";
 import {
+  createPartFix,
   createRemixJob,
   getAccount,
   getAsset,
   getLibrary,
   getMyRemixes,
+  getPartFix,
   getRemixJob,
   getSavedAssetIds,
   listAssets,
 } from "~/lib/api.server";
-import { getSession, requireSession } from "~/lib/auth.server";
+import { type Session, getSession, requireSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
 import type { AutoTweakCapture } from "~/lib/spine-auto-tweak";
 import { hasSavableTweaks } from "~/lib/spine-tweak-bake";
 import { DEFAULT_PART, DEFAULT_TWEAKS, isDefaultPart, type RigInfo, type SpineTweakBinding, type SpineTweaks, type TweakExporter } from "~/lib/spine-tweaks";
 import { getSiteUrl } from "~/lib/site.server";
 import {
+  PART_FIX_SOURCES,
   REMIX_API_VERSIONS,
   REMIX_STYLES,
+  type PartFixJob,
   type RemixApiVersion,
   type RemixJob,
   type RemixStyle,
@@ -93,13 +97,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const session = getSession(context);
   const params = new URL(request.url).searchParams;
   const jobId = params.get("job");
+  const fixId = params.get("fix");
   const rq = params.get("rq")?.slice(0, 200) ?? "";
   const source: PickerSource = params.get("src") === "library" ? "library" : "all";
 
   const job = jobId && session ? await getRemixJob(session, jobId) : null;
   const baseId = params.get("base") ?? job?.base.id ?? null;
 
-  const [base, savedIds, myRemixes, pickerRigs, account] = await Promise.all([
+  const [base, savedIds, myRemixes, pickerRigs, account, fix] = await Promise.all([
     baseId ? getAsset(baseId, session) : null,
     getSavedAssetIds(session),
     session ? getMyRemixes(session) : [],
@@ -110,11 +115,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         ? session ? getLibrary(session) : []
         : listAssets({ q: rq, sort: "popular" }),
     session ? getAccount(session) : null,
+    fixId && session ? getPartFix(session, fixId) : null,
   ]);
 
   return {
     base,
     job,
+    fix,
     anim: params.get("anim"),
     rq,
     source,
@@ -142,6 +149,7 @@ const isApiVersion = (v: unknown): v is RemixApiVersion =>
 export async function action({ request, context }: Route.ActionArgs) {
   const session = requireSession(context, request);
   const form = await request.formData();
+  if (form.get("intent") === "fix-parts") return fixParts(session, form);
   const errors: FieldErrors = {};
 
   const baseAssetId = String(form.get("baseAssetId") ?? "");
@@ -192,6 +200,36 @@ export async function action({ request, context }: Route.ActionArgs) {
   throw redirect(`/remix?${new URLSearchParams({ base: baseAssetId, job: result.job.id })}`);
 }
 
+/** Same rules as parsePartFixInput in backend/src/lib/validate.ts. */
+const MAX_FIX_PARTS = 20;
+
+/** Starts repainting the chosen parts of a finished remix, then reloads the page with `?fix=`. */
+async function fixParts(session: Session, form: FormData) {
+  const assetId = String(form.get("assetId") ?? "");
+  const regions = [...new Set(form.getAll("region").map(String).filter(Boolean))];
+  const prompt = String(form.get("fixPrompt") ?? "").trim();
+  const source = PART_FIX_SOURCES.find((s) => s === form.get("fixSource")) ?? "original";
+
+  const fixError = !assetId
+    ? "Run a remix first."
+    : regions.length === 0
+      ? "Pick at least one part on the sprite sheet."
+      : regions.length > MAX_FIX_PARTS
+        ? `Pick at most ${MAX_FIX_PARTS} parts at a time.`
+        : prompt.length < 5
+          ? "Describe the fix in at least 5 characters."
+          : prompt.length > 500
+            ? "Keep it under 500 characters."
+            : null;
+  if (fixError) return data({ fixError }, { status: 400 });
+
+  const result = await createPartFix(session, assetId, { regions, prompt, source });
+  if (!result.ok) return data({ fixError: result.error }, { status: 400 });
+
+  const next = new URLSearchParams({ base: String(form.get("base") ?? ""), job: String(form.get("job") ?? ""), fix: result.job.id });
+  throw redirect(`/remix?${next}`);
+}
+
 /** Optional prompt constraints; all off by default so the model can reshape parts. */
 const KEEP_PART_OPTIONS = [
   { name: "keepPosition", label: "Position" },
@@ -207,9 +245,10 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, job, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
+  const { base, job, fix, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
-  const errors: FieldErrors = actionData?.errors ?? {};
+  const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
+  const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
   const { revalidate } = useRevalidator();
   const tweak = useTweakSession(base?.id ?? null);
   const savedRemix = job?.status === "succeeded" ? job.asset : null;
@@ -231,7 +270,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   };
 
   // Poll the job while it's in progress. BACKEND: could be replaced by SSE/WebSocket push.
-  const active = job?.status === "queued" || job?.status === "running";
+  const active = job?.status === "queued" || job?.status === "running" || fix?.status === "queued" || fix?.status === "running";
   useEffect(() => {
     if (!active) return;
     const t = setInterval(revalidate, 1000);
@@ -436,13 +475,15 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
             </section>
           </div>
 
-          <SpriteSheet
-            // Remount per rig/result so page and source selection start fresh.
-            key={`${base.id}:${job?.asset?.id ?? ""}`}
-            sources={[
-              ...(job?.status === "succeeded" && job.asset ? [{ label: "Remix", asset: job.asset }] : []),
-              { label: "Original", asset: base },
-            ]}
+          <PartFixSection
+            // Remount per rig/result so page, source and part selection start fresh.
+            key={`${base.id}:${savedRemix?.id ?? ""}`}
+            base={base}
+            remix={savedRemix}
+            jobId={job?.id ?? null}
+            fix={fix?.assetId === savedRemix?.id ? fix : null}
+            error={fixError}
+            usage={usage}
           />
         </div>
       )}
@@ -458,6 +499,193 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
           <AssetGrid assets={recent} savedIds={savedIds} />
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * The sprite sheet with a "Fix parts" panel beside it. Once a remix has finished, clicking regions
+ * on the sheet picks them, and the panel repaints just those parts from a prompt.
+ */
+function PartFixSection({
+  base,
+  remix,
+  jobId,
+  fix,
+  error,
+  usage,
+}: {
+  base: SpineAsset;
+  remix: SpineAsset | null;
+  jobId: string | null;
+  fix: PartFixJob | null;
+  error: string | null;
+  usage: RemixUsage | null;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const navigation = useNavigation();
+  const submitting = navigation.state === "submitting" && navigation.formData?.get("intent") === "fix-parts";
+  const fixing = fix?.status === "queued" || fix?.status === "running";
+
+  const onToggle = (region: string) => {
+    if (selected.includes(region)) {
+      setSelected(selected.filter((r) => r !== region));
+    } else if (selected.length >= MAX_FIX_PARTS) {
+      toast(`Pick at most ${MAX_FIX_PARTS} parts at a time.`);
+    } else {
+      setSelected([...selected, region]);
+    }
+  };
+
+  return (
+    <div className="grid gap-8 lg:grid-cols-3">
+      <Card className="lg:self-start">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Paintbrush className="size-4" /> Fix parts
+          </CardTitle>
+          <CardDescription>
+            {remix
+              ? "Click the parts that came out wrong on the sprite sheet, then describe how they should look. Only those parts are repainted; the rest of the remix stays as it is."
+              : "Once your remix finishes, you can pick parts that came out wrong on the sprite sheet and repaint just those."}
+          </CardDescription>
+        </CardHeader>
+        {remix && (
+          <CardContent>
+            <Form method="post" preventScrollReset className="flex flex-col gap-5">
+              <input type="hidden" name="intent" value="fix-parts" />
+              <input type="hidden" name="assetId" value={remix.id} />
+              <input type="hidden" name="base" value={base.id} />
+              <input type="hidden" name="job" value={jobId ?? ""} />
+              {selected.map((r) => (
+                <input key={r} type="hidden" name="region" value={r} />
+              ))}
+
+              <div className="flex flex-col gap-2">
+                <div className="flex min-h-8 items-center justify-between">
+                  <span className="text-sm font-medium">Selected parts</span>
+                  {selected.length > 0 && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setSelected([])}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+                {selected.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">None yet. Click a box on the sprite sheet.</p>
+                ) : (
+                  <ul className="flex flex-wrap gap-1.5">
+                    {selected.map((r) => (
+                      <li key={r}>
+                        <Badge variant="secondary" className="gap-1 pr-1">
+                          {r}
+                          <button
+                            type="button"
+                            onClick={() => onToggle(r)}
+                            aria-label={`Remove ${r}`}
+                            className="cursor-pointer rounded-sm p-0.5 hover:bg-background/60"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="fixPrompt">What should they look like?</Label>
+                <Textarea
+                  id="fixPrompt"
+                  name="fixPrompt"
+                  rows={3}
+                  maxLength={500}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="e.g. a green lower jaw with two ivory tusks, same style as the head"
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? "fix-error" : undefined}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="fixSource">Start from</Label>
+                <Select name="fixSource" defaultValue="original">
+                  <SelectTrigger id="fixSource" className="w-full" aria-describedby="fixSource-hint">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="original">The original part</SelectItem>
+                    <SelectItem value="remix">The remix's current part</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p id="fixSource-hint" className="text-xs text-muted-foreground">
+                  Start from the original when the part came out as the wrong thing; from the remix for small changes.
+                </p>
+              </div>
+
+              <FieldError id="fix-error" message={error ?? undefined} />
+              {fix && <PartFixStatus fix={fix} />}
+
+              <div className="flex flex-col gap-2">
+                <Button type="submit" disabled={selected.length === 0 || fixing || submitting} className="w-full">
+                  {submitting || fixing ? <Loader2 className="animate-spin" /> : <Paintbrush />}
+                  {submitting
+                    ? "Starting…"
+                    : fixing
+                      ? "Repainting…"
+                      : selected.length === 0
+                        ? "Repaint parts"
+                        : `Repaint ${selected.length} part${selected.length === 1 ? "" : "s"}`}
+                </Button>
+                <p className="text-center text-xs text-muted-foreground">Uses one remix from your monthly allowance.</p>
+                {usage && <RemixAllowance usage={usage} />}
+              </div>
+            </Form>
+          </CardContent>
+        )}
+      </Card>
+
+      <SpriteSheet
+        className="lg:col-span-2"
+        sources={[...(remix ? [{ label: "Remix", asset: remix }] : []), { label: "Original", asset: base }]}
+        selection={remix ? { selected, onToggle, disabled: fixing } : undefined}
+      />
+    </div>
+  );
+}
+
+function PartFixStatus({ fix }: { fix: PartFixJob }) {
+  const parts = fix.input.regions.join(", ");
+  if (fix.status === "failed") {
+    return (
+      <Alert variant="destructive">
+        <AlertCircle />
+        <AlertTitle>Fix failed</AlertTitle>
+        <AlertDescription>{fix.error ?? "Something went wrong. Try again with a different prompt."}</AlertDescription>
+      </Alert>
+    );
+  }
+  if (fix.status === "succeeded") {
+    return (
+      <Alert>
+        <CircleCheck />
+        <AlertTitle>Repainted {parts}</AlertTitle>
+        <AlertDescription>The remix and its download now use the new parts. Not right? Pick them again and try another prompt.</AlertDescription>
+      </Alert>
+    );
+  }
+  const percent = Math.round(fix.progress * 100);
+  return (
+    <div className="flex flex-col gap-2" aria-live="polite">
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="truncate">
+          {fix.stage}: {parts}
+        </span>
+        <span className="tabular-nums">{percent}%</span>
+      </div>
+      <Progress value={percent} aria-label="Fix progress" />
     </div>
   );
 }

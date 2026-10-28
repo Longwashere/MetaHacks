@@ -205,7 +205,7 @@ export async function runRemix(
 }
 
 /** Fetches a base rig file. URLs are built by the backend from the asset's storage keys. */
-async function fetchBaseFile(url: string, signal: AbortSignal): Promise<Buffer> {
+export async function fetchBaseFile(url: string, signal: AbortSignal): Promise<Buffer> {
   const res = await fetch(url, { signal });
   if (!res.ok) {
     console.error(`Fetching ${url} failed (${res.status})`);
@@ -219,7 +219,7 @@ async function fetchBaseFile(url: string, signal: AbortSignal): Promise<Buffer> 
  * the bar doesn't sit still. Reaches about two thirds of the way after `expectedMs`
  * and never quite gets to `to` until the call returns.
  */
-async function withProgress<T>(
+export async function withProgress<T>(
   onProgress: RemixProgress,
   from: number,
   to: number,

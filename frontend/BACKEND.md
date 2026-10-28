@@ -68,6 +68,14 @@ The tweak panel's **Line up parts** button (Parts tab, finished remixes only) fi
 
 Every run, including failed ones, is saved locally (never to R2, since snapshots can show private remixes) to `backend/data/auto-tweaks/<time>_<assetId>/`: `pose-N.jpg` (the images Muse saw), `system-prompt.txt`, and `reply.json` (the text request, the part list, Muse's HTTP status and full raw response, and the validated review or error the endpoint returned, plus timing). Set `AUTO_TWEAK_LOG_DIR` to change the folder.
 
+## Part fixes
+
+Below the remix result, the **Fix parts** card sits beside the sprite sheet. Once a remix has finished, its region boxes on the sheet are buttons: the user picks the parts that came out wrong, describes them, and repaints only those.
+
+- `POST /me/remixes/:assetId/part-fixes` with `{ regions: string[], prompt, source: "original" | "remix" }` returns `202 PartFixJob`, or `400/402/404/409 { error }`. `409` means another fix on the same remix is still running. Each fix is a `remix_jobs` row (`input.kind = "parts"`), so it counts toward the monthly allowance. `GET /me/remix-jobs/:id` ignores these rows.
+- `GET /me/part-fixes/:id` returns `PartFixJob`. The page keeps the id in `?fix=` and polls it like a remix job.
+- Pipeline (`backend/src/v2/lib/part-fix.ts`): only the chosen regions are packed into the model's square. With `source: "original"`, they come from the rig the remix was made from; it falls back to the remix's own parts if that rig is gone or its atlas differs. Muse Image gets only that one image. To match the rest of the remix, Muse Spark condenses the remix job's edit prompt into a one- or two-sentence description of its look (`summarizeLook`), with no positions or per-part orders, and that goes into the image prompt. When the job's edit prompt is gone, the user's remix prompt is used instead. An earlier version sent the rest of the remix as a reference image, and Muse Image repainted that image instead (see `FRICTION_LOG.md`). The result is checked with `layoutFit`, keyed, and copied into those regions only. The atlas and every page are written to a new `remixes/<time>_<jobId>/` folder, because the runtime loads pages next to the atlas. Then the remix's `files.atlas`/`files.textures` are updated in place. The previous files stay in storage; nothing points back to them yet.
+
 ## Asset files
 
 `SpineAsset.files` is `null` when an asset has no exported files; the UI then draws a placeholder SVG rig. Otherwise it needs:

@@ -54,6 +54,16 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Muse Image repainted the reference image instead of the parts to fix
+- **What happened:** the first real part fix (Forest Troll Warrior remix: `sward` → an axe, `head` → a troll head) failed with "The image model moved the parts out of place twice."
+- **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`, 1536×1536. Image 1 was the two original parts (a sword and a skull) packed on cyan. Image 2 was the remix's other ~25 parts as a style reference, also on cyan. The prompt said image 1 holds the parts to repaint and image 2 only shows the style. Both attempts returned image 2's layout, with every reference part redrawn and a new axe and troll head placed in the reference's top row. Only 53% and 56% of painted pixels fell inside image 1's part boxes (the minimum is 85%). The axe and head themselves looked right. Run in R2 under `remixes/2026-10-28T08-33-26-568Z_job_de86b8ba/`.
+- **Cost:** two image calls, one part-fix run, and the user's time.
+- **Cause:** with two inputs, Muse Image picked the busier image as the canvas, whatever the prompt said each one was for. The full remix only sends a reference on multi-page rigs, so this hadn't shown up before.
+- **Workaround / status:** part fixes now send Muse Image only the parts being fixed (`backend/src/v2/lib/part-fix.ts`). The look comes through text instead: Muse Spark condenses the remix job's stored `editPrompt` into a description of materials, colours and style (`summarizeLook` in `backend/src/v2/lib/meta.ts`), because the raw edit prompt names full-page positions and gives orders for every part. Checked once against `muse-spark-1.3` on this run's remix: 5.6 s, a clean two-sentence look with no positions. The next full part fix on the same remix (`remixes/2026-10-28T08-39-43-292Z_job_5b54cf31/`) scored 1.00 inside the boxes on the first attempt.
+- **Ask for Meta:** a way to mark which input image is edited and which is reference only, e.g. a separate `reference_images` field on `/images/edits`.
+- **Lesson:** don't count on the prompt to say which image is the canvas. Send one image, or make the reference much less like a canvas than the input.
+
+
 ### 2026-10-28 — Muse Image completes fragments into whole objects
 - **What happened:** two Skeleton Warrior → "human warrior, Simpsons style" remixes came back with extra parts: five boots, two heads, and limbs with hands and feet. These spilled out of their boxes and scrambled the sheet (layout scores 70% and 87%).
 - **Evidence (verified):** `POST /images/edits`, `muse-image-1.0`. The extras were completed versions of fragments: bone segments drawn as whole legs with feet, greaves and a boot with legs inside, an empty helmet with a head in it. Muse Spark's plans had asked for it ("repaint all horizontal bone shafts as yellow human arms and legs"). Our per-part label line also listed about 34 nouns such as "left leg bone", "tall armored boot" and "left shin plate".

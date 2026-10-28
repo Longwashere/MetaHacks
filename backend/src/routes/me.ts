@@ -4,12 +4,13 @@ import { getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
+import { getPartFixView, startPartFix } from "../lib/part-fix-jobs.js";
 import { getAccount } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
 import { putFile } from "../lib/storage.js";
-import { parseRemixInput, parseSkeleton } from "../lib/validate.js";
+import { parsePartFixInput, parseRemixInput, parseSkeleton } from "../lib/validate.js";
 
 /** Large rigs export several hundred KB of JSON; leave headroom without accepting anything huge. */
 const MAX_SKELETON_BYTES = "8mb";
@@ -197,6 +198,38 @@ meRouter.get("/remix-jobs/:id", async (req, res) => {
   const job = await getRemixJobView(userIdOf(res), req.params.id);
   if (!job) {
     res.status(404).json({ error: "Remix job not found." });
+    return;
+  }
+  res.json(job);
+});
+
+// ---------------------------------------------------------------------------
+// Part fixes: repaint a few regions of a finished remix in place
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /me/remixes/:assetId/part-fixes  body = { regions: string[], prompt, source: "original" | "remix" }
+ * → 202 PartFixJob, 400/402/404/409 { error }. Counts toward the monthly remix allowance.
+ */
+meRouter.post("/remixes/:assetId/part-fixes", json, async (req, res) => {
+  const parsed = parsePartFixInput(req.body);
+  if ("error" in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const result = await startPartFix(userIdOf(res), req.params.assetId, parsed.input, isAdminOf(res));
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.status(202).json(result.job);
+});
+
+/** GET /me/part-fixes/:id → PartFixJob, or 404 if it isn't the user's */
+meRouter.get("/part-fixes/:id", async (req, res) => {
+  const job = await getPartFixView(userIdOf(res), req.params.id);
+  if (!job) {
+    res.status(404).json({ error: "Part fix not found." });
     return;
   }
   res.json(job);

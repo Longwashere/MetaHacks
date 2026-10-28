@@ -41,15 +41,8 @@ export async function startRemix(
   apiVersion: RemixApiVersion,
   isAdmin: boolean,
 ): Promise<StartRemixResult> {
-  const [profile, used, base] = await Promise.all([getProfile(userId), remixesUsed(userId), getAssetRow(input.baseAssetId, userId, isAdmin)]);
-  const limit = PLAN_LIMITS[profile.plan];
-  if (!isAdmin && used >= limit) {
-    const error =
-      profile.plan === "free"
-        ? `You've used your ${limit} free remixes this month. Upgrade to Pro for more.`
-        : `You've used all ${limit} remixes this month. Your allowance resets on the 1st.`;
-    return { ok: false, status: 402, error };
-  }
+  const [limitError, base] = await Promise.all([allowanceError(userId, isAdmin), getAssetRow(input.baseAssetId, userId, isAdmin)]);
+  if (limitError) return { ok: false, status: 402, error: limitError };
   if (!base) return { ok: false, status: 400, error: "That rig no longer exists.", field: "base" };
   if (!base.files) return { ok: false, status: 400, error: "This rig has no textures to repaint yet. Choose another one.", field: "base" };
 
@@ -94,6 +87,17 @@ export async function startRemix(
   const job = await getRemixJobView(userId, id);
   if (!job) throw new Error(`Remix job ${id} vanished right after it was created`);
   return { ok: true, job };
+}
+
+/** Why the user can't start another remix or part fix this month, or null if they can. Admins have no limit. */
+export async function allowanceError(userId: string, isAdmin: boolean): Promise<string | null> {
+  if (isAdmin) return null;
+  const [profile, used] = await Promise.all([getProfile(userId), remixesUsed(userId)]);
+  const limit = PLAN_LIMITS[profile.plan];
+  if (used < limit) return null;
+  return profile.plan === "free"
+    ? `You've used your ${limit} free remixes this month. Upgrade to Pro for more.`
+    : `You've used all ${limit} remixes this month. Your allowance resets on the 1st.`;
 }
 
 const ACCENTS = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
@@ -150,7 +154,8 @@ export async function getRemixJobView(userId: string, jobId: string): Promise<Re
       .maybeSingle()
       .overrideTypes<RemixJobRow | null, { merge: false }>(),
   );
-  if (!row) return null;
+  // Part fixes share the table (they count toward the allowance) but have their own view.
+  if (!row || row.input.kind === "parts") return null;
 
   const [base, asset] = await Promise.all([
     row.base_asset_id ? getAssetRow(row.base_asset_id, userId) : null,

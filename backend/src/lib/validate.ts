@@ -1,4 +1,4 @@
-import { REMIX_STYLES, type RemixInput, type RemixStyle } from "./types.js";
+import { PART_FIX_SOURCES, REMIX_STYLES, type PartFixInput, type RemixInput, type RemixStyle } from "./types.js";
 
 // Request body checks shared by the routes. Bodies are untrusted.
 
@@ -36,6 +36,25 @@ export function parseRemixInput(body: unknown): { input: RemixInput } | { errors
       visibility: visibility === "public" ? "public" : "private",
     },
   };
+}
+
+/** Most parts a single fix repaints; more is a remix. */
+export const MAX_PART_FIX_REGIONS = 20;
+
+/** Same rules as the fix-parts branch of the action in frontend/app/routes/remix.tsx. */
+export function parsePartFixInput(body: unknown): { input: PartFixInput } | { error: string } {
+  const b = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const regions = Array.isArray(b.regions)
+    ? [...new Set(b.regions.filter((r): r is string => typeof r === "string" && r.length > 0 && r.length <= 200))]
+    : [];
+  const prompt = typeof b.prompt === "string" ? b.prompt.trim() : "";
+  const source = PART_FIX_SOURCES.find((s) => s === b.source) ?? "original";
+
+  if (regions.length === 0) return { error: "Pick at least one part on the sprite sheet." };
+  if (regions.length > MAX_PART_FIX_REGIONS) return { error: `Pick at most ${MAX_PART_FIX_REGIONS} parts at a time.` };
+  if (prompt.length < 5) return { error: "Describe the fix in at least 5 characters." };
+  if (prompt.length > 500) return { error: "Keep it under 500 characters." };
+  return { input: { regions, prompt, source } };
 }
 
 function isStyle(value: unknown): value is RemixStyle {
