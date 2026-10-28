@@ -82,6 +82,7 @@ Reply with JSON only, no markdown, no extra fields, in this order: {"name": "...
 export async function planRemix(
   input: RemixInput,
   base: { name: string; parts: string[]; pageImages: string[]; background: string },
+  reference: ReferenceLook | null,
   signal: AbortSignal,
 ): Promise<RemixPlan> {
   const kept = keptPartProperties(input);
@@ -90,9 +91,14 @@ export async function planRemix(
     `Parts:\n${base.parts.slice(0, 120).join("\n")}`,
     `Page background: solid ${base.background}`,
     `Requested look: ${input.prompt}`,
-    input.style === "auto"
-      ? "Art style: keep the original art style of the pages, unless the requested look names a different one"
-      : `Art style: ${input.style} (${STYLE_LOOKS[input.style]}). This is a style change, unless the pages already look like this.`,
+    reference
+      ? `Reference image: the user uploaded a reference for the new look. It shows: ${reference.look} Follow it closely: use its colours, materials, patterns and costume details, mapped onto the matching parts of this character. Where the requested look and the reference differ, the requested look wins.`
+      : "",
+    reference?.style && input.style === "auto"
+      ? `Art style: the reference image's style, ${reference.style} This is a style change.`
+      : input.style === "auto"
+        ? "Art style: keep the original art style of the pages, unless the requested look names a different one"
+        : `Art style: ${input.style} (${STYLE_LOOKS[input.style]}). This is a style change, unless the pages already look like this.`,
     `Change amount: ${strengthHint(input.strength, input.keepOutline, input.style !== "auto")}`,
     `Keep palette: ${input.keepPalette ? "on" : "off"}`,
     kept ? `Every part must keep exactly the same ${kept}.` : "",
@@ -401,6 +407,81 @@ export async function planPartFix(input: PartFixPlanInput, signal: AbortSignal):
   if (clean.length < 20) return null;
   logPrompt(`chat/completions (${MUSE_MODEL}) part fix plan`, clean);
   return clean;
+}
+
+/** What Muse Spark took from the user's reference image, in paint terms. */
+export interface ReferenceLook {
+  /** Colours, materials, costume and details to carry over onto the character. */
+  look: string;
+  /** The reference's art style in paint terms when it differs from the pages' rendering, else null. */
+  style: string | null;
+}
+
+const REFERENCE_SYSTEM_PROMPT = `You are the art director for 2D game assets. A user wants to repaint a rigged character's sprite parts to look like a reference image they uploaded. You are given two images: first the reference image, then one atlas page of the character as it looks now (separate cut-out body parts on a plain solid-colour background; ignore that background). The user message has the user's request, which may be empty.
+
+Describe what to take from the reference, so an image model that never sees it can repaint the character's parts to match. It only ever paints the character's own parts, which keep their shapes.
+
+- look: the reference subject's colours (named precisely, e.g. "deep teal", "burnt orange", "off-white", with which areas carry them), materials and surfaces (cloth, leather, metal, fur, scales, skin), costume or armour pieces, patterns, trims, emblems and other distinctive motifs. Say where on a body each sits (head, hair, torso, arms, hands, legs, feet, held weapon or prop). Leave out the reference's background, scene, pose, framing, lighting effects and any text or logos. If the request says to take only part of the reference (just its colours, just the outfit, just the style), describe only that. Two to four sentences, at most 700 characters.
+- style: compare how the two images are rendered, ignoring subject and colour. Null when they share a rendering family (e.g. both detailed painted fantasy art, both pixel art, both cel-shaded cartoon), even if details differ; also null when the reference is a photo or 3D render, or when the request says to keep the character's style. When unsure, null. Only when the rendering clearly differs (e.g. flat cartoon versus painted, pixel art versus smooth, ink sketch versus full colour), write one or two sentences, at most 400 characters, describing how the reference is rendered so a painter could match it: line work (weight, colour, clean or rough, or none), colour and shading (flat, cel steps, gradients, washes, hatching, dithering), texture and medium marks (brush strokes, pixels, grain), palette and lighting. Describe the subject's own surfaces only, never the background or effects around it.
+
+Name no characters, franchises, artists or brands: visual traits only.
+
+Reply with JSON only, no markdown: {"look": "...", "style": "..." or null}`;
+
+/**
+ * Asks Muse Spark what to take from the user's reference image: its look, and its art style if
+ * that differs from the rig's. It runs on its own before the plan, like describeStyle, so the
+ * reference gets Spark's full attention. Returns null when the reply is unusable.
+ */
+export async function describeReference(
+  referenceImage: string,
+  pageImage: string,
+  request: string,
+  signal: AbortSignal,
+): Promise<ReferenceLook | null> {
+  logPrompt(`chat/completions (${MUSE_MODEL}) describe reference + 2 images`, request);
+  const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: MUSE_MODEL,
+      messages: [
+        { role: "system", content: REFERENCE_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Request: ${request}` },
+            { type: "image_url", image_url: { url: referenceImage } },
+            { type: "image_url", image_url: { url: pageImage } },
+          ],
+        },
+      ],
+    }),
+    timeoutMs: MUSE_TIMEOUT_MS,
+    signal,
+  });
+  if (!res.ok) {
+    console.error(`Muse reference request failed (${res.status})`, await res.text());
+    return null;
+  }
+  const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
+  if (typeof content !== "string") return null;
+  const start = content.indexOf("{");
+  const end = content.lastIndexOf("}");
+  let parsed: unknown;
+  try {
+    parsed = start >= 0 && end > start ? JSON.parse(content.slice(start, end + 1)) : null;
+  } catch {
+    return null;
+  }
+  const look = getPath(parsed, ["look"]);
+  const style = getPath(parsed, ["style"]);
+  const cleanLook = typeof look === "string" ? look.replace(/\s+/g, " ").trim().slice(0, 900) : "";
+  if (cleanLook.length < 20) return null;
+  const cleanStyle = typeof style === "string" ? style.replace(/\s+/g, " ").trim().slice(0, 600) : "";
+  const result = { look: cleanLook, style: cleanStyle.length >= 20 ? cleanStyle : null };
+  logPrompt(`chat/completions (${MUSE_MODEL}) reference`, JSON.stringify(result, null, 2));
+  return result;
 }
 
 /** Logs a prompt sent to (or plan returned by) the Meta API. Images are never logged. */

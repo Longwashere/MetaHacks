@@ -4,6 +4,7 @@ import { type PartLayout, layoutParts } from "../../lib/layout.js";
 import {
   ContentPolicyError,
   STYLE_LOOKS,
+  describeReference,
   describeStyle,
   keptPartProperties,
   planRemix,
@@ -29,8 +30,12 @@ const IMAGE_MAX_SIDE = 1536;
 /** Muse only needs to see what the rig looks like, so it gets smaller pages, and at most a few. */
 const PLAN_MAX_SIDE = 768;
 const PLAN_MAX_PAGES = 4;
+/** The user's reference image is sent to Muse Spark at this size. */
+const REFERENCE_MAX_SIDE = 1024;
 /** Rough durations of the model calls, used to keep the progress bar moving while they run. */
 const PLAN_EXPECTED_MS = 6_000;
+/** Muse Spark took 18–22 s to describe a 1024px reference next to a page (2026-10-28). */
+const REFERENCE_EXPECTED_MS = 20_000;
 const PAGE_EXPECTED_MS = 10_000;
 /** A page whose painted pixels fall less inside the parts' boxes than this was rearranged by the model (see layoutFit). */
 const MIN_LAYOUT_FIT = 0.85;
@@ -85,17 +90,30 @@ export async function runRemix(
       .map(async (img, i) => (await toModelInput(img, PLAN_MAX_SIDE, background, layouts[i])).dataUrl),
   );
   const parts = describeParts(pages.slice(0, PLAN_MAX_PAGES), layouts);
+  // The uploaded reference image is described first, on its own; Muse Image never sees it, since
+  // it repaints a reference image instead of the atlas (see FRICTION_LOG.md, part fixes).
+  const { referenceUrl } = input;
+  const referenceLook = referenceUrl
+    ? await withProgress(onProgress, 0.06, 0.1, "Studying the reference image", REFERENCE_EXPECTED_MS, async () =>
+        describeReference(await toDataUrl(await fetchBaseFile(referenceUrl, signal), REFERENCE_MAX_SIDE), pageImages[0], input.prompt, signal),
+      )
+    : null;
+  if (referenceUrl && !referenceLook) throw new Error("Muse couldn't read the reference image. Try again or use another image.");
+  // An art style the user picked beats the reference image's.
+  const referenceStyle = input.style === "auto" ? (referenceLook?.style ?? null) : null;
   const { plan, describedStyle } = await withProgress(onProgress, 0.1, 0.2, "Planning the new look", PLAN_EXPECTED_MS, async () => {
-    const plan = await planRemix(input, { name: base.name, parts, pageImages, background: background.name }, signal);
+    const plan = await planRemix(input, { name: base.name, parts, pageImages, background: background.name }, referenceLook, signal);
     // A named reference is described on its own, which Spark does far better than inside the plan.
-    return { plan, describedStyle: plan.reference ? await describeStyle(plan.reference, signal) : null };
+    // The reference image's style, when there is one, already is that description.
+    return { plan, describedStyle: plan.reference && !referenceStyle ? await describeStyle(plan.reference, signal) : null };
   });
 
   onPrompt(plan.editPrompt, "original");
 
-  // The target style for a style change: the reference described on its own, else the plan's own
-  // description, else the picked preset. Null when the remix keeps the pages' style.
-  const styleLook = describedStyle ?? plan.style ?? (input.style === "auto" ? null : STYLE_LOOKS[input.style]);
+  // The target style for a style change: the reference image's, else a named reference described
+  // on its own, else the plan's own description, else the picked preset. Null when the remix keeps
+  // the pages' style.
+  const styleLook = referenceStyle ?? describedStyle ?? plan.style ?? (input.style === "auto" ? null : STYLE_LOOKS[input.style]);
   const soften = !styleLook ? 0 : input.strength < 0.34 ? STYLE_SOFTEN.light : input.strength < 0.67 ? STYLE_SOFTEN.moderate : STYLE_SOFTEN.heavy;
   const kept = keptPartProperties(input);
   const buildImagePrompt = (editPrompt: string) => [
@@ -129,6 +147,7 @@ export async function runRemix(
           base: base.name,
           request,
           parts,
+          referenceLook,
           plan,
           styleLook,
           imagePrompt: buildImagePrompt(editPrompt),

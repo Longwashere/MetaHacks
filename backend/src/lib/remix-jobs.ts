@@ -1,10 +1,11 @@
+import sharp from "sharp";
 import { createRemixJob as createV1Job, getRemixJob as getV1Job, newRemixJobId } from "./jobs.js";
 import { createRemixJob as createV2Job, getRemixJob as getV2Job } from "../v2/lib/jobs.js";
 import { getAssetRow } from "./assets.js";
 import { getProfile, remixesUsed } from "./billing.js";
 import { PLAN_LIMITS } from "./config.js";
 import { REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
-import { objectUrl } from "./storage.js";
+import { objectUrl, putFile } from "./storage.js";
 import { REMIX_STYLES, type RemixInput, type RemixJob, type RemixStyle } from "./types.js";
 
 // Remix jobs for signed-in users. The v1/v2 runners do the work in memory; this records each job
@@ -26,13 +27,15 @@ export interface RemixJobView {
   createdAt: string;
   editPrompt: string | null;
   promptStatus: RemixJob["promptStatus"];
+  /** URL of the user's reference image, or null. */
+  referenceUrl: string | null;
   asset: SpineAsset | null;
   error: string | null;
 }
 
 export type StartRemixResult =
   | { ok: true; job: RemixJobView }
-  | { ok: false; status: 400 | 402; error: string; field?: "base" };
+  | { ok: false; status: 400 | 402; error: string; field?: "base" | "referenceImage" };
 
 /** Starts a remix if the user has allowance left. Admins have no monthly limit and can remix any asset. */
 export async function startRemix(
@@ -40,13 +43,23 @@ export async function startRemix(
   input: RemixInput,
   apiVersion: RemixApiVersion,
   isAdmin: boolean,
+  referenceImage: Buffer | null = null,
 ): Promise<StartRemixResult> {
   const [limitError, base] = await Promise.all([allowanceError(userId, isAdmin), getAssetRow(input.baseAssetId, userId, isAdmin)]);
   if (limitError) return { ok: false, status: 402, error: limitError };
   if (!base) return { ok: false, status: 400, error: "That rig no longer exists.", field: "base" };
   if (!base.files) return { ok: false, status: 400, error: "This rig has no textures to repaint yet. Choose another one.", field: "base" };
 
+  if (referenceImage && apiVersion === "v1") {
+    return { ok: false, status: 400, error: "Reference images need the v2 remix API.", field: "referenceImage" };
+  }
+
   const id = newRemixJobId();
+  if (referenceImage) {
+    const jpeg = await normalizeReference(referenceImage);
+    if (!jpeg) return { ok: false, status: 400, error: "Couldn't read the reference image. Try another file.", field: "referenceImage" };
+    input = { ...input, referenceImage: await putFile(`${new Date().toISOString().replace(/[:.]/g, "-")}_${id}_ref`, "reference.jpg", jpeg) };
+  }
   check(
     await db().from("remix_jobs").insert({
       id,
@@ -61,6 +74,7 @@ export async function startRemix(
   const request = {
     ...input,
     base: { name: base.name, atlasUrl: objectUrl(base.files.atlas), premultipliedAlpha: base.files.premultipliedAlpha },
+    referenceUrl: input.referenceImage ? objectUrl(input.referenceImage) : null,
   };
   const onSettled = async (job: RemixJob) => {
     let assetId: string | null = null;
@@ -167,13 +181,14 @@ export async function getRemixJobView(userId: string, jobId: string): Promise<Re
   // The runner has finished but onSettled hasn't recorded it yet: keep the client polling.
   const settling = live?.status === "succeeded" || live?.status === "failed";
   const baseAsset = base && toSpineAsset(base);
+  const input = parseStoredInput(row.input);
 
   return {
     id: row.id,
     status: lost ? "failed" : live ? (live.status === "queued" ? "queued" : "running") : row.status,
     progress: live ? (settling ? 0.99 : live.progress) : row.status === "succeeded" ? 1 : 0,
     stage: live ? (settling ? "Saving remix" : live.stage) : row.status === "succeeded" ? "Done" : "Failed",
-    input: parseStoredInput(row.input),
+    input,
     apiVersion: row.api_version,
     base: baseAsset
       ? {
@@ -189,6 +204,7 @@ export async function getRemixJobView(userId: string, jobId: string): Promise<Re
     createdAt: row.created_at,
     editPrompt: live?.editPrompt ?? row.edit_prompt,
     promptStatus: live?.promptStatus ?? (row.prompt_status === "reworded" ? "reworded" : "original"),
+    referenceUrl: input.referenceImage ? objectUrl(input.referenceImage) : null,
     asset: live ? null : asset && toSpineAsset(asset),
     error: lost ? "The remix service restarted. Try again." : live ? null : row.error,
   };
@@ -206,7 +222,25 @@ function parseStoredInput(value: Record<string, unknown>): RemixInput {
     keepSize: value.keepSize === true,
     keepOutline: value.keepOutline === true,
     visibility: value.visibility === "public" ? "public" : "private",
+    referenceImage: typeof value.referenceImage === "string" ? value.referenceImage : null,
   };
+}
+
+/** Longest side of a stored reference image; Muse Spark sees it at this size. */
+const REFERENCE_MAX_SIDE = 1024;
+
+/** The upload as a flattened JPEG of at most REFERENCE_MAX_SIDE, or null if it isn't a readable image. */
+async function normalizeReference(image: Buffer): Promise<Buffer | null> {
+  try {
+    return await sharp(image, { limitInputPixels: 50_000_000 })
+      .rotate()
+      .resize({ width: REFERENCE_MAX_SIDE, height: REFERENCE_MAX_SIDE, fit: "inside", withoutEnlargement: true })
+      .flatten({ background: "#ffffff" })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+  } catch {
+    return null;
+  }
 }
 
 /** On startup: jobs still marked running were lost with the previous process, so stop counting them. */

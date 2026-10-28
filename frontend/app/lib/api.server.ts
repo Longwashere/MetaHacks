@@ -153,24 +153,28 @@ export async function setRemixVisibility(
 export type CreateRemixResult =
   | { ok: true; job: RemixJob }
   /** `limitReached` when the monthly allowance is used up (402). */
-  | { ok: false; error: string; field: "base" | null; limitReached: boolean };
+  | { ok: false; error: string; field: "base" | "referenceImage" | null; limitReached: boolean };
 
-/** POST /me/remix-jobs — returns right away with a queued job; the UI polls getRemixJob. */
+/**
+ * POST /me/remix-jobs — returns right away with a queued job; the UI polls getRemixJob.
+ * `referenceImage` is a JPEG, PNG or WebP data URL; the backend stores it and sets `input.referenceImage`.
+ */
 export async function createRemixJob(
   session: Session,
-  input: RemixInput,
+  input: Omit<RemixInput, "referenceImage">,
   apiVersion: RemixApiVersion = "v2",
+  referenceImage: string | null = null,
 ): Promise<CreateRemixResult> {
   try {
-    const job = await backend<RemixJob>("/me/remix-jobs", { session, method: "POST", body: { ...input, apiVersion } });
+    const job = await backend<RemixJob>("/me/remix-jobs", { session, method: "POST", body: { ...input, apiVersion, referenceImage } });
     return { ok: true, job };
   } catch (error) {
     if (!(error instanceof BackendError) || (error.status !== 400 && error.status !== 402)) throw error;
-    const fieldErrors = (error.body as { errors?: { base?: unknown } } | null)?.errors;
+    const fieldErrors = (error.body as { errors?: { base?: unknown; referenceImage?: unknown } } | null)?.errors;
     return {
       ok: false,
       error: errorMessage(error.body, "Couldn't start the remix."),
-      field: typeof fieldErrors?.base === "string" ? "base" : null,
+      field: typeof fieldErrors?.base === "string" ? "base" : typeof fieldErrors?.referenceImage === "string" ? "referenceImage" : null,
       limitReached: error.status === 402,
     };
   }

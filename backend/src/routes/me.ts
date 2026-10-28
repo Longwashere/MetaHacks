@@ -12,7 +12,7 @@ import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
 import { putFile } from "../lib/storage.js";
-import { parsePartFixInput, parseRemixInput, parseSkeleton } from "../lib/validate.js";
+import { MAX_REFERENCE_BYTES, parsePartFixInput, parseReferenceImage, parseRemixInput, parseSkeleton } from "../lib/validate.js";
 
 /** Large rigs export several hundred KB of JSON; leave headroom without accepting anything huge. */
 const MAX_SKELETON_BYTES = "8mb";
@@ -24,6 +24,8 @@ const MAX_AUTO_TWEAK_BYTES = "12mb";
 export const meRouter = Router();
 meRouter.use(requireUser);
 const json = express.json();
+/** A remix request can carry a reference image as a base64 data URL, about 4/3 of its bytes. */
+const MAX_REMIX_BODY_BYTES = Math.ceil(MAX_REFERENCE_BYTES * 1.4) + 64 * 1024;
 
 /** GET /me → Account: profile, plan, subscription and this month's remix usage */
 meRouter.get("/", async (_req, res) => {
@@ -218,17 +220,24 @@ meRouter.post("/remixes/:assetId/animations", express.json({ limit: MAX_SKELETON
 // ---------------------------------------------------------------------------
 
 /**
- * POST /me/remix-jobs  body = RemixInput & { apiVersion: "v1" | "v2" }
+ * POST /me/remix-jobs  body = RemixInput & { apiVersion: "v1" | "v2", referenceImage?: data URL }
  * → 202 RemixJob, 400 { errors }, or 402 { error } when the monthly allowance is used up.
  */
-meRouter.post("/remix-jobs", json, async (req, res) => {
+meRouter.post("/remix-jobs", express.json({ limit: MAX_REMIX_BODY_BYTES }), async (req, res) => {
   const parsed = parseRemixInput(req.body);
   const apiVersion = REMIX_API_VERSIONS.find((v) => v === req.body?.apiVersion);
-  if ("errors" in parsed || !apiVersion) {
-    res.status(400).json({ errors: { ...("errors" in parsed ? parsed.errors : {}), ...(apiVersion ? {} : { apiVersion: "Choose a remix API version." }) } });
+  const reference = parseReferenceImage(req.body?.referenceImage);
+  if ("errors" in parsed || !apiVersion || "error" in reference) {
+    res.status(400).json({
+      errors: {
+        ...("errors" in parsed ? parsed.errors : {}),
+        ...(apiVersion ? {} : { apiVersion: "Choose a remix API version." }),
+        ...("error" in reference ? { referenceImage: reference.error } : {}),
+      },
+    });
     return;
   }
-  const result = await startRemix(userIdOf(res), parsed.input, apiVersion, isAdminOf(res));
+  const result = await startRemix(userIdOf(res), parsed.input, apiVersion, isAdminOf(res), reference.image);
   if (!result.ok) {
     res.status(result.status).json(result.field ? { errors: { [result.field]: result.error } } : { error: result.error });
     return;

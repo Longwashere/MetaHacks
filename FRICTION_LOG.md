@@ -56,6 +56,15 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Muse Image has no style-reference input, so a reference image has to go through Spark as text
+- **What happened:** For "remix from a reference image", the natural design is to give Muse Image the user's image as a style reference. `/images/edits` treats every image in `images` as something to edit: in part fixes it repainted the reference instead of the parts (see the part-fix entry below). So the reference never reaches Muse Image. Muse Spark describes it first (`describeReference`), and only that text goes into the plan and the image prompt.
+- **Evidence:** `POST /v1/chat/completions`, `muse-spark-1.3`, system prompt + text + two `image_url` parts (reference at 1024px, one atlas page at 768px), no `response_format`. Verified: it returned clean JSON (`look`, `style`) in 18.5 s and 21.9 s. The look was concrete and paintable (named colours, materials, where they sit). Its style call was right: the test pair (water elemental vs stone golem) really does differ in rendering. Muse Image's lack of a reference input is inferred from the part-fix run, not from the docs.
+- **Cost:** One extra Spark call (~20 s) on every reference remix. Some detail is lost because the image becomes text.
+- **Cause:** `/images/edits` has no separate field for a style or subject reference.
+- **Workaround / status:** `backend/src/v2/lib/meta.ts` (`describeReference`), `backend/src/v2/lib/remix.ts`.
+- **Ask for Meta:** A `reference_images` (or `style_image`) field on `/images/edits` that guides style and palette without being edited itself.
+- **Lesson:** Vision models read images well. For the image model, turn references into text.
+
 ### 2026-10-28 — Muse Spark animated the wrong part and the wrong direction from bone names alone
 - **What happened:** rendered with textures, generated animations swung the orc's skull shoulder pad instead of the axe, struck behind the character, and raised arms when it meant to punch forward.
 - **Evidence (verified, `POST /chat/completions`, `muse-spark-1.3`; 22 generations plus replays, rendered to video in `backend/data/animation-videos/`, local):** given only text (bone names, positions, directions), Spark named `SH_AC` as the axe (it's the shoulder accessory; the axe is on `ARM_L`/`ARM_L3`/`ARM_L4`). With a labelled rig sheet as an `image_url`, its plan read "faces right, axe handle at ARM_L4" on every run. Separately, relative rotations came out with the wrong sign (an arm keyed to "snap forward" went up); with "aim" keys (screen directions) resolved by our code, posed bones landed within a few degrees of the requested direction, the worst 14° off.
@@ -273,6 +282,13 @@ Add the entry in the same task, not later.
 - **API keys appeared in plain text in chat sessions.** The Meta key and the Cloudflare API token (which the R2 credentials are derived from) are stored in `backend/.env` (gitignored), but rotate both before the repo goes public. Rolling the Cloudflare token changes `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` too. (2026-10-27)
 
 ### Log
+
+### 2026-10-28 — tsx scratch scripts fail on top-level await as `.ts`
+- **What happened:** A one-off script to test a Muse call (`npx tsx script.ts` outside the backend folder) failed with "Top-level await is currently not supported with the \"cjs\" output format".
+- **Cost:** One retry.
+- **Cause:** Outside a `"type": "module"` package, tsx compiles a `.ts` file as CommonJS.
+- **Workaround / status:** Name scratch scripts `.mts` and pass `--env-file=backend/.env` (from `backend/`: `npx tsx --env-file=.env <script>.mts`).
+- **Lesson:** Use `.mts` for throwaway scripts.
 
 ### 2026-10-28 — Part fix threw away two good paintings because they didn't fit the old mesh outline
 - **What happened:** `job_de04cbc1` ("change the axe into a wrench", `ARM_L2`, steampunk orc) failed with "The image model moved the parts out of place twice", spending two Muse Image calls and the user's remix.

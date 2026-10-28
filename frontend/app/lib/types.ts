@@ -113,6 +113,8 @@ export interface RemixInput {
   keepOutline: boolean;
   /** Who can see the finished remix. Public remixes appear in Explore and anyone can remix them. */
   visibility: SpineAsset["visibility"];
+  /** Storage key of the reference image the user uploaded, or null. */
+  referenceImage: string | null;
 }
 
 export interface RemixJob {
@@ -134,6 +136,8 @@ export interface RemixJob {
    * rejected it, "reworded" once the new prompt is in use.
    */
   promptStatus: PromptStatus;
+  /** URL of the user's reference image, or null. */
+  referenceUrl: string | null;
   asset: SpineAsset | null;
   error: string | null;
 }

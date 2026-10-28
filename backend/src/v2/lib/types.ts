@@ -26,6 +26,8 @@ export interface RemixInput {
   keepOutline: boolean;
   /** Who can see the finished remix. Public remixes appear in Explore and anyone can remix them. */
   visibility: "public" | "private";
+  /** Storage key of the user's uploaded reference image (see storage.ts), or null. Muse Spark matches its look. */
+  referenceImage: string | null;
 }
 
 /** The base rig's files the remix repaints, looked up by the backend from `baseAssetId`. */
@@ -38,6 +40,8 @@ export interface RemixBase {
 
 export interface RemixRequest extends RemixInput {
   base: RemixBase;
+  /** Public URL of `referenceImage`, built by the backend. */
+  referenceUrl?: string | null;
 }
 
 /** The new atlas and its repainted page images. Page names match the base atlas. */

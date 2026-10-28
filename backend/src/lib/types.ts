@@ -26,6 +26,8 @@ export interface RemixInput {
   keepOutline: boolean;
   /** Who can see the finished remix. Public remixes appear in Explore and anyone can remix them. */
   visibility: "public" | "private";
+  /** Storage key of the user's uploaded reference image (see storage.ts), or null. Muse Spark matches its look. */
+  referenceImage: string | null;
 }
 
 /** Where a part fix starts: the original rig's part, or the remix's current one. */

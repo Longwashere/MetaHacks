@@ -2,7 +2,7 @@ import { PART_FIX_SOURCES, REMIX_STYLES, type PartFixInput, type RemixInput, typ
 
 // Request body checks shared by the routes. Bodies are untrusted.
 
-export type RemixFieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength" | "apiVersion", string>>;
+export type RemixFieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength" | "apiVersion" | "referenceImage", string>>;
 
 /** Same rules as the action in frontend/app/routes/remix.tsx, except strength is already 0–1. */
 export function parseRemixInput(body: unknown): { input: RemixInput } | { errors: RemixFieldErrors } {
@@ -10,11 +10,14 @@ export function parseRemixInput(body: unknown): { input: RemixInput } | { errors
   const errors: RemixFieldErrors = {};
 
   const baseAssetId = typeof b.baseAssetId === "string" ? b.baseAssetId.trim() : "";
-  const prompt = typeof b.prompt === "string" ? b.prompt.trim() : "";
+  const typed = typeof b.prompt === "string" ? b.prompt.trim() : "";
   const { style, strength, keepPalette, keepPosition, keepSize, keepOutline } = b;
+  const hasReference = b.referenceImage !== undefined && b.referenceImage !== null;
+  // With a reference image the prompt is optional: the image says what the look is.
+  const prompt = typed || (hasReference ? REFERENCE_ONLY_PROMPT : "");
 
   if (!baseAssetId || baseAssetId.length > 200) errors.base = "Choose a rig to remix.";
-  if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters.";
+  if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters, or add a reference image.";
   else if (prompt.length > 500) errors.prompt = "Keep it under 500 characters.";
   if (!isStyle(style)) errors.style = "Choose a style.";
   if (typeof strength !== "number" || !Number.isFinite(strength) || strength < 0 || strength > 1) {
@@ -34,8 +37,30 @@ export function parseRemixInput(body: unknown): { input: RemixInput } | { errors
       keepOutline: keepOutline === true,
       // Every remix is public for now.
       visibility: "public",
+      // Set by startRemix once the upload is stored.
+      referenceImage: null,
     },
   };
+}
+
+/** The remix prompt when the user gave only a reference image. */
+export const REFERENCE_ONLY_PROMPT = "Match the look of the reference image.";
+
+/** Largest reference image accepted, decoded. The page sends a JPEG of at most 1024px. */
+export const MAX_REFERENCE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The reference image from a remix request body: a base64 JPEG, PNG or WebP data URL. Returns
+ * null when there is none, or an error message. The bytes are checked again when decoded.
+ */
+export function parseReferenceImage(value: unknown): { image: Buffer | null } | { error: string } {
+  if (value === undefined || value === null || value === "") return { image: null };
+  const match = typeof value === "string" ? /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(value) : null;
+  if (!match) return { error: "The reference must be a JPEG, PNG or WebP image." };
+  const image = Buffer.from(match[1], "base64");
+  if (image.length === 0) return { error: "The reference image is empty." };
+  if (image.length > MAX_REFERENCE_BYTES) return { error: "The reference image is too large. Use one under 4 MB." };
+  return { image };
 }
 
 /** Most parts a single fix repaints; more is a remix. */

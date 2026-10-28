@@ -19,6 +19,7 @@ import type { action as saveSkeletonAction } from "./api.remix-skeleton";
 import { AnimatePanel } from "~/components/AnimatePanel";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
+import { ReferenceImageField } from "~/components/ReferenceImageField";
 import { RigPicker } from "~/components/RigPicker";
 import { SaveButton } from "~/components/SaveButton";
 import { VisibilityToggle } from "~/components/VisibilityToggle";
@@ -163,7 +164,7 @@ function filterRigs(rigs: SpineAsset[], q: string) {
 }
 
 /** `limit`: the monthly remix allowance is used up. */
-type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength" | "apiVersion" | "limit", string>>;
+type FieldErrors = Partial<Record<"base" | "prompt" | "style" | "strength" | "apiVersion" | "referenceImage" | "limit", string>>;
 
 const isStyle = (v: unknown): v is RemixStyle => typeof v === "string" && REMIX_STYLES.some((s) => s === v);
 const isApiVersion = (v: unknown): v is RemixApiVersion =>
@@ -184,12 +185,18 @@ export async function action({ request, context }: Route.ActionArgs) {
   const keepSize = form.get("keepSize") === "on";
   const keepOutline = form.get("keepOutline") === "on";
   const apiVersion = form.get("apiVersion");
+  const referenceImage = String(form.get("referenceImage") ?? "") || null;
   // Every remix is public for now.
   const visibility = "public";
 
   if (!baseAssetId) errors.base = "Choose a rig to remix.";
-  if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters.";
-  else if (prompt.length > 500) errors.prompt = "Keep it under 500 characters.";
+  // With a reference image the prompt is optional; the backend fills in a default.
+  if (prompt.length < 5 && !(referenceImage && prompt.length === 0)) {
+    errors.prompt = "Describe the new look in at least 5 characters, or add a reference image.";
+  } else if (prompt.length > 500) errors.prompt = "Keep it under 500 characters.";
+  if (referenceImage && !REFERENCE_DATA_URL.test(referenceImage)) errors.referenceImage = "The reference must be a JPEG, PNG or WebP image.";
+  else if (referenceImage && referenceImage.length > MAX_REFERENCE_CHARS) errors.referenceImage = "The reference image is too large.";
+  if (referenceImage && apiVersion === "v1") errors.referenceImage = "Reference images need the v2 remix API.";
   if (!isStyle(style)) errors.style = "Choose a style.";
   if (!Number.isFinite(strength) || strength < 0 || strength > 100) errors.strength = "Strength must be 0–100.";
   if (!isApiVersion(apiVersion)) errors.apiVersion = "Choose a remix API version.";
@@ -214,14 +221,18 @@ export async function action({ request, context }: Route.ActionArgs) {
     keepSize,
     keepOutline,
     visibility,
-  }, apiVersion);
+  }, apiVersion, referenceImage);
   if (!result.ok) {
-    const key = result.limitReached ? "limit" : result.field === "base" ? "base" : "prompt";
+    const key = result.limitReached ? "limit" : (result.field ?? "prompt");
     return data({ errors: { [key]: result.error } satisfies FieldErrors }, { status: result.limitReached ? 402 : 400 });
   }
 
   throw redirect(`/remix?${new URLSearchParams({ base: baseAssetId, job: result.job.id })}`);
 }
+
+/** Same rules as parseReferenceImage in backend/src/lib/validate.ts (4 MB decoded, as base64). */
+const REFERENCE_DATA_URL = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+const MAX_REFERENCE_CHARS = Math.ceil((4 * 1024 * 1024 * 4) / 3) + 64;
 
 /** Same rules as parsePartFixInput in backend/src/lib/validate.ts. */
 const MAX_FIX_PARTS = 20;
@@ -487,7 +498,12 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       <Loader2 className="size-4 animate-spin" />{" "}
                       {job.promptStatus === "rewording" ? "Re-wording the prompt" : job.stage}
                     </CardTitle>
-                    <CardDescription className="line-clamp-2">“{job.input.prompt}”</CardDescription>
+                    <CardDescription className="flex items-center gap-3">
+                      {job.referenceUrl && (
+                        <img src={job.referenceUrl} alt="Reference image" className="size-12 shrink-0 rounded-md bg-muted object-contain" />
+                      )}
+                      <span className="line-clamp-2">“{job.input.prompt}”</span>
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-4">
                     <RemixProgress job={job} />
@@ -1128,6 +1144,8 @@ function RemixForm({
         </div>
       </div>
 
+      <ReferenceImageField error={errors.referenceImage} />
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor="style">Art style</Label>
@@ -1144,7 +1162,7 @@ function RemixForm({
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Auto uses a style named in your prompt, or keeps the {base.style} style.
+            Auto uses a style named in your prompt or shown in your reference image, or keeps the {base.style} style.
           </p>
           <FieldError id="style-error" message={errors.style} />
         </div>
