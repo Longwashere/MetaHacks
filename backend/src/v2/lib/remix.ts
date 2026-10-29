@@ -77,7 +77,7 @@ export async function runRemix(
 
   const atlasDir = base.atlasUrl.slice(0, base.atlasUrl.lastIndexOf("/") + 1);
   const images = await Promise.all(
-    pages.map(async (p) => decodePage(await fetchBaseFile(atlasDir + p.name, signal), base.premultipliedAlpha)),
+    pages.map(async (p) => decodePage(await fetchBaseFile(atlasDir + p.name, signal), base.premultipliedAlpha, p.size)),
   );
 
   // One background for every page, so the reference page matches the one being painted.

@@ -5,6 +5,11 @@ export interface AtlasPage {
   regions: string[];
   /** Where each region is packed on the page, in the same order as `regions`. */
   rects: PageRect[];
+  /**
+   * The page size from its `size:` line, which region bounds are measured in. The image file can
+   * differ (Zedrex's is 512×128 for a 1010×253 atlas); the Spine runtime scales to fit.
+   */
+  size: { width: number; height: number } | null;
 }
 
 /** A region's area on its page, in page pixels as packed (a rotated region's width and height are swapped). */
@@ -14,6 +19,9 @@ export interface PageRect {
   width: number;
   height: number;
 }
+
+/** Larger declared page sizes are ignored, so an atlas can't make us decode a huge image. */
+const MAX_PAGE_SIDE = 8192;
 
 /**
  * Reads page and region names, and where each region is packed, from a Spine .atlas
@@ -38,9 +46,15 @@ export function parseAtlas(text: string): AtlasPage[] {
     }
     const colon = line.indexOf(":");
     if (colon >= 0) {
-      if (!region) continue;
       const key = line.slice(0, colon).trim();
       const values = line.slice(colon + 1).split(",").map((v) => Number(v.trim()));
+      if (!region) {
+        const page = pages.at(-1);
+        if (page && key === "size" && values.length === 2 && values.every((v) => Number.isInteger(v) && v > 0 && v <= MAX_PAGE_SIDE)) {
+          page.size = { width: values[0], height: values[1] };
+        }
+        continue;
+      }
       const value = line.slice(colon + 1).trim();
       if (key === "bounds" && values.length === 4) {
         [region.rect.x, region.rect.y, region.rect.width, region.rect.height] = values;
@@ -56,7 +70,7 @@ export function parseAtlas(text: string): AtlasPage[] {
     }
     finishRegion();
     if (expectPage) {
-      pages.push({ name: line, regions: [], rects: [] });
+      pages.push({ name: line, regions: [], rects: [], size: null });
       expectPage = false;
     } else {
       const page = pages.at(-1);

@@ -103,7 +103,7 @@ export async function runPartFix(
 
   const remixDir = dirOf(input.remix.atlasUrl);
   const remixFiles = await Promise.all(pages.map((p) => fetchBaseFile(remixDir + p.name, signal)));
-  const remixImages = await Promise.all(remixFiles.map((f) => decodePage(f, input.remix.premultipliedAlpha)));
+  const remixImages = await Promise.all(remixFiles.map((f, i) => decodePage(f, input.remix.premultipliedAlpha, pages[i].size)));
   const sources = await sourcePages(input, atlasText, pages, selected, remixImages, signal);
   const source = sources ? "original" : "remix";
 
@@ -268,7 +268,7 @@ async function sourcePages(
     const dir = dirOf(input.original.atlasUrl);
     const original = input.original;
     const images = await Promise.all(
-      pages.map(async (p, i) => (selected[i].length > 0 ? decodePage(await fetchBaseFile(dir + p.name, signal), original.premultipliedAlpha) : null)),
+      pages.map(async (p, i) => (selected[i].length > 0 ? decodePage(await fetchBaseFile(dir + p.name, signal), original.premultipliedAlpha, p.size) : null)),
     );
     const sameSize = images.every((img, i) => !img || (img.width === remixImages[i].width && img.height === remixImages[i].height));
     return sameSize ? images : null;
