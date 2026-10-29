@@ -54,17 +54,35 @@ export async function putFile(folder: string, name: string, body: Buffer | strin
   return key;
 }
 
-/** Uploads to R2 at `key`. Throws if R2 isn't configured. */
+const R2_PUT_ATTEMPTS = 3;
+const R2_RETRY_DELAY_MS = 1_000;
+
+/** Uploads to R2 at `key`, retrying network errors and 5xx. Throws if R2 isn't configured. */
 export async function putR2Object(key: string, body: Buffer | string, cacheControl: string): Promise<void> {
   if (!r2) throw new Error("R2 isn't configured; set every R2_* variable in .env.");
   const contentType = CONTENT_TYPES[path.extname(key).toLowerCase()] ?? "application/octet-stream";
-  const res = await r2.client.fetch(`${r2.bucketUrl}/${encodeKey(key)}`, {
-    method: "PUT",
-    body: typeof body === "string" ? body : new Uint8Array(body),
-    headers: { "Content-Type": contentType, "Cache-Control": cacheControl },
-  });
-  if (!res.ok) {
+  // Connect timeouts and 5xx from R2 are retried; a single one killed a v3 part fix (2026-10-29).
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await r2.client.fetch(`${r2.bucketUrl}/${encodeKey(key)}`, {
+        method: "PUT",
+        body: typeof body === "string" ? body : new Uint8Array(body),
+        headers: { "Content-Type": contentType, "Cache-Control": cacheControl },
+      });
+    } catch (error) {
+      if (attempt >= R2_PUT_ATTEMPTS) throw error;
+      console.warn(`Saving ${key} to R2 failed (attempt ${attempt}); retrying`, error instanceof Error ? error.message : error);
+      await new Promise((r) => setTimeout(r, R2_RETRY_DELAY_MS * attempt));
+      continue;
+    }
+    if (res.ok) return;
     const detail = (await res.text()).slice(0, 300);
+    if (res.status >= 500 && attempt < R2_PUT_ATTEMPTS) {
+      console.warn(`Saving ${key} to R2 failed (${res.status}, attempt ${attempt}); retrying`);
+      await new Promise((r) => setTimeout(r, R2_RETRY_DELAY_MS * attempt));
+      continue;
+    }
     throw new Error(`Couldn't save ${key} to R2 (${res.status}): ${detail}`);
   }
 }

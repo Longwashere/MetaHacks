@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { createRemixJob as createV1Job, getRemixJob as getV1Job, newRemixJobId } from "./jobs.js";
 import { createRemixJob as createV2Job, getRemixJob as getV2Job } from "../v2/lib/jobs.js";
+import { createRemixJob as createV3Job, getRemixJob as getV3Job } from "../v3/lib/jobs.js";
 import { getAssetRow } from "./assets.js";
 import { getProfile, remixesUsed } from "./billing.js";
 import { PLAN_LIMITS } from "./config.js";
@@ -8,11 +9,11 @@ import { REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJo
 import { objectUrl, putFile } from "./storage.js";
 import { REMIX_STYLES, type RemixInput, type RemixJob, type RemixStyle } from "./types.js";
 
-// Remix jobs for signed-in users. The v1/v2 runners do the work in memory; this records each job
+// Remix jobs for signed-in users. The v1/v2/v3 runners do the work in memory; this records each job
 // in remix_jobs (which is also the monthly usage count) and saves the finished remix as an asset
 // owned by the user, public or private as they chose when starting it.
 
-export const REMIX_API_VERSIONS = ["v1", "v2"] as const;
+export const REMIX_API_VERSIONS = ["v1", "v2", "v3"] as const;
 export type RemixApiVersion = (typeof REMIX_API_VERSIONS)[number];
 
 /** The job shape the frontend expects (RemixJob in frontend/app/lib/types.ts). */
@@ -73,7 +74,12 @@ export async function startRemix(
 
   const request = {
     ...input,
-    base: { name: base.name, atlasUrl: objectUrl(base.files.atlas), premultipliedAlpha: base.files.premultipliedAlpha },
+    base: {
+      name: base.name,
+      atlasUrl: objectUrl(base.files.atlas),
+      skeletonUrl: objectUrl(base.files.skeleton),
+      premultipliedAlpha: base.files.premultipliedAlpha,
+    },
     referenceUrl: input.referenceImage ? objectUrl(input.referenceImage) : null,
   };
   const onSettled = async (job: RemixJob) => {
@@ -96,7 +102,8 @@ export async function startRemix(
     );
   };
   if (apiVersion === "v1") createV1Job(request, { id, onSettled });
-  else createV2Job(request, { id, onSettled });
+  else if (apiVersion === "v2") createV2Job(request, { id, onSettled });
+  else createV3Job(request, { id, onSettled });
 
   const job = await getRemixJobView(userId, id);
   if (!job) throw new Error(`Remix job ${id} vanished right after it was created`);
@@ -122,7 +129,7 @@ async function saveRemixAsset(
   jobId: string,
   input: RemixInput,
   base: AssetRow,
-  result: { name: string; atlas: string; textures: string[] },
+  result: { name: string; atlas: string; textures: string[]; skeleton?: string },
 ): Promise<string> {
   const profile = await getProfile(userId);
   const name = result.name || `${base.name} Remix`;
@@ -151,7 +158,7 @@ async function saveRemixAsset(
       slot_count: base.slot_count,
       animations: base.animations,
       accent,
-      files: { ...base.files, atlas: result.atlas, textures: result.textures },
+      files: { ...base.files, atlas: result.atlas, textures: result.textures, ...(result.skeleton ? { skeleton: result.skeleton } : {}) },
     }),
   );
   return id;
@@ -175,7 +182,8 @@ export async function getRemixJobView(userId: string, jobId: string): Promise<Re
     row.base_asset_id ? getAssetRow(row.base_asset_id, userId) : null,
     row.asset_id ? getAssetRow(row.asset_id, userId) : null,
   ]);
-  const live = row.status === "running" || row.status === "queued" ? (row.api_version === "v1" ? getV1Job(jobId) : getV2Job(jobId)) : null;
+  const getLiveJob = row.api_version === "v1" ? getV1Job : row.api_version === "v2" ? getV2Job : getV3Job;
+  const live = row.status === "running" || row.status === "queued" ? getLiveJob(jobId) : null;
   // A running row with no live job means the server restarted mid-remix (see markStaleJobsFailed).
   const lost = !live && (row.status === "running" || row.status === "queued");
   // The runner has finished but onSettled hasn't recorded it yet: keep the client polling.

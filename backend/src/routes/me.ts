@@ -288,7 +288,7 @@ meRouter.post("/remixes/:assetId/animations", express.json({ limit: MAX_SKELETON
 // ---------------------------------------------------------------------------
 
 /**
- * POST /me/remix-jobs  body = RemixInput & { apiVersion: "v1" | "v2", referenceImage?: data URL }
+ * POST /me/remix-jobs  body = RemixInput & { apiVersion: "v1" | "v2" | "v3", referenceImage?: data URL }
  * → 202 RemixJob, 400 { errors }, or 402 { error } when the monthly allowance is used up.
  */
 meRouter.post("/remix-jobs", express.json({ limit: MAX_REMIX_BODY_BYTES }), async (req, res) => {

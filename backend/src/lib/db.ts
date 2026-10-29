@@ -88,7 +88,7 @@ export interface RemixJobRow {
   id: string;
   user_id: string;
   base_asset_id: string | null;
-  api_version: "v1" | "v2";
+  api_version: "v1" | "v2" | "v3";
   input: Record<string, unknown>;
   status: "queued" | "running" | "succeeded" | "failed";
   error: string | null;

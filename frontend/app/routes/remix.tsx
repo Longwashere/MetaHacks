@@ -1334,7 +1334,7 @@ function RemixForm({
           <SelectContent>
             {REMIX_API_VERSIONS.map((v) => (
               <SelectItem key={v} value={v}>
-                {v === "v2" ? "v2 (default)" : v}
+                {v === "v2" ? "v2 (default)" : v === "v3" ? "v3 (self-checking, slower)" : v}
               </SelectItem>
             ))}
           </SelectContent>
