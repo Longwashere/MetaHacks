@@ -7,12 +7,12 @@ import { AnimateError, generateAnimation, parseAnimateInput } from "../lib/anima
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
 import { getPartFixView, startPartFix } from "../lib/part-fix-jobs.js";
-import { getAccount } from "../lib/billing.js";
+import { getAccount, setDisplayName } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
 import { putFile } from "../lib/storage.js";
-import { MAX_REFERENCE_BYTES, parsePartFixInput, parseReferenceImage, parseRemixInput, parseSkeleton } from "../lib/validate.js";
+import { MAX_REFERENCE_BYTES, parseDisplayName, parsePartFixInput, parseReferenceImage, parseRemixInput, parseSkeleton } from "../lib/validate.js";
 
 /** Large rigs export several hundred KB of JSON; leave headroom without accepting anything huge. */
 const MAX_SKELETON_BYTES = "8mb";
@@ -30,6 +30,18 @@ const MAX_REMIX_BODY_BYTES = Math.ceil(MAX_REFERENCE_BYTES * 1.4) + 64 * 1024;
 /** GET /me → Account: profile, plan, subscription and this month's remix usage */
 meRouter.get("/", async (_req, res) => {
   res.json(await getAccount(userIdOf(res), isAdminOf(res)));
+});
+
+/** PATCH /me  body = { name } → Account, or 400 { error }. Also renames the user on all their assets. */
+meRouter.patch("/", json, async (req, res) => {
+  const parsed = parseDisplayName(req.body?.name);
+  if ("error" in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const userId = userIdOf(res);
+  await setDisplayName(userId, parsed.name);
+  res.json(await getAccount(userId, isAdminOf(res)));
 });
 
 // ---------------------------------------------------------------------------

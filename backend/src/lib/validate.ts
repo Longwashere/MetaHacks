@@ -104,3 +104,14 @@ export function parseLimit(value: unknown, fallback: number, max = 200): number 
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? Math.min(n, max) : fallback;
 }
+
+export const MAX_DISPLAY_NAME_LENGTH = 40;
+
+/** A display name: trimmed, inner whitespace collapsed, 2–40 characters, no control characters. */
+export function parseDisplayName(value: unknown): { name: string } | { error: string } {
+  const name = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  if (name.length < 2) return { error: "Use at least 2 characters." };
+  if (name.length > MAX_DISPLAY_NAME_LENGTH) return { error: `Keep it under ${MAX_DISPLAY_NAME_LENGTH} characters.` };
+  if (/\p{Cc}|\p{Cf}/u.test(name)) return { error: "Use letters, numbers and punctuation only." };
+  return { name };
+}

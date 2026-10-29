@@ -314,6 +314,16 @@ export async function getAccount(session: Session): Promise<Account> {
   return backend<Account>("/me", { session });
 }
 
+/** PATCH /me — sets the display name shown on the account page and on all the user's assets. */
+export async function updateDisplayName(session: Session, name: string): Promise<{ ok: true; account: Account } | { ok: false; error: string }> {
+  try {
+    return { ok: true, account: await backend<Account>("/me", { session, method: "PATCH", body: { name } }) };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status !== 400) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't change your display name.") };
+  }
+}
+
 /** POST /billing/checkout → Stripe Checkout URL (or the portal, for existing subscribers). */
 export async function createCheckoutUrl(session: Session): Promise<string> {
   const { url } = await backend<{ url: string }>("/billing/checkout", { session, method: "POST" });

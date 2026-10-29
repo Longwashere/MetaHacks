@@ -67,7 +67,8 @@ async function readSession(supabase: SupabaseClient): Promise<Session | null> {
   return {
     user: {
       id: claims.sub,
-      name: str(meta.full_name) ?? str(meta.name) ?? email?.split("@")[0] ?? "You",
+      // display_name is set from /account; Google sign-in only refreshes its own keys, so it sticks.
+      name: str(meta.display_name) ?? str(meta.full_name) ?? str(meta.name) ?? email?.split("@")[0] ?? "You",
       email,
       avatarUrl: str(meta.avatar_url) ?? str(meta.picture),
       isAdmin: appMeta.role === "admin",
@@ -94,6 +95,17 @@ export function getSupabase(context: Readonly<RouterContextProvider>): SupabaseC
   const supabase = context.get(supabaseContext);
   if (!supabase) throw new Response("Sign-in isn't configured: set SUPABASE_URL and SUPABASE_ANON_KEY.", { status: 503 });
   return supabase;
+}
+
+/**
+ * Stores the display name in the user's metadata and refreshes the session, so the new access
+ * token (and the header's account menu) carries it. The backend's profile stays the source of truth.
+ */
+export async function syncDisplayName(context: Readonly<RouterContextProvider>, name: string): Promise<void> {
+  const supabase = getSupabase(context);
+  const { error } = await supabase.auth.updateUser({ data: { display_name: name } });
+  if (error) throw error;
+  await supabase.auth.refreshSession();
 }
 
 /** Only same-site paths, so ?next= can't send people to another website after sign-in. */

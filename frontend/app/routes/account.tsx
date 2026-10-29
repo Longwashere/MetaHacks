@@ -1,13 +1,15 @@
 import { CheckCircle2, CreditCard, Crown, Sparkles } from "lucide-react";
-import { Form, data, redirect, useNavigation } from "react-router";
+import { Form, data, redirect, useFetcher, useNavigation } from "react-router";
 import type { Route } from "./+types/account";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 import { Progress } from "~/components/ui/progress";
-import { createCheckoutUrl, createPortalUrl, getAccount } from "~/lib/api.server";
-import { requireSession } from "~/lib/auth.server";
+import { createCheckoutUrl, createPortalUrl, getAccount, updateDisplayName } from "~/lib/api.server";
+import { requireSession, syncDisplayName } from "~/lib/auth.server";
 import { SITE_NAME } from "~/lib/seo";
 
 export function meta({}: Route.MetaArgs) {
@@ -26,7 +28,16 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 export async function action({ request, context }: Route.ActionArgs) {
   const session = requireSession(context, request);
-  const intent = (await request.formData()).get("intent");
+  const form = await request.formData();
+  const intent = form.get("intent");
+  if (intent === "rename") {
+    const name = form.get("name");
+    if (typeof name !== "string") return data({ nameError: "Enter a display name." }, { status: 400 });
+    const result = await updateDisplayName(session, name);
+    if (!result.ok) return data({ nameError: result.error }, { status: 400 });
+    await syncDisplayName(context, result.account.user.name);
+    return { renamed: true };
+  }
   if (intent === "upgrade") throw redirect(await createCheckoutUrl(session));
   if (intent === "manage") {
     const url = await createPortalUrl(session);
@@ -45,6 +56,8 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
   const navigation = useNavigation();
   const pendingIntent = navigation.state !== "idle" ? navigation.formData?.get("intent") : null;
   const pro = plan === "pro";
+  const rename = useFetcher<typeof action>();
+  const renameResult = rename.state === "idle" ? rename.data : undefined;
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
@@ -65,12 +78,47 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
           </AlertDescription>
         </Alert>
       )}
-      {actionData?.error && (
+      {actionData && "error" in actionData && (
         <Alert variant="destructive">
           <AlertTitle>Something went wrong</AlertTitle>
           <AlertDescription>{actionData.error}</AlertDescription>
         </Alert>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Display name</CardTitle>
+          <CardDescription>Shown on your account and as the author of every asset you publish.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <rename.Form method="post" className="flex flex-col gap-2">
+            <Label htmlFor="display-name">Display name</Label>
+            <div className="flex gap-2">
+              <Input
+                id="display-name"
+                name="name"
+                defaultValue={account.user.name}
+                required
+                minLength={2}
+                maxLength={40}
+                autoComplete="nickname"
+                aria-invalid={renameResult && "nameError" in renameResult ? true : undefined}
+                aria-describedby="display-name-status"
+              />
+              <Button type="submit" name="intent" value="rename" disabled={rename.state !== "idle"}>
+                {rename.state !== "idle" ? "Saving…" : "Save"}
+              </Button>
+            </div>
+            <p id="display-name-status" role="status" className="text-sm">
+              {renameResult && "nameError" in renameResult ? (
+                <span className="text-destructive">{renameResult.nameError}</span>
+              ) : renameResult && "renamed" in renameResult ? (
+                <span className="text-muted-foreground">Saved. Your assets now show this name.</span>
+              ) : null}
+            </p>
+          </rename.Form>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

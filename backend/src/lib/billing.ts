@@ -71,6 +71,12 @@ export async function getAccount(userId: string, isAdmin: boolean): Promise<Acco
   };
 }
 
+/** Sets the user's display name and renames them on every asset they authored (assets copy the name when made). */
+export async function setDisplayName(userId: string, name: string): Promise<void> {
+  check(await db().from("profiles").update({ name }).eq("id", userId));
+  check(await db().from("assets").update({ author_name: name }).eq("author_id", userId));
+}
+
 /** The user's Stripe customer, created on first checkout. */
 async function customerFor(profile: ProfileRow): Promise<string> {
   if (profile.stripe_customer_id) return profile.stripe_customer_id;
