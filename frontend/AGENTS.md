@@ -30,8 +30,12 @@ components.json       # shadcn config
 ```bash
 npm run dev         # dev server (run from frontend/, or `npm run dev:frontend` from the root)
 npm run build       # production build
-npm run typecheck   # react-router typegen && tsc — run before finishing a task
+npm run typecheck   # wrangler types, react-router typegen, tsc (app + workers/) — run before finishing a task
+npm run preview     # production build on the local Workers runtime
+npm run deploy      # build and deploy to Cloudflare Workers (rigforge.app)
 ```
+
+The app runs on Cloudflare Workers (`workers/app.ts`, `wrangler.jsonc`). Server code reads settings from `process.env`, which is filled from wrangler `vars` and secrets. Don't add Node-only APIs (`fs`, `path`, `Buffer`) or `@react-router/node` to the frontend.
 
 Requires Node > 22.22.
 

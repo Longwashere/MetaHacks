@@ -283,6 +283,13 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Moving the frontend to Cloudflare Workers: three snags
+- **What happened:** (1) With `@react-router/node` still installed, React Router picked its Node server entry, which can't run on Workers. (2) Wrangler's generated runtime types redeclare DOM globals such as `Element`, so `tsc` failed on browser code (`document.body.append(host)` in `spine-auto-tweak.ts`). (3) `vite preview` returned 500 on `/` while dev worked.
+- **Cost:** Three retries.
+- **Cause:** (1) The default entry is chosen by whether `@react-router/node`/`serve`/`express` is a dependency. (2) Worker types and DOM types don't mix in one program. (3) Preview serves the build, whose `vars` (`BACKEND_URL=https://api.rigforge.app`) are fixed at build time, and that host doesn't exist yet. Local `.env` overrides apply only in dev.
+- **Workaround / status:** Removed `@react-router/node` and `@react-router/serve`. `frontend/tsconfig.worker.json` typechecks `workers/` with Worker types, and the main tsconfig excludes them. `frontend/.env` sets `BACKEND_URL` and `PUBLIC_SITE_URL` to localhost for dev.
+- **Lesson:** To test a production build locally, rebuild with local vars. A 500 in preview may just mean the production backend isn't live.
+
 ### 2026-10-28 — tsx scratch scripts fail on top-level await as `.ts`
 - **What happened:** A one-off script to test a Muse call (`npx tsx script.ts` outside the backend folder) failed with "Top-level await is currently not supported with the \"cjs\" output format".
 - **Cost:** One retry.

@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rigforge-frontend",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2026-10-01",
+  // process.env is filled from vars and secrets (compatibility dates from 2025-04-01 on).
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "rigforge.app", "custom_domain": true },
+    { "pattern": "www.rigforge.app", "custom_domain": true }
+  ],
+  "observability": { "enabled": true },
+  // SUPABASE_URL and SUPABASE_ANON_KEY are secrets: npx wrangler secret put <NAME>
+  "vars": {
+    "PUBLIC_SITE_URL": "https://rigforge.app",
+    "BACKEND_URL": "https://api.rigforge.app"
+  }
+}
