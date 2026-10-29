@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { aiFetch } from "./ai-fetch.js";
 import { IMAGE_MODEL, IMAGE_TIMEOUT_MS, META_API_BASE_URL, MUSE_MODEL, MUSE_TIMEOUT_MS } from "./config.js";
 import type { RemixInput } from "./types.js";
@@ -24,6 +25,9 @@ export function apiKey(): string {
  * key without access) shows up at startup rather than as model_not_found on someone's remix.
  */
 export async function checkModels(): Promise<void> {
+  // A hash prefix, so the key in use can be matched against another environment's without logging it.
+  const fingerprint = createHash("sha256").update(apiKey()).digest("hex").slice(0, 8);
+  console.log(`Meta Model API: key fingerprint ${fingerprint}`);
   const res = await fetch(`${META_API_BASE_URL}/models`, { headers: { authorization: `Bearer ${apiKey()}` } });
   if (!res.ok) {
     console.warn(`Meta Model API: listing models failed (${res.status})`, (await res.text()).slice(0, 300));
