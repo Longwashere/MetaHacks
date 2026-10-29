@@ -34,12 +34,13 @@ Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `pr
 | `animateRemix(session, assetId, input)` | `POST /me/remixes/:assetId/animations` (JSON `AnimateInput`, up to 8 MB) | `201` `AnimateResult`: the updated `SpineAsset`, the new animation, Muse's notes and any dropped bones; `{ ok: false, error }` on 400/404/409/502. See **Generated animations** below. |
 | `createRemixJob(session, input, apiVersion)` | `POST /me/remix-jobs` (JSON `RemixInput` + `apiVersion`) | `202` `RemixJob`; `400 { errors }`; `402 { error }` when the monthly allowance is used up |
 | `getRemixJob(session, jobId)` | `GET /me/remix-jobs/:id` | `RemixJob \| null` |
-| `getAccount(session)` | `GET /me` | `Account`: profile, plan, subscription and `usage: { used, limit, resetsAt }` |
+| `getAccount(session)` | `GET /me` | `Account`: profile, plan, subscription, `usage: { used, limit, resetsAt }` (remixes) and `downloads: { used, limit, resetsAt }` (`limit` null = unlimited) |
+| `recordDownload(session, assetId)` | `POST /me/downloads/:assetId` | `{ used, limit, resetsAt }` once recorded; `402 { error, used, limit, resetsAt }` when the monthly download allowance is used up; `404` if the asset isn't visible. Re-downloading an asset already downloaded this month is free. |
 | `updateDisplayName(session, name)` | `PATCH /me` (JSON `{ name }`) | Updated `Account`; `{ ok: false, error }` on 400 (2–40 characters, no control characters). Sets `profiles.name` and `author_name` on every asset the user authored. The account action then also stores it as `user_metadata.display_name` so the header menu shows it. |
 | `createCheckoutUrl(session)` | `POST /billing/checkout` | `{ url }` of Stripe Checkout (or the portal for existing subscribers) |
 | `createPortalUrl(session)` | `POST /billing/portal` | `{ url }` of the Stripe customer portal, or `null` if they never subscribed |
 
-`/assets/:id/download` redirects to the asset's `skeletonUrl`, or serves `buildPlaceholderSkeleton(asset)` for assets without files.
+`/assets/:id/download` sends guests to `/login` (back to the asset page after), counts the download with `recordDownload` (on `402` it redirects to the asset page with `?download=limit`, which shows an upgrade note), then serves a zip of the skeleton, the `.atlas` and every page image (named as the atlas names them), or `buildPlaceholderSkeleton(asset)` as JSON for assets without files.
 
 ## Remix flow
 
@@ -125,7 +126,7 @@ Below the remix result, the **Fix parts** card sits beside the sprite sheet. Onc
 
 The `animations` list must use the clip names in the skeleton exactly. The viewer calls `setAnimation(name)` and skips names that don't exist. Have the backend read the names and durations from the skeleton when an asset is ingested, rather than entering them by hand.
 
-Serve files from a CDN with CORS enabled if they're on a different origin, since WebGL needs CORS to load textures. `/assets/:id/download` redirects to `skeletonUrl`. Change it to a signed URL or a zip of all files if you need that.
+Serve files from a CDN with CORS enabled if they're on a different origin, since WebGL needs CORS to load textures. `/assets/:id/download` fetches the files server-side and zips them, so they must be reachable from the frontend Worker.
 
 `thumbnailUrl` is optional but recommended (see SEO).
 
@@ -149,7 +150,7 @@ If grid performance becomes a problem with many real rigs, show `thumbnailUrl` i
 
 - Sign-in is Google via Supabase Auth: `/login` starts the OAuth flow, `/auth/callback` exchanges the code for session cookies, and `/logout` (POST) clears them. Guests can browse Explore, asset pages and the remix picker; saving, remixing, the library and `/account` need an account.
 - `SpineAsset.visibility` controls exposure. Only `public` assets appear in Explore, the sitemap and search engines. For now every new remix (and every copy) is public: the remix form has no visibility choice and the backend ignores `visibility` on `POST /remixes`. Public remixes appear in Explore and on the base rig's page, and anyone can remix them in turn; private ones are only shown to their owner (others get a 404). The owner can change it later with `<VisibilityToggle>` (asset page, remix result, and **My Library → Remixes**).
-- Plans: everyone gets `FREE_MONTHLY_REMIXES` (default 3) a calendar month; a Stripe subscription gives `PRO_MONTHLY_REMIXES` (default 100). `/account` shows usage and opens Stripe Checkout or the customer portal. The backend's Stripe webhook is the only thing that changes a user's plan.
+- Plans: everyone gets `FREE_MONTHLY_REMIXES` (default 3) a calendar month; a Stripe subscription gives `PRO_MONTHLY_REMIXES` (default 100). `/account` shows usage and opens Stripe Checkout or the customer portal. Free users can also download `FREE_MONTHLY_DOWNLOADS` (default 3) distinct assets a calendar month; Pro and admins download without limit. The `downloads` table holds one row per user, asset and month, and `record_download()` checks and records in one transaction; each new row adds one to `assets.downloads`. The backend's Stripe webhook is the only thing that changes a user's plan.
 - The theme cookie (`app/lib/theme.server.ts`) is independent of auth and can stay as is.
 
 ## Error handling

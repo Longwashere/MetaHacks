@@ -88,3 +88,9 @@ export const PLAN_LIMITS = {
   free: count("FREE_MONTHLY_REMIXES", 3),
   pro: count("PRO_MONTHLY_REMIXES", 100),
 } as const;
+
+/** Distinct assets each plan can download per calendar month (UTC); null is unlimited. Admins are unlimited too. */
+export const DOWNLOAD_LIMITS: Record<"free" | "pro", number | null> = {
+  free: count("FREE_MONTHLY_DOWNLOADS", 3),
+  pro: null,
+};

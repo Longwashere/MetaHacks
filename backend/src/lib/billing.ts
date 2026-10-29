@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { APP_URL, PLAN_LIMITS, STRIPE } from "./config.js";
+import { APP_URL, DOWNLOAD_LIMITS, PLAN_LIMITS, STRIPE } from "./config.js";
 import { PROFILE_COLUMNS, check, db, type Plan, type ProfileRow } from "./db.js";
 
 // Plans, monthly remix allowance and the Stripe subscription. The webhook is the only thing that
@@ -25,6 +25,8 @@ export interface Account {
   subscription: { status: string; currentPeriodEnd: string | null } | null;
   /** `limit` is null for unlimited (admins). */
   usage: { used: number; limit: number | null; resetsAt: string };
+  /** Distinct assets downloaded this month. `limit` is null for unlimited (Pro and admins). */
+  downloads: { used: number; limit: number | null; resetsAt: string };
   billingEnabled: boolean;
 }
 
@@ -57,8 +59,36 @@ export async function remixesUsed(userId: string): Promise<number> {
   return count ?? 0;
 }
 
+/** Distinct assets downloaded this month. */
+export async function downloadsUsed(userId: string): Promise<number> {
+  const { count, error } = await db()
+    .from("downloads")
+    .select("asset_id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("period", usagePeriod().start.toISOString().slice(0, 10));
+  if (error) throw new Error(`Database error: ${error.message}`);
+  return count ?? 0;
+}
+
+export function downloadLimit(plan: Plan, isAdmin: boolean): number | null {
+  return isAdmin ? null : DOWNLOAD_LIMITS[plan];
+}
+
+export type DownloadResult = { allowed: boolean; used: number; limit: number | null; resetsAt: string };
+
+/** Records a download against this month's allowance, unless it's used up. Re-downloading an asset this month is free. */
+export async function recordDownload(userId: string, assetId: string, isAdmin: boolean): Promise<DownloadResult> {
+  const limit = downloadLimit((await getProfile(userId)).plan, isAdmin);
+  const rows = check(await db().rpc("record_download", { p_user_id: userId, p_asset_id: assetId, p_limit: limit })) as
+    | { allowed: boolean; used: number }[]
+    | null;
+  const row = rows?.[0];
+  if (!row) throw new Error("record_download returned no row");
+  return { allowed: row.allowed, used: row.used, limit, resetsAt: usagePeriod().end.toISOString() };
+}
+
 export async function getAccount(userId: string, isAdmin: boolean): Promise<Account> {
-  const [profile, used] = await Promise.all([getProfile(userId), remixesUsed(userId)]);
+  const [profile, used, downloads] = await Promise.all([getProfile(userId), remixesUsed(userId), downloadsUsed(userId)]);
   return {
     user: { id: profile.id, name: profile.name, avatarUrl: profile.avatar_url },
     plan: profile.plan,
@@ -67,6 +97,7 @@ export async function getAccount(userId: string, isAdmin: boolean): Promise<Acco
       ? { status: profile.subscription_status, currentPeriodEnd: profile.current_period_end }
       : null,
     usage: { used, limit: isAdmin ? null : PLAN_LIMITS[profile.plan], resetsAt: usagePeriod().end.toISOString() },
+    downloads: { used: downloads, limit: downloadLimit(profile.plan, isAdmin), resetsAt: usagePeriod().end.toISOString() },
     billingEnabled: billingEnabled(),
   };
 }

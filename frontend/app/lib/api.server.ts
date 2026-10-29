@@ -306,7 +306,28 @@ export interface Account {
   subscription: { status: string; currentPeriodEnd: string | null } | null;
   /** Remixes started this calendar month (UTC) that didn't fail, and the plan's allowance (null = unlimited). */
   usage: { used: number; limit: number | null; resetsAt: string };
+  /** Distinct assets downloaded this calendar month (UTC), and the allowance (null = unlimited: Pro and admins). */
+  downloads: { used: number; limit: number | null; resetsAt: string };
   billingEnabled: boolean;
+}
+
+export type RecordDownloadResult = { ok: true } | { ok: false; limitReached: true; error: string } | { ok: false; limitReached: false };
+
+/**
+ * POST /me/downloads/:assetId — counts the download against the monthly allowance. Re-downloading
+ * an asset already downloaded this month is free. `limitReached` when the allowance is used up (402).
+ */
+export async function recordDownload(session: Session, assetId: string): Promise<RecordDownloadResult> {
+  try {
+    await backend(`/me/downloads/${id(assetId)}`, { session, method: "POST" });
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof BackendError && error.status === 402) {
+      return { ok: false, limitReached: true, error: errorMessage(error.body, "You've used this month's free downloads.") };
+    }
+    if (error instanceof BackendError && error.status === 404) return { ok: false, limitReached: false };
+    throw error;
+  }
 }
 
 /** GET /me */

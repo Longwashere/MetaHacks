@@ -7,7 +7,7 @@ import { AnimateError, generateAnimation, parseAnimateInput } from "../lib/anima
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
 import { getPartFixView, startPartFix } from "../lib/part-fix-jobs.js";
-import { getAccount, setDisplayName } from "../lib/billing.js";
+import { getAccount, recordDownload, setDisplayName } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
@@ -90,6 +90,30 @@ meRouter.put("/library/:assetId", async (req, res) => {
 meRouter.delete("/library/:assetId", async (req, res) => {
   check(await db().from("library").delete().eq("user_id", userIdOf(res)).eq("asset_id", req.params.assetId));
   res.status(204).end();
+});
+
+// ---------------------------------------------------------------------------
+// Downloads (monthly allowance)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /me/downloads/:assetId → { used, limit, resetsAt } when the download is allowed and recorded,
+ * 402 { error, used, limit, resetsAt } when the month's allowance is used up, 404 if the asset isn't visible.
+ */
+meRouter.post("/downloads/:assetId", async (req, res) => {
+  const userId = userIdOf(res);
+  const isAdmin = isAdminOf(res);
+  const row = await getAssetRow(req.params.assetId, userId, isAdmin);
+  if (!row) {
+    res.status(404).json({ error: "Asset not found." });
+    return;
+  }
+  const { allowed, ...usage } = await recordDownload(userId, row.id, isAdmin);
+  if (!allowed) {
+    res.status(402).json({ error: `You've used your ${usage.limit} free downloads this month. Upgrade to Pro for unlimited downloads.`, ...usage });
+    return;
+  }
+  res.json(usage);
 });
 
 // ---------------------------------------------------------------------------

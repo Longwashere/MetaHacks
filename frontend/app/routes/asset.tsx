@@ -112,6 +112,8 @@ export default function AssetPage({ loaderData, actionData }: Route.ComponentPro
   const boneColorParam = searchParams.get("boneColor");
   const boneColor = boneColorParam ? `#${boneColorParam.replace("#", "")}` : "#ef4444";
   const showLabels = searchParams.get("labels") === "1";
+  // Set by the download route when the free monthly allowance is used up.
+  const downloadLimitReached = searchParams.get("download") === "limit";
 
   const handleViewModeChange = (nextMode: SpineViewMode) => {
     setSearchParams(
@@ -288,6 +290,13 @@ export default function AssetPage({ loaderData, actionData }: Route.ComponentPro
               {canManage && <DeleteAssetButton assetId={asset.id} assetName={asset.name} redirectTo={isOwner ? "/library?tab=remixes" : "/explore"} />}
             </div>
             {actionData?.copyError && <p className="-mt-3 text-sm text-destructive">{actionData.copyError}</p>}
+            {downloadLimitReached && (
+              <p className="-mt-3 text-sm text-destructive">
+                You've used your free downloads this month.{" "}
+                <Link to="/account" className="font-medium underline underline-offset-4">Upgrade to Pro</Link> for unlimited
+                downloads; assets you've already downloaded this month can be downloaded again.
+              </p>
+            )}
 
             <Card className="gap-4">
               <CardHeader>

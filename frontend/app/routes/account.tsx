@@ -52,7 +52,7 @@ const formatDate = (iso: string) =>
 
 export default function Account({ loaderData, actionData }: Route.ComponentProps) {
   const { account, email, checkout } = loaderData;
-  const { usage, plan, subscription } = account;
+  const { usage, downloads, plan, subscription } = account;
   const navigation = useNavigation();
   const pendingIntent = navigation.state !== "idle" ? navigation.formData?.get("intent") : null;
   const pro = plan === "pro";
@@ -137,7 +137,7 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
               ? `Renews ${formatDate(subscription.currentPeriodEnd)}.`
               : pro
                 ? "Thanks for supporting the project."
-                : "Upgrade for more remixes every month."}
+                : "Upgrade for more remixes and unlimited downloads every month."}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -153,6 +153,25 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
             <>
               <Progress value={usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 100} aria-label="Remixes used this month" />
               <p className="text-xs text-muted-foreground">Resets {formatDate(usage.resetsAt)}. Failed remixes don't count.</p>
+            </>
+          )}
+          <div className="mt-2 flex items-baseline justify-between text-sm">
+            <span className="font-medium">Downloads this month</span>
+            <span className="tabular-nums text-muted-foreground">
+              {downloads.limit === null ? `${downloads.used} · unlimited` : `${downloads.used} / ${downloads.limit}`}
+            </span>
+          </div>
+          {downloads.limit === null ? (
+            <p className="text-xs text-muted-foreground">{account.isAdmin && !pro ? "As an admin you" : "Pro members"} have unlimited downloads.</p>
+          ) : (
+            <>
+              <Progress
+                value={downloads.limit > 0 ? Math.min((downloads.used / downloads.limit) * 100, 100) : 100}
+                aria-label="Downloads used this month"
+              />
+              <p className="text-xs text-muted-foreground">
+                Resets {formatDate(downloads.resetsAt)}. Downloading an asset again this month doesn't count.
+              </p>
             </>
           )}
         </CardContent>
