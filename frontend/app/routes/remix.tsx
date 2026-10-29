@@ -1,10 +1,11 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Paintbrush, Palette, Repeat, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, Download, ExternalLink, Film, Loader2, Paintbrush, Palette, Repeat, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Form,
   Link,
   data,
+  href,
   redirect,
   useFetcher,
   useLocation,
@@ -486,6 +487,12 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                     <Button asChild variant="outline">
                       <Link to={`${assetPath(savedRemix)}?public=1`}>
                         <ExternalLink /> View public page
+                      </Link>
+                    </Button>
+                    <Button asChild variant="outline">
+                      {/* reloadDocument: this is a resource route returning a file */}
+                      <Link to={href("/assets/:assetId/download", { assetId: savedRemix.id })} reloadDocument rel="nofollow">
+                        <Download /> Download
                       </Link>
                     </Button>
                     <DeleteAssetButton assetId={savedRemix.id} assetName={savedRemix.name} redirectTo="/library?tab=remixes" />

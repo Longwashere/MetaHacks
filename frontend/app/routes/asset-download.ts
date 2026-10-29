@@ -31,19 +31,22 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const [skeleton, atlas] = await Promise.all([fetchFile(skeletonUrl), fetchFile(atlasUrl)]);
   const atlasText = new TextDecoder().decode(atlas);
 
-  // Page images keep the names the atlas gives them, so Spine finds them beside the .atlas.
+  // Every file is named after the asset (Spine's export style: name.png, name_2.png, ...), and the
+  // atlas is rewritten to point at the renamed pages so Spine still finds them beside the .atlas.
   const pageNames = parseAtlas(atlasText).map((p) => p.name);
-  const pages = pageNames.length
+  const sources = pageNames.length
     ? pageNames.map((name) => ({ name, url: new URL(name, atlasUrl).href }))
     : textureUrls.map((url) => ({ name: fileName(url), url }));
+  const pages = sources.map((p, i) => ({ ...p, rename: `${baseName}${i === 0 ? "" : `_${i + 1}`}${extension(p.name)}` }));
   const images = await Promise.all(pages.map((p) => fetchFile(p.url)));
+  const renamedAtlas = renameAtlasPages(atlasText, new Map(pages.map((p) => [p.name, p.rename])));
 
   const files: Zippable = {
-    [fileName(skeletonUrl)]: skeleton,
-    [fileName(atlasUrl)]: atlas,
+    [`${baseName}.json`]: skeleton,
+    [`${baseName}.atlas`]: new TextEncoder().encode(renamedAtlas),
   };
   // PNGs are already compressed; storing them skips wasted work.
-  pages.forEach((p, i) => (files[p.name] = [images[i], { level: 0 }]));
+  pages.forEach((p, i) => (files[p.rename] = [images[i], { level: 0 }]));
   const zip = zipSync(files);
 
   // Counted only once the zip is built, so a failed fetch doesn't use up a download.
@@ -69,6 +72,30 @@ async function fetchFile(url: string): Promise<Uint8Array> {
 
 function fileName(url: string): string {
   return decodeURIComponent(new URL(url).pathname.split("/").pop() || "file");
+}
+
+function extension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot) : ".png";
+}
+
+/** Swaps page names in a Spine .atlas. Page lines start the file or follow a blank line (see parseAtlas). */
+function renameAtlasPages(text: string, renames: Map<string, string>): string {
+  let expectPage = true;
+  return text
+    .split(/(\r?\n)/)
+    .map((part) => {
+      if (/^\r?\n$/.test(part)) return part;
+      const line = part.trim();
+      if (!line) {
+        expectPage = true;
+        return part;
+      }
+      const isPage = expectPage && !line.includes(":");
+      expectPage = false;
+      return isPage ? (renames.get(line) ?? part) : part;
+    })
+    .join("");
 }
 
 function fileSafe(name: string): string {

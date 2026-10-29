@@ -2,6 +2,7 @@ import { Bone, Film } from "lucide-react";
 import { Link } from "react-router";
 import { SpinePreview } from "~/components/SpinePreview";
 import { Badge } from "~/components/ui/badge";
+import { assetOrigin } from "~/lib/format";
 import type { SpineAsset } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
@@ -23,7 +24,7 @@ export function RigPicker({ rigs, selectHref, className }: RigPickerProps) {
             preventScrollReset
             className="group flex flex-col overflow-hidden rounded-lg border bg-card transition-colors outline-none hover:border-primary focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
-            <SpinePreview asset={rig} className="border-b" />
+            <SpinePreview asset={rig} origin={assetOrigin(rig)} className="border-b" />
             <div className="flex flex-col gap-1 p-3">
               <span className="truncate text-sm font-medium group-hover:text-primary">{rig.name}</span>
               <span className="flex items-center gap-3 text-xs text-muted-foreground">

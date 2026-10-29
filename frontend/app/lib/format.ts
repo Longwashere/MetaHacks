@@ -13,3 +13,11 @@ export function formatDate(iso: string) {
 export function formatCount(n: number) {
   return n.toLocaleString("en-US");
 }
+
+/** Where an asset came from, for the badge on its preview: the model a remix was made with, or an original upload. */
+export type AssetOrigin = { kind: "remix"; model: string } | { kind: "upload" };
+
+export function assetOrigin(asset: { remixOf: unknown }): AssetOrigin {
+  // Muse is the only model for now; read it from the asset once there's more than one.
+  return asset.remixOf ? { kind: "remix", model: "Muse AI" } : { kind: "upload" };
+}

@@ -7,7 +7,7 @@ import { VisibilityToggle } from "~/components/VisibilityToggle";
 import { Badge } from "~/components/ui/badge";
 import { Card, CardContent } from "~/components/ui/card";
 import type { SpineAsset } from "~/lib/types";
-import { formatCount } from "~/lib/format";
+import { formatCount, assetOrigin } from "~/lib/format";
 import { animationLabel, assetPath } from "~/lib/seo";
 import { cn } from "~/lib/utils";
 
@@ -26,7 +26,7 @@ export function AssetCard({ asset, saved, manage = false, className }: AssetCard
         to={assetPath(asset)}
         className="block outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
-        <SpinePreview asset={asset} className="border-b" />
+        <SpinePreview asset={asset} origin={assetOrigin(asset)} className="border-b" />
         <span className="sr-only">View {asset.name}</span>
       </Link>
       <SaveButton

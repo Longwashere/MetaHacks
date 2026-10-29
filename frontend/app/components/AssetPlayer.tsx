@@ -7,6 +7,7 @@ import { Label } from "~/components/ui/label";
 import { Slider } from "~/components/ui/slider";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Toggle } from "~/components/ui/toggle";
+import { assetOrigin } from "~/lib/format";
 import type { SpineTweakBinding } from "~/lib/spine-tweaks";
 import type { SpineAsset, SpineViewMode } from "~/lib/types";
 import { cn } from "~/lib/utils";
@@ -180,6 +181,7 @@ export function AssetPlayer({
         boneColor={boneColor}
         showLabels={bonesActive && showLabels}
         tweaks={tweaks}
+        origin={assetOrigin(asset)}
         className="border-b"
       />
       <div className="flex flex-col gap-4 p-4">
