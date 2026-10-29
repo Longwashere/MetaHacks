@@ -1,3 +1,4 @@
+import { cloudflare } from "@cloudflare/vite-plugin";
 import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, loadEnv } from "vite";
@@ -8,7 +9,7 @@ export default defineConfig(({ mode }) => {
   for (const [name, value] of Object.entries(loadEnv(mode, process.cwd(), ""))) process.env[name] ??= value;
 
   return {
-    plugins: [tailwindcss(), reactRouter()],
+    plugins: [cloudflare({ viteEnvironment: { name: "ssr" } }), tailwindcss(), reactRouter()],
     resolve: {
       tsconfigPaths: true,
     },

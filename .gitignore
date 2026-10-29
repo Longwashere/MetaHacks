@@ -10,3 +10,7 @@ build/
 # Backend
 dist/
 backend/data/
+
+# Cloudflare
+.wrangler/
+.dev.vars

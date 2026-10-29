@@ -283,6 +283,20 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Stripe webhook rejected every event: secret retyped with lookalike characters
+- **What happened:** The first test checkout on rigforge.app succeeded in Stripe, but the account stayed Free. All 4 webhook deliveries to `https://api.rigforge.app/billing/webhook` failed with 400 "Invalid Stripe signature."
+- **Cost:** One failed checkout, plus a round of debugging and a redeploy.
+- **Cause:** `STRIPE_WEBHOOK_SECRET` in Render was typed from Stripe's on-screen text and differed from the real secret at two lookalike characters (l/1, 0/o).
+- **Workaround / status:** Fixed. Corrected the value in Render, redeployed, and resent the event from Stripe (200, delivered). The account now shows Pro.
+- **Lesson:** Copy-paste secrets, never retype them. A 400 "Invalid Stripe signature" on every delivery means a wrong secret, not a code bug.
+
+### 2026-10-28 — Moving the frontend to Cloudflare Workers: three snags
+- **What happened:** (1) With `@react-router/node` still installed, React Router picked its Node server entry, which can't run on Workers. (2) Wrangler's generated runtime types redeclare DOM globals such as `Element`, so `tsc` failed on browser code (`document.body.append(host)` in `spine-auto-tweak.ts`). (3) `vite preview` returned 500 on `/` while dev worked.
+- **Cost:** Three retries.
+- **Cause:** (1) The default entry is chosen by whether `@react-router/node`/`serve`/`express` is a dependency. (2) Worker types and DOM types don't mix in one program. (3) Preview serves the build, whose `vars` (`BACKEND_URL=https://api.rigforge.app`) are fixed at build time, and that host doesn't exist yet. Local `.env` overrides apply only in dev.
+- **Workaround / status:** Removed `@react-router/node` and `@react-router/serve`. `frontend/tsconfig.worker.json` typechecks `workers/` with Worker types, and the main tsconfig excludes them. `frontend/.env` sets `BACKEND_URL` and `PUBLIC_SITE_URL` to localhost for dev.
+- **Lesson:** To test a production build locally, rebuild with local vars. A 500 in preview may just mean the production backend isn't live.
+
 ### 2026-10-28 — tsx scratch scripts fail on top-level await as `.ts`
 - **What happened:** A one-off script to test a Muse call (`npx tsx script.ts` outside the backend folder) failed with "Top-level await is currently not supported with the \"cjs\" output format".
 - **Cost:** One retry.
