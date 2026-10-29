@@ -8,6 +8,7 @@ export function loader({ request }: Route.LoaderArgs) {
     // Private / non-content pages
     "Disallow: /library",
     "Disallow: /account",
+    "Disallow: /upload",
     "Disallow: /login",
     "Disallow: /auth/",
     "Disallow: /api/",

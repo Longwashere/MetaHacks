@@ -295,6 +295,42 @@ export async function animateRemix(
 }
 
 // ---------------------------------------------------------------------------
+// Uploads (the user's own rigs)
+// ---------------------------------------------------------------------------
+
+export type UploadRigsResult =
+  | { ok: true; assets: SpineAsset[] }
+  /** `rigErrors` maps a rig's index in the request to what's wrong with it; nothing was stored. */
+  | { ok: false; error: string; rigErrors: Record<string, string> };
+
+/**
+ * POST /me/uploads — `body` is the JSON request ({ category, style, visibility, rigs }), streamed
+ * through as-is: a batch can be tens of MB of base64 PNGs, more than a Worker should buffer.
+ */
+export async function uploadRigs(session: Session, body: ReadableStream<Uint8Array>): Promise<UploadRigsResult> {
+  const res = await fetch(`${BACKEND_URL}/me/uploads`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${session.accessToken}`, "content-type": "application/json" },
+    body,
+  });
+  const text = await res.text();
+  let parsed: unknown = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    // A proxy error page; handled as a failure below.
+  }
+  if (res.ok) return { ok: true, assets: (parsed as { assets: SpineAsset[] }).assets };
+  if (res.status >= 500) throw new BackendError(res.status, parsed ?? text.slice(0, 300), "/me/uploads");
+  const rigErrors = (parsed as { rigErrors?: unknown } | null)?.rigErrors;
+  return {
+    ok: false,
+    error: res.status === 413 ? "That batch is too big. Upload fewer or smaller rigs at a time." : errorMessage(parsed, "Couldn't upload the rigs."),
+    rigErrors: typeof rigErrors === "object" && rigErrors !== null ? (rigErrors as Record<string, string>) : {},
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Account & billing
 // ---------------------------------------------------------------------------
 

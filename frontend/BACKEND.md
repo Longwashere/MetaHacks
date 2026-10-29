@@ -35,6 +35,7 @@ Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `pr
 | `createRemixJob(session, input, apiVersion)` | `POST /me/remix-jobs` (JSON `RemixInput` + `apiVersion`) | `202` `RemixJob`; `400 { errors }`; `402 { error }` when the monthly allowance is used up |
 | `getRemixJob(session, jobId)` | `GET /me/remix-jobs/:id` | `RemixJob \| null` |
 | `getAccount(session)` | `GET /me` | `Account`: profile, plan, subscription, `usage: { used, limit, resetsAt }` (remixes) and `downloads: { used, limit, resetsAt }` (`limit` null = unlimited) |
+| `uploadRigs(session, body)` | `POST /me/uploads` (JSON `{ category, style, visibility, rigs }`, up to 64 MB; streamed through `/api/upload`) | `201 { assets: SpineAsset[] }`; `400 { error, rigErrors? }` with nothing stored. Up to 3 rigs per request (admins 50). See **Uploads** below. |
 | `recordDownload(session, assetId)` | `POST /me/downloads/:assetId` | `{ used, limit, resetsAt }` once recorded; `402 { error, used, limit, resetsAt }` when the monthly download allowance is used up; `404` if the asset isn't visible. Re-downloading an asset already downloaded this month is free. |
 | `updateDisplayName(session, name)` | `PATCH /me` (JSON `{ name }`) | Updated `Account`; `{ ok: false, error }` on 400 (2–40 characters, no control characters). Sets `profiles.name` and `author_name` on every asset the user authored. The account action then also stores it as `user_metadata.display_name` so the header menu shows it. |
 | `createCheckoutUrl(session)` | `POST /billing/checkout` | `{ url }` of Stripe Checkout (or the portal for existing subscribers) |
@@ -113,6 +114,12 @@ Below the remix result, the **Fix parts** card sits beside the sprite sheet. Onc
 ## Full textures (tweak panel)
 
 **Tweak → Parts** offers the same box swap by hand. **Full textures → Show all** applies it to every rigid mesh part, and each part has a **Show the full texture** checkbox. For a part that can't be swapped, the checkbox is disabled and says why. `RigInfo.meshes` lists each mesh part with `null` (can be swapped) or a reason (`MESH_REASONS` in `app/lib/spine-mesh.ts`). The preview swaps the mesh shape live (`TweakController.planMeshes`/`applyMeshes`). **Save** writes the box into the skeleton JSON (`boxMesh` in `spine-tweak-bake.ts`), before any offset, so the offset moves the box.
+
+## Uploads
+
+`/upload` (signed in) lets users add their own Spine 4.2 rigs, one folder per rig. They pick a parent folder (`<input webkitdirectory>`) or drop several folders; `app/lib/rig-folder.ts` turns every directory holding a `.atlas` (or `.atlas.txt`) into a rig, named after the folder (editable). In the browser it reads the skeleton (`.json`, or `.skel` converted with `skelToJson`), the atlas and the PNG pages the atlas names, and sends pages as base64. Regular users can add 3 rigs per upload; admins any number. The page sends at most 3 rigs and ~40 MB per request, one request after another, and shows each rig's result.
+
+The backend (`backend/src/lib/uploads.ts`) loads every rig with the Spine runtime against its atlas (a missing region or page is a per-rig error), requires Spine 4.2 and real PNGs, and rejects the whole request if any rig fails. It then stores the files under `remixes/<time>_upload_<id>/` and creates original assets (`remix_of` null) owned by the uploader, with the batch's category, style and visibility, bone/slot counts and animations (durations from the runtime; `loop` guessed from the name). They show under the library's remixes tab, can be remixed, and their visibility can be changed like a remix's.
 
 ## Asset files
 

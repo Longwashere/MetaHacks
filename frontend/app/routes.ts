@@ -14,6 +14,7 @@ export default [
     // /assets/wandering-monk and /assets/wandering-monk/walk (one indexable page per animation)
     route("assets/:assetId/:animation?", "routes/asset.tsx"),
     route("library", "routes/library.tsx"),
+    route("upload", "routes/upload.tsx"),
     route("account", "routes/account.tsx"),
     route("login", "routes/login.tsx"),
   ]),
@@ -30,4 +31,5 @@ export default [
   route("api/auto-tweak", "routes/api.auto-tweak.ts"),
   route("api/remix-animation", "routes/api.remix-animation.ts"),
   route("api/theme", "routes/api.theme.ts"),
+  route("api/upload", "routes/api.upload.ts"),
 ] satisfies RouteConfig;

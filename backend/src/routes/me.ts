@@ -10,12 +10,15 @@ import { getPartFixView, startPartFix } from "../lib/part-fix-jobs.js";
 import { getAccount, recordDownload, setDisplayName } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
+import { createUploads, parseUploadInput } from "../lib/uploads.js";
 import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
 import { putFile } from "../lib/storage.js";
 import { MAX_REFERENCE_BYTES, parseDisplayName, parsePartFixInput, parseReferenceImage, parseRemixInput, parseSkeleton } from "../lib/validate.js";
 
 /** Large rigs export several hundred KB of JSON; leave headroom without accepting anything huge. */
 const MAX_SKELETON_BYTES = "8mb";
+/** Uploads carry up to three rigs' page images as base64; the page splits bigger batches into several requests. */
+const MAX_UPLOAD_BYTES = "64mb";
 /** Auto-tweak posts a few snapshot images as data URLs. */
 const MAX_AUTO_TWEAK_BYTES = "12mb";
 
@@ -90,6 +93,24 @@ meRouter.put("/library/:assetId", async (req, res) => {
 meRouter.delete("/library/:assetId", async (req, res) => {
   check(await db().from("library").delete().eq("user_id", userIdOf(res)).eq("asset_id", req.params.assetId));
   res.status(204).end();
+});
+
+// ---------------------------------------------------------------------------
+// Uploads (the user's own rigs)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /me/uploads  body = { category, style, visibility, rigs: [{ name, skeleton, atlas, pages: [{ name, data }] }] }
+ * → 201 { assets: SpineAsset[] }, or 400 { error, rigErrors? } (nothing stored). `data` is base64 PNG.
+ * Up to 3 rigs per request; admins up to 50. See lib/uploads.ts.
+ */
+meRouter.post("/uploads", express.json({ limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+  const parsed = parseUploadInput(req.body, isAdminOf(res));
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error, rigErrors: parsed.rigErrors });
+    return;
+  }
+  res.status(201).json({ assets: await createUploads(userIdOf(res), parsed.input) });
 });
 
 // ---------------------------------------------------------------------------
