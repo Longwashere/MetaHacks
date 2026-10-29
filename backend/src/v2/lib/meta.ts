@@ -127,7 +127,7 @@ export async function planRemix(
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse request failed (${res.status})`, await res.text());
+    console.error(`Muse request failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
     throw new Error("Couldn't plan the remix. Try again.");
   }
 
@@ -231,7 +231,7 @@ export async function repaintPage(
 
     const text = await res.text();
     if (res.status === 503 && attempt === 0) continue;
-    console.error(`Muse Image request failed (${res.status})`, text);
+    console.error(`Muse Image request failed (${res.status}) with ${IMAGE_MODEL}`, text);
     if (text.includes("content_policy_violation")) throw new ContentPolicyError();
     throw new Error("Couldn't paint the new textures. Try again.");
   }
@@ -281,7 +281,7 @@ export async function describeStyle(reference: string, signal: AbortSignal): Pro
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse style request failed (${res.status})`, await res.text());
+    console.error(`Muse style request failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
     return null;
   }
   const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
@@ -312,7 +312,7 @@ export async function rewordForContentPolicy(editPrompt: string, signal: AbortSi
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse reword request failed (${res.status})`, await res.text());
+    console.error(`Muse reword request failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
     return null;
   }
   const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
@@ -389,7 +389,7 @@ export async function planPartFix(input: PartFixPlanInput, signal: AbortSignal):
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse part-fix plan request failed (${res.status})`, await res.text());
+    console.error(`Muse part-fix plan request failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
     return null;
   }
   const content = getPath(await res.json(), ["choices", 0, "message", "content"]);
@@ -461,7 +461,7 @@ export async function describeReference(
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse reference request failed (${res.status})`, await res.text());
+    console.error(`Muse reference request failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
     return null;
   }
   const content = getPath(await res.json(), ["choices", 0, "message", "content"]);

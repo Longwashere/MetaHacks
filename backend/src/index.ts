@@ -1,5 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import { PORT, REMIX_OUTPUT_DIR, STRIPE, SUPABASE } from "./lib/config.js";
+import { checkModels } from "./lib/meta.js";
 import { markStaleJobsFailed } from "./lib/remix-jobs.js";
 import { STORAGE_BACKEND } from "./lib/storage.js";
 import { assetsRouter } from "./routes/assets.js";
@@ -43,6 +44,11 @@ app.listen(PORT, () => {
   console.log(`Backend listening on http://localhost:${PORT} (storage: ${STORAGE_BACKEND})`);
   if (!SUPABASE) console.warn("Supabase isn't configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Asset and account routes will fail.");
   if (!STRIPE) console.warn("Stripe isn't configured: billing routes return 503.");
+  if (process.env.META_API_KEY || process.env.MODEL_API_KEY) {
+    checkModels().catch((error: unknown) => console.warn("Meta Model API: couldn't check models", error));
+  } else {
+    console.warn("Meta Model API isn't configured: set META_API_KEY. Remixes will fail.");
+  }
 });
 
 if (SUPABASE) {

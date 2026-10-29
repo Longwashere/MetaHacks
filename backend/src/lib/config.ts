@@ -25,8 +25,16 @@ export const IMAGE_TIMEOUT_MS = ms("IMAGE_TIMEOUT_MS", 20 * MINUTE);
 
 /** Meta Model API (OpenAI-compatible). */
 export const META_API_BASE_URL = url("META_API_BASE_URL", "https://api.meta.ai/v1");
-export const MUSE_MODEL = process.env.MUSE_MODEL || "muse-spark-1.3";
-export const IMAGE_MODEL = process.env.IMAGE_MODEL || "muse-image-1.0";
+/**
+ * A model id from the environment. Hosting dashboards often keep quotes or a trailing newline
+ * pasted into a value, which the API rejects as model_not_found, so both are stripped.
+ */
+function modelId(name: string, fallback: string): string {
+  return (process.env[name] ?? "").trim().replace(/^(["'])(.*)\1$/, "$2").trim() || fallback;
+}
+
+export const MUSE_MODEL = modelId("MUSE_MODEL", "muse-spark-1.3");
+export const IMAGE_MODEL = modelId("IMAGE_MODEL", "muse-image-1.0");
 /**
  * `reasoning_effort` for both generated-animation calls (plan and keyframes). The API accepts
  * none, minimal, low, medium, high, xhigh and max; other Muse calls send nothing and get its default.

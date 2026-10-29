@@ -56,6 +56,15 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-29 — Production remixes failed with model_not_found, and the error doesn't say which model
+- **What happened:** On rigforge.app, remixes failed and the backend logged `Muse request failed (404) {"error":{"code":"model_not_found","message":"The requested model was not found.","param":null,"type":"invalid_request_error"}}`. Locally everything worked.
+- **Evidence:** `POST /v1/chat/completions` with the local key, verified: `muse-spark-1.3` and `muse-spark-1.3-contributor` both answer; `muse-spark-1.3-typo` returns exactly the production error. `GET /v1/models` lists both Spark ids and `muse-image-1.0`. So production sent an id the API doesn't recognise: a wrong or quoted/padded `MUSE_MODEL`/`IMAGE_MODEL`, or a key without access (inferred; production env not checked yet).
+- **Cost:** Failed production remixes, plus debugging time.
+- **Cause:** Open until the production env is checked. The error body doesn't echo the requested model, and our log line didn't record it either, so the logs couldn't tell which call or id failed.
+- **Workaround / status:** `backend/src/lib/config.ts` strips quotes and whitespace from `MUSE_MODEL`/`IMAGE_MODEL` (and the key); the backend checks `GET /v1/models` at startup and logs any configured model the key can't use; every "request failed" log names the model.
+- **Ask for Meta:** Put the requested model id in `model_not_found` errors (e.g. `"The model 'x' was not found."`), as other OpenAI-compatible APIs do.
+- **Lesson:** Log the model id with every model error, and check configured models at startup.
+
 ### 2026-10-28 — Muse Image has no style-reference input, so a reference image has to go through Spark as text
 - **What happened:** For "remix from a reference image", the natural design is to give Muse Image the user's image as a style reference. `/images/edits` treats every image in `images` as something to edit: in part fixes it repainted the reference instead of the parts (see the part-fix entry below). So the reference never reaches Muse Image. Muse Spark describes it first (`describeReference`), and only that text goes into the plan and the image prompt.
 - **Evidence:** `POST /v1/chat/completions`, `muse-spark-1.3`, system prompt + text + two `image_url` parts (reference at 1024px, one atlas page at 768px), no `response_format`. Verified: it returned clean JSON (`look`, `style`) in 18.5 s and 21.9 s. The look was concrete and paintable (named colours, materials, where they sit). Its style call was right: the test pair (water elemental vs stone golem) really does differ in rendering. Muse Image's lack of a reference input is inferred from the part-fix run, not from the docs.

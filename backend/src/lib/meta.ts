@@ -14,9 +14,26 @@ export interface RemixPlan {
 }
 
 export function apiKey(): string {
-  const key = process.env.META_API_KEY || process.env.MODEL_API_KEY;
+  const key = (process.env.META_API_KEY || process.env.MODEL_API_KEY)?.trim();
   if (!key) throw new Error("The remix service isn't configured yet.");
   return key;
+}
+
+/**
+ * Logs whether this key can use the configured models, so a wrong MUSE_MODEL / IMAGE_MODEL (or a
+ * key without access) shows up at startup rather than as model_not_found on someone's remix.
+ */
+export async function checkModels(): Promise<void> {
+  const res = await fetch(`${META_API_BASE_URL}/models`, { headers: { authorization: `Bearer ${apiKey()}` } });
+  if (!res.ok) {
+    console.warn(`Meta Model API: listing models failed (${res.status})`, (await res.text()).slice(0, 300));
+    return;
+  }
+  const body = (await res.json()) as { data?: { id?: unknown }[] };
+  const available = (body.data ?? []).map((m) => String(m.id));
+  const missing = [MUSE_MODEL, IMAGE_MODEL].filter((m) => !available.includes(m));
+  if (missing.length === 0) console.log(`Meta Model API: using ${MUSE_MODEL} and ${IMAGE_MODEL}`);
+  else console.error(`Meta Model API: this key can't use ${missing.map((m) => JSON.stringify(m)).join(", ")}. Available: ${available.join(", ")}`);
 }
 
 const PLAN_SYSTEM_PROMPT = `You are the art director for 2D game assets. You are given atlas pages from a rigged Spine character: each page is a sprite sheet of separate body parts (regions) packed on a plain solid-colour background (the user message names the colour). That background colour is not part of the character; ignore it.
@@ -74,7 +91,7 @@ export async function planRemix(
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse request failed (${res.status})`, await res.text());
+    console.error(`Muse request failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
     throw new Error("Couldn't plan the remix. Try again.");
   }
 
@@ -164,7 +181,7 @@ export async function repaintPage(
 
     const text = await res.text();
     if (res.status === 503 && attempt === 0) continue;
-    console.error(`Muse Image request failed (${res.status})`, text);
+    console.error(`Muse Image request failed (${res.status}) with ${IMAGE_MODEL}`, text);
     if (text.includes("content_policy_violation")) throw new ContentPolicyError();
     throw new Error("Couldn't paint the new textures. Try again.");
   }
@@ -202,7 +219,7 @@ export async function rewordForContentPolicy(editPrompt: string, signal: AbortSi
     signal,
   });
   if (!res.ok) {
-    console.error(`Muse reword request failed (${res.status})`, await res.text());
+    console.error(`Muse reword request failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
     return null;
   }
   const content = getPath(await res.json(), ["choices", 0, "message", "content"]);

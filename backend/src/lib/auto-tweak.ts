@@ -152,7 +152,7 @@ async function callMuse(input: AutoTweakInput, request: string, signal: AbortSig
   if (!res.ok) {
     const body = await res.text();
     run.responseBody = body;
-    console.error(`Muse auto-tweak request failed (${res.status})`, body);
+    console.error(`Muse auto-tweak request failed (${res.status}) with ${MUSE_MODEL}`, body);
     throw new Error("Muse couldn't review the rig. Try again.");
   }
 
