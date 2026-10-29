@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Paintbrush, Palette, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, ExternalLink, Film, Loader2, Paintbrush, Palette, Repeat, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -113,8 +113,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const remix = await loadOwnRemix(params.get("asset"), session);
   const baseId = remix?.remixOf?.id ?? params.get("base") ?? job?.base.id ?? null;
 
-  const [loadedBase, savedIds, myRemixes, pickerRigs, account, fix] = await Promise.all([
+  const [loadedBase, copySource, savedIds, myRemixes, pickerRigs, account, fix] = await Promise.all([
     baseId ? getAsset(baseId, session) : null,
+    remix?.copyOf ? getAsset(remix.copyOf.id, session) : null,
     getSavedAssetIds(session),
     session ? getMyRemixes(session) : [],
     // Only load the picker when no rig is selected yet.
@@ -129,9 +130,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // The rig a remix was made from can be gone or private (a copy of someone's remix of their own
   // private remix). The remix then stands in for it, so the workspace still opens.
   const base = loadedBase ?? remix;
+  // A copy generates from the remix it was copied from; ?from=original swaps to the original rig.
+  // Tweaks, part fixes and the sprite sheet still compare against the original either way.
+  const copyBase = copySource?.files && copySource.id !== base?.id ? copySource : null;
 
   return {
     base,
+    copyBase,
+    fromOriginal: params.get("from") === "original",
     remix,
     job,
     fix,
@@ -279,7 +285,7 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, remix, job, fix, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
+  const { base, copyBase, fromOriginal, remix, job, fix, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
@@ -324,6 +330,9 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
     }
     return `?${next}`;
   };
+
+  // What Generate repaints: a copy starts from the remix it was copied from, unless swapped back to the original.
+  const fromCopy = copyBase !== null && !fromOriginal;
 
   return (
     <div className="flex flex-col gap-10">
@@ -397,7 +406,15 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
           {/* The two columns get their own grid so the sticky preview stops above the sprite sheet. */}
           <div className="grid gap-8 lg:grid-cols-2">
             <div className="flex flex-col gap-6 lg:self-start">
-              <BaseRigSummary base={base} />
+              <BaseRigSummary
+                base={fromCopy ? copyBase : base}
+                swap={
+                  copyBase && {
+                    label: fromCopy ? `Use the original, ${base.name}` : `Use ${copyBase.name}`,
+                    href: withParams({ from: fromCopy ? "original" : null }),
+                  }
+                }
+              />
               <Card>
                 <Tabs
                   value={tweaking ? "tweak" : animating ? "animate" : "generate"}
@@ -426,7 +443,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       <CardDescription>Textures are repainted to fit the existing atlas regions, so every animation keeps working.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <RemixForm key={base.id} base={base} errors={errors} signedIn={signedIn} usage={usage} />
+                      <RemixForm key={fromCopy ? copyBase.id : base.id} base={fromCopy ? copyBase : base} errors={errors} signedIn={signedIn} usage={usage} />
                     </CardContent>
                   </TabsContent>
                   <TabsContent value="tweak" forceMount className="data-[state=inactive]:hidden">
@@ -1057,7 +1074,7 @@ function formatElapsed(seconds: number) {
   return m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
 }
 
-function BaseRigSummary({ base }: { base: SpineAsset }) {
+function BaseRigSummary({ base, swap }: { base: SpineAsset; swap?: { label: string; href: string } | null }) {
   return (
     <Card className="flex-row items-center gap-4 p-3">
       <SpinePreview asset={base} className="size-20 shrink-0 rounded-md" />
@@ -1074,6 +1091,11 @@ function BaseRigSummary({ base }: { base: SpineAsset }) {
             <Film className="size-3" /> {base.animations.length} animations kept
           </span>
         </span>
+        {swap && (
+          <Link to={swap.href} replace preventScrollReset className="flex w-fit items-center gap-1 text-xs text-primary hover:underline">
+            <Repeat className="size-3" /> {swap.label}
+          </Link>
+        )}
       </div>
       <Button asChild variant="outline" size="sm">
         <Link to="/remix">
