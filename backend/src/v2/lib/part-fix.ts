@@ -22,6 +22,13 @@ const PAGE_EXPECTED_MS = 10_000;
 const MIN_ATTACHED_FIT = 0.85;
 /** Smallest shrink a part may need to fit its box; below this the model drew it far too big. */
 const MIN_PART_SCALE = 0.5;
+/**
+ * When at least CLEAN_ATTACHED_FIT of the paint touches the chosen parts, the model drew them where
+ * they belong, only too big, so they may shrink as far as MIN_CLEAN_PART_SCALE. A 70×72 goblin
+ * shield came back well placed both times but needed 0.36 and 0.38 (see FRICTION_LOG.md, 2026-10-29).
+ */
+const CLEAN_ATTACHED_FIT = 0.95;
+const MIN_CLEAN_PART_SCALE = 0.25;
 /** Margin kept clear inside each part's box and outline, as a share of the box's shorter side, so soft edges aren't cut. */
 const FIT_INSET = 0.02;
 /**
@@ -130,7 +137,12 @@ export async function runPartFix(
   for (const [step, i] of touched.entries()) {
     const page = pages[i];
     const rects = selected[i].map((j) => page.rects[j]);
-    const sourceImage = sources?.[i] ?? remixImages[i];
+    // Other parts sharing the chosen boxes are hidden from the model and kept on the page.
+    // Kept where either page has them: a remix can shrink a neighbour, but its mesh still shows its old area.
+    const startImage = sources?.[i] ?? remixImages[i];
+    const hidden = neighbourPixels(startImage, page.rects, selected[i]);
+    const sourceImage = withoutPixels(startImage, hidden);
+    const keep = union(hidden, sources?.[i] ? neighbourPixels(remixImages[i], page.rects, selected[i]) : null);
     const modelInput = await toModelInput(sourceImage, IMAGE_MAX_SIDE, background, centreLayout(layoutParts(rects, sourceImage)));
     const outlines = await placementOutlines(input.outlines, page, selected[i], modelInput.layout, sourceImage);
     const from = 0.1 + (0.8 * step) / touched.length;
@@ -189,7 +201,8 @@ export async function runPartFix(
           const clipped = selected[i].filter((_, k) => outlineDropped[modelInput.layout.regionPlacement[k]]).map((j) => page.regions[j]);
           layoutChecks.push({ page: page.name, attempt, attached: Math.round(fit * 100) / 100, scales, ...(clipped.length > 0 && { clippedByOutline: clipped }) });
           await writeLog();
-          return fit >= MIN_ATTACHED_FIT && Math.min(...scales) >= MIN_PART_SCALE ? { generated: image, fitted: shrunk } : null;
+          const minScale = fit >= CLEAN_ATTACHED_FIT ? MIN_CLEAN_PART_SCALE : MIN_PART_SCALE;
+          return fit >= MIN_ATTACHED_FIT && Math.min(...scales) >= minScale ? { generated: image, fitted: shrunk } : null;
         };
         const first = await paint("");
         const firstFit = await check(first, 1);
@@ -208,7 +221,7 @@ export async function runPartFix(
     // Parts take the model's new silhouettes, keyed out within their own regions.
     // Already placed by shrinkPartsToBoxes, so no drift correction.
     const fixed = await fitToPage(fitted, modelInput, sourceImage, input.remix.premultipliedAlpha, rects, false);
-    out[i] = await replaceRegions(remixFiles[i], fixed, rects);
+    out[i] = await replaceRegions(remixFiles[i], fixed, rects, keep);
   }
 
   onProgress(0.95, "Saving the remix");
@@ -345,18 +358,109 @@ function describeParts(names: string[], layout: PartLayout): string[] {
   });
 }
 
+/** Alpha at which a pixel counts as painted when tracing which part it belongs to. */
+const PAINTED_ALPHA = 16;
+/** Pixels kept around a neighbour's paint, so its soft edge and the margin its mesh shows aren't painted over. */
+const NEIGHBOUR_MARGIN = 2;
+
 /**
- * The stored remix page with `rects` replaced by the same areas of `fixed`. Both are encoded
- * pages of the same size and alpha mode, so pixels are copied as they are.
+ * Pixels inside the chosen regions' boxes that belong to other regions, or null when no other
+ * box overlaps a chosen one. Polygon-packed atlases overlap their boxes (the fire knight's chest
+ * box holds a corner of its axe, job_31687ecf), so the box alone doesn't say whose a pixel is.
+ * Each painted pixel in an overlap goes to the part it's joined to, by a flood over painted
+ * pixels from where only one side's boxes reach. Paint joined to neither is kept as the
+ * neighbour's, with NEIGHBOUR_MARGIN around it.
  */
-async function replaceRegions(page: Buffer, fixed: Buffer, rects: PageRect[]): Promise<Buffer> {
+function neighbourPixels(image: PageImage, rects: PageRect[], chosen: number[]): Uint8Array | null {
+  const mine = new Set(chosen);
+  const overlaps = (a: PageRect, b: PageRect) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  const others = rects.flatMap((r, j) => (!mine.has(j) && chosen.some((k) => overlaps(r, rects[k])) ? [j] : []));
+  if (others.length === 0) return null;
+
+  const { width, height, rgba } = image;
+  // Per pixel: 1 inside a chosen box, 2 inside an overlapping other box, 3 inside both.
+  const cover = new Uint8Array(width * height);
+  const mark = (r: PageRect, side: number) => {
+    for (let y = Math.max(r.y, 0); y < Math.min(r.y + r.height, height); y++) {
+      for (let x = Math.max(r.x, 0); x < Math.min(r.x + r.width, width); x++) cover[y * width + x] |= side;
+    }
+  };
+  for (const j of chosen) mark(rects[j], 1);
+  for (const j of others) mark(rects[j], 2);
+  const painted = (p: number) => rgba[p * 4 + 3] >= PAINTED_ALPHA;
+
+  // Flood both sides at once, so paint joined to both goes to the nearer one.
+  const owner = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  let head = 0, tail = 0;
+  for (let p = 0; p < cover.length; p++) {
+    if ((cover[p] === 1 || cover[p] === 2) && painted(p)) {
+      owner[p] = cover[p];
+      queue[tail++] = p;
+    }
+  }
+  while (head < tail) {
+    const p = queue[head++];
+    const x = p % width;
+    for (const q of [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, p - width, p + width]) {
+      if (q < 0 || q >= cover.length || !cover[q] || owner[q] || !painted(q)) continue;
+      owner[q] = owner[p];
+      queue[tail++] = q;
+    }
+  }
+
+  const theirs = new Uint8Array(width * height);
+  let found = false;
+  for (let p = 0; p < cover.length; p++) {
+    if (cover[p] === 3 && painted(p) && owner[p] !== 1) {
+      theirs[p] = 1;
+      found = true;
+    }
+  }
+  if (!found) return null;
+  for (let step = 1; step <= NEIGHBOUR_MARGIN; step++) {
+    const grown = Uint8Array.from(theirs);
+    for (let p = 0; p < cover.length; p++) {
+      if (theirs[p] !== step) continue;
+      const x = p % width;
+      for (const q of [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, p - width, p + width]) {
+        if (q >= 0 && q < cover.length && cover[q] === 3 && !grown[q] && owner[q] !== 1) grown[q] = step + 1;
+      }
+    }
+    theirs.set(grown);
+  }
+  return theirs;
+}
+
+function union(a: Uint8Array | null, b: Uint8Array | null): Uint8Array | null {
+  if (!a || !b) return a ?? b;
+  return a.map((v, p) => (v || b[p] ? 1 : 0));
+}
+
+/** The image with the `hidden` pixels made transparent, so they're painted as background. */
+function withoutPixels(image: PageImage, hidden: Uint8Array | null): PageImage {
+  if (!hidden) return image;
+  const rgba = Buffer.from(image.rgba);
+  for (let p = 0; p < hidden.length; p++) if (hidden[p]) rgba.fill(0, p * 4, p * 4 + 4);
+  return { ...image, rgba };
+}
+
+/**
+ * The stored remix page with `rects` replaced by the same areas of `fixed`, except the `keep`
+ * pixels (other parts sharing the boxes). Both are encoded pages of the same size and alpha
+ * mode, so pixels are copied as they are.
+ */
+async function replaceRegions(page: Buffer, fixed: Buffer, rects: PageRect[], keep: Uint8Array | null): Promise<Buffer> {
   const { data: base, info } = await sharp(page).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { data: patch } = await sharp(fixed).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width, height } = info;
   for (const r of rects) {
     const x0 = Math.max(r.x, 0), x1 = Math.min(r.x + r.width, width);
     for (let y = Math.max(r.y, 0); y < Math.min(r.y + r.height, height); y++) {
-      patch.copy(base, (y * width + x0) * 4, (y * width + x0) * 4, (y * width + x1) * 4);
+      for (let x = x0; x < x1; x++) {
+        const p = y * width + x;
+        if (!keep?.[p]) patch.copy(base, p * 4, p * 4, p * 4 + 4);
+      }
     }
   }
   return sharp(base, { raw: { width, height, channels: 4 } }).png().toBuffer();

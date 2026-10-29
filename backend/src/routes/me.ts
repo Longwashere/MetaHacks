@@ -6,7 +6,8 @@ import { AiTimeoutError } from "../lib/ai-fetch.js";
 import { AnimateError, generateAnimation, parseAnimateInput } from "../lib/animate.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
-import { getPartFixView, startPartFix } from "../lib/part-fix-jobs.js";
+import { getPartFixView, isFixRunning, startPartFix } from "../lib/part-fix-jobs.js";
+import { listVersions, restoreVersion } from "../lib/versions.js";
 import { getAccount, recordDownload, setDisplayName } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
@@ -342,6 +343,38 @@ meRouter.post("/remixes/:assetId/part-fixes", json, async (req, res) => {
     return;
   }
   res.status(202).json(result.job);
+});
+
+/** GET /me/remixes/:assetId/versions → AssetVersion[], newest first (empty before the first part fix), or 404 */
+meRouter.get("/remixes/:assetId/versions", async (req, res) => {
+  const versions = await listVersions(userIdOf(res), req.params.assetId);
+  if (!versions) {
+    res.status(404).json({ error: "Remix not found." });
+    return;
+  }
+  res.json(versions);
+});
+
+/**
+ * POST /me/remixes/:assetId/restore  body = { versionId } → SpineAsset, 400/404/409 { error }.
+ * Makes an earlier version current again. No model runs, so it doesn't count toward the allowance.
+ */
+meRouter.post("/remixes/:assetId/restore", json, async (req, res) => {
+  const versionId: unknown = req.body?.versionId;
+  if (typeof versionId !== "string" || versionId.length === 0 || versionId.length > 64) {
+    res.status(400).json({ error: "Expected { versionId }." });
+    return;
+  }
+  if (isFixRunning(req.params.assetId)) {
+    res.status(409).json({ error: "A part fix on this remix is still running. Wait for it to finish." });
+    return;
+  }
+  const result = await restoreVersion(userIdOf(res), req.params.assetId, versionId);
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.json(result.asset);
 });
 
 /** GET /me/part-fixes/:id → PartFixJob, or 404 if it isn't the user's */

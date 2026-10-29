@@ -10,6 +10,20 @@ export function formatDate(iso: string) {
   return dateFormat.format(new Date(iso));
 }
 
+const dateTimeFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
+
+/** e.g. "Oct 29, 10:56 AM UTC". */
+export function formatDateTime(iso: string) {
+  return dateTimeFormat.format(new Date(iso));
+}
+
 export function formatCount(n: number) {
   return n.toLocaleString("en-US");
 }

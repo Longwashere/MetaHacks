@@ -171,6 +171,20 @@ export interface PartFixJob {
   error: string | null;
 }
 
+/** One state of a remix's sprite sheet, from GET /me/remixes/:assetId/versions (newest first). */
+export interface AssetVersion {
+  /** The version's id, or "original" for the remix before its first part fix. */
+  id: string;
+  kind: "original" | "part_fix";
+  /** The fix's prompt. */
+  label: string;
+  /** Regions a part fix repainted. */
+  regions: string[];
+  createdAt: string;
+  /** True for the version the remix is on now. */
+  current: boolean;
+}
+
 /** The fields a preview needs to render an asset. */
 export type PreviewableAsset = Pick<SpineAsset, "category" | "accent" | "animations" | "files" | "tint">;
 

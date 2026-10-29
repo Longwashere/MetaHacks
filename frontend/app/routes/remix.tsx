@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, Download, ExternalLink, Film, Loader2, Paintbrush, Palette, Repeat, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, Download, ExternalLink, Film, History, Loader2, Paintbrush, Palette, Repeat, RotateCcw, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -63,8 +63,10 @@ import {
   getMyRemixes,
   getPartFix,
   getRemixJob,
+  getRemixVersions,
   getSavedAssetIds,
   listAssets,
+  restoreRemixVersion,
 } from "~/lib/api.server";
 import { type Session, getSession, requireSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
@@ -76,12 +78,14 @@ import {
   PART_FIX_SOURCES,
   REMIX_API_VERSIONS,
   REMIX_STYLES,
+  type AssetVersion,
   type PartFixJob,
   type RemixApiVersion,
   type RemixJob,
   type RemixStyle,
   type SpineAsset,
 } from "~/lib/types";
+import { formatDateTime } from "~/lib/format";
 import { cn } from "~/lib/utils";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -114,7 +118,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const remix = await loadOwnRemix(params.get("asset"), session);
   const baseId = remix?.remixOf?.id ?? params.get("base") ?? job?.base.id ?? null;
 
-  const [loadedBase, copySource, savedIds, myRemixes, pickerRigs, account, fix] = await Promise.all([
+  const [loadedBase, copySource, savedIds, myRemixes, pickerRigs, account, fix, versions] = await Promise.all([
     baseId ? getAsset(baseId, session) : null,
     remix?.copyOf ? getAsset(remix.copyOf.id, session) : null,
     getSavedAssetIds(session),
@@ -127,6 +131,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         : listAssets({ q: rq, sort: "popular" }),
     session ? getAccount(session) : null,
     fixId && session ? getPartFix(session, fixId) : null,
+    remix && session ? getRemixVersions(session, remix.id) : [],
   ]);
   // The rig a remix was made from can be gone or private (a copy of someone's remix of their own
   // private remix). The remix then stands in for it, so the workspace still opens.
@@ -142,6 +147,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     remix,
     job,
     fix,
+    versions,
     anim: params.get("anim"),
     rq,
     source,
@@ -182,6 +188,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const session = requireSession(context, request);
   const form = await request.formData();
   if (form.get("intent") === "fix-parts") return fixParts(session, form);
+  if (form.get("intent") === "restore-version") return restoreVersion(session, form);
   const errors: FieldErrors = {};
 
   const baseAssetId = String(form.get("baseAssetId") ?? "");
@@ -271,6 +278,18 @@ async function fixParts(session: Session, form: FormData) {
   throw redirect(`/remix?${new URLSearchParams({ asset: assetId, fix: result.job.id })}`);
 }
 
+/** Brings back an earlier version of the remix's sprite sheet, then reloads the page without `?fix=`. */
+async function restoreVersion(session: Session, form: FormData) {
+  const assetId = String(form.get("assetId") ?? "");
+  const versionId = String(form.get("versionId") ?? "");
+  if (!assetId || !versionId) return data({ restoreError: "Pick a version to restore." }, { status: 400 });
+
+  const result = await restoreRemixVersion(session, assetId, versionId);
+  if (!result.ok) return data({ restoreError: result.error }, { status: 400 });
+
+  throw redirect(`/remix?${new URLSearchParams({ asset: assetId })}`);
+}
+
 /** Optional prompt constraints; all off by default so the model can reshape parts. */
 const KEEP_PART_OPTIONS = [
   { name: "keepPosition", label: "Position" },
@@ -286,10 +305,11 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, copyBase, fromOriginal, remix, job, fix, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
+  const { base, copyBase, fromOriginal, remix, job, fix, versions, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
+  const restoreError = actionData && "restoreError" in actionData ? actionData.restoreError : null;
   const { revalidate } = useRevalidator();
   const tweak = useTweakSession(base?.id ?? null);
   // A finished part fix carries the remix as it saved it. The loader reads the remix first, so on
@@ -563,6 +583,8 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
             fix={fix?.assetId === savedRemix?.id ? fix : null}
             error={fixError}
             usage={usage}
+            versions={versions}
+            restoreError={restoreError}
           />
         </div>
       )}
@@ -592,12 +614,16 @@ function PartFixSection({
   fix,
   error,
   usage,
+  versions,
+  restoreError,
 }: {
   base: SpineAsset;
   remix: SpineAsset | null;
   fix: PartFixJob | null;
   error: string | null;
   usage: RemixUsage | null;
+  versions: AssetVersion[];
+  restoreError: string | null;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -618,110 +644,113 @@ function PartFixSection({
 
   return (
     <div className="grid gap-8 lg:grid-cols-3">
-      <Card className="lg:self-start">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Paintbrush className="size-4" /> Fix parts
-          </CardTitle>
-          <CardDescription>
-            {remix
-              ? "Click the parts that came out wrong on the sprite sheet, then describe how they should look. Only those parts are repainted; the rest of the remix stays as it is."
-              : "Once your remix finishes, you can pick parts that came out wrong on the sprite sheet and repaint just those."}
-          </CardDescription>
-        </CardHeader>
-        {remix && (
-          <CardContent>
-            <Form method="post" preventScrollReset className="flex flex-col gap-5">
-              <input type="hidden" name="intent" value="fix-parts" />
-              <input type="hidden" name="assetId" value={remix.id} />
-              {selected.map((r) => (
-                <input key={r} type="hidden" name="region" value={r} />
-              ))}
+      <div className="flex flex-col gap-8 lg:self-start">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Paintbrush className="size-4" /> Fix parts
+            </CardTitle>
+            <CardDescription>
+              {remix
+                ? "Click the parts that came out wrong on the sprite sheet, then describe how they should look. Only those parts are repainted; the rest of the remix stays as it is."
+                : "Once your remix finishes, you can pick parts that came out wrong on the sprite sheet and repaint just those."}
+            </CardDescription>
+          </CardHeader>
+          {remix && (
+            <CardContent>
+              <Form method="post" preventScrollReset className="flex flex-col gap-5">
+                <input type="hidden" name="intent" value="fix-parts" />
+                <input type="hidden" name="assetId" value={remix.id} />
+                {selected.map((r) => (
+                  <input key={r} type="hidden" name="region" value={r} />
+                ))}
 
-              <div className="flex flex-col gap-2">
-                <div className="flex min-h-8 items-center justify-between">
-                  <span className="text-sm font-medium">Selected parts</span>
-                  {selected.length > 0 && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setSelected([])}>
-                      Clear
-                    </Button>
+                <div className="flex flex-col gap-2">
+                  <div className="flex min-h-8 items-center justify-between">
+                    <span className="text-sm font-medium">Selected parts</span>
+                    {selected.length > 0 && (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setSelected([])}>
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                  {selected.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">None yet. Click a box on the sprite sheet.</p>
+                  ) : (
+                    <ul className="flex flex-wrap gap-1.5">
+                      {selected.map((r) => (
+                        <li key={r}>
+                          <Badge variant="secondary" className="gap-1 pr-1">
+                            {r}
+                            <button
+                              type="button"
+                              onClick={() => onToggle(r)}
+                              aria-label={`Remove ${r}`}
+                              className="cursor-pointer rounded-sm p-0.5 hover:bg-background/60"
+                            >
+                              <X className="size-3" />
+                            </button>
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
-                {selected.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">None yet. Click a box on the sprite sheet.</p>
-                ) : (
-                  <ul className="flex flex-wrap gap-1.5">
-                    {selected.map((r) => (
-                      <li key={r}>
-                        <Badge variant="secondary" className="gap-1 pr-1">
-                          {r}
-                          <button
-                            type="button"
-                            onClick={() => onToggle(r)}
-                            aria-label={`Remove ${r}`}
-                            className="cursor-pointer rounded-sm p-0.5 hover:bg-background/60"
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </Badge>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
 
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="fixPrompt">What should they look like?</Label>
-                <Textarea
-                  id="fixPrompt"
-                  name="fixPrompt"
-                  rows={3}
-                  maxLength={500}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="e.g. a green lower jaw with two ivory tusks, same style as the head"
-                  aria-invalid={Boolean(error)}
-                  aria-describedby={error ? "fix-error" : undefined}
-                />
-              </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="fixPrompt">What should they look like?</Label>
+                  <Textarea
+                    id="fixPrompt"
+                    name="fixPrompt"
+                    rows={3}
+                    maxLength={500}
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="e.g. a green lower jaw with two ivory tusks, same style as the head"
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? "fix-error" : undefined}
+                  />
+                </div>
 
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="fixSource">Start from</Label>
-                <Select name="fixSource" defaultValue="original">
-                  <SelectTrigger id="fixSource" className="w-full" aria-describedby="fixSource-hint">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="original">The original part</SelectItem>
-                    <SelectItem value="remix">The remix's current part</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p id="fixSource-hint" className="text-xs text-muted-foreground">
-                  Start from the original when the part came out as the wrong thing; from the remix for small changes.
-                </p>
-              </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="fixSource">Start from</Label>
+                  <Select name="fixSource" defaultValue="original">
+                    <SelectTrigger id="fixSource" className="w-full" aria-describedby="fixSource-hint">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="original">The original part</SelectItem>
+                      <SelectItem value="remix">The remix's current part</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p id="fixSource-hint" className="text-xs text-muted-foreground">
+                    Start from the original when the part came out as the wrong thing; from the remix for small changes.
+                  </p>
+                </div>
 
-              <FieldError id="fix-error" message={error ?? undefined} />
-              {fix && <PartFixStatus fix={fix} />}
+                <FieldError id="fix-error" message={error ?? undefined} />
+                {fix && <PartFixStatus fix={fix} />}
 
-              <div className="flex flex-col gap-2">
-                <Button type="submit" disabled={selected.length === 0 || fixing || submitting} className="w-full">
-                  {submitting || fixing ? <Loader2 className="animate-spin" /> : <Paintbrush />}
-                  {submitting
-                    ? "Starting…"
-                    : fixing
-                      ? "Repainting…"
-                      : selected.length === 0
-                        ? "Repaint parts"
-                        : `Repaint ${selected.length} part${selected.length === 1 ? "" : "s"}`}
-                </Button>
-                <p className="text-center text-xs text-muted-foreground">Uses one remix from your monthly allowance.</p>
-                {usage && <RemixAllowance usage={usage} />}
-              </div>
-            </Form>
-          </CardContent>
-        )}
-      </Card>
+                <div className="flex flex-col gap-2">
+                  <Button type="submit" disabled={selected.length === 0 || fixing || submitting} className="w-full">
+                    {submitting || fixing ? <Loader2 className="animate-spin" /> : <Paintbrush />}
+                    {submitting
+                      ? "Starting…"
+                      : fixing
+                        ? "Repainting…"
+                        : selected.length === 0
+                          ? "Repaint parts"
+                          : `Repaint ${selected.length} part${selected.length === 1 ? "" : "s"}`}
+                  </Button>
+                  <p className="text-center text-xs text-muted-foreground">Uses one remix from your monthly allowance.</p>
+                  {usage && <RemixAllowance usage={usage} />}
+                </div>
+              </Form>
+            </CardContent>
+          )}
+        </Card>
+        {remix && versions.length > 0 && <VersionHistory assetId={remix.id} versions={versions} disabled={fixing} error={restoreError} />}
+      </div>
 
       <SpriteSheet
         className="lg:col-span-2"
@@ -736,6 +765,60 @@ function PartFixSection({
         }
       />
     </div>
+  );
+}
+
+const VERSION_KIND_LABEL: Record<AssetVersion["kind"], string> = { original: "Before any fixes", part_fix: "Part fix" };
+
+/**
+ * The remix's sprite sheet history, newest first. Restoring brings back that version's pages and
+ * moves the Current badge; the version left behind stays listed, so it can be restored again.
+ * No model runs, so it's free.
+ */
+function VersionHistory({ assetId, versions, disabled, error }: { assetId: string; versions: AssetVersion[]; disabled: boolean; error: string | null }) {
+  const navigation = useNavigation();
+  const restoring = navigation.state === "submitting" && navigation.formData?.get("intent") === "restore-version";
+  const restoringId = restoring ? navigation.formData?.get("versionId") : null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <History className="size-4" /> History
+        </CardTitle>
+        <CardDescription>Every part fix saves a version. Restore any of them to bring its sprite sheet back, and switch back the same way. It doesn't use your allowance.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <FieldError id="restore-error" message={error ?? undefined} />
+        <ol className="flex flex-col divide-y divide-border">
+          {versions.map((v) => (
+            <li key={v.id} className="flex items-start justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+              <div className="flex min-w-0 flex-col gap-1">
+                <span className="line-clamp-2 text-sm font-medium break-words">{v.label}</span>
+                <span className="text-xs text-muted-foreground">
+                  {VERSION_KIND_LABEL[v.kind]}
+                  {v.regions.length > 0 && ` · ${v.regions.join(", ")}`} · {formatDateTime(v.createdAt)}
+                </span>
+              </div>
+              {v.current ? (
+                <Badge variant="secondary" className="shrink-0">
+                  Current
+                </Badge>
+              ) : (
+                <Form method="post" preventScrollReset className="shrink-0">
+                  <input type="hidden" name="intent" value="restore-version" />
+                  <input type="hidden" name="assetId" value={assetId} />
+                  <input type="hidden" name="versionId" value={v.id} />
+                  <Button type="submit" variant="outline" size="sm" disabled={disabled || restoring}>
+                    {restoringId === v.id ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                    Restore
+                  </Button>
+                </Form>
+              )}
+            </li>
+          ))}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }
 

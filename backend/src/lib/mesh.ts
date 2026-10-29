@@ -58,6 +58,35 @@ export function boxMeshes(skeleton: unknown, regions: string[]): string[] {
   return [...boxed];
 }
 
+/**
+ * Copies into `to` the attachments of `from` that draw one of `regions`, by skin, slot and name,
+ * so a restored version gets back the meshes its part fixes swapped for boxes while every other
+ * attachment keeps the user's later edits. Returns how many were copied.
+ */
+export function copyRegionAttachments(from: unknown, to: unknown, regions: string[]): number {
+  if (!isObject(from) || !isObject(to) || !Array.isArray(from.skins) || !Array.isArray(to.skins)) return 0;
+  const wanted = new Set(regions);
+  const sourceSkins = new Map(from.skins.filter(isObject).map((s) => [String(s.name ?? "default"), s]));
+  let copied = 0;
+  for (const skin of to.skins.filter(isObject)) {
+    const source = sourceSkins.get(String(skin.name ?? "default"));
+    if (!isObject(skin.attachments) || !source || !isObject(source.attachments)) continue;
+    for (const [slot, atts] of Object.entries(skin.attachments)) {
+      const sourceAtts = source.attachments[slot];
+      if (!isObject(atts) || !isObject(sourceAtts)) continue;
+      for (const [name, att] of Object.entries(atts)) {
+        const old = sourceAtts[name];
+        if (!isObject(att) || !isObject(old)) continue;
+        const region = typeof att.path === "string" ? att.path : name;
+        if (!wanted.has(region)) continue;
+        atts[name] = structuredClone(old);
+        copied++;
+      }
+    }
+  }
+  return copied;
+}
+
 function meshEntries(skeleton: unknown, regions: string[]): { check: MeshCheck; att: Json }[] {
   if (!isObject(skeleton) || !Array.isArray(skeleton.skins)) return [];
   const wanted = new Set(regions);

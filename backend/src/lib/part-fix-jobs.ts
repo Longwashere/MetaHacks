@@ -7,6 +7,7 @@ import { boxMeshes, checkMeshes, meshOutlines } from "./mesh.js";
 import { allowanceError } from "./remix-jobs.js";
 import { objectUrl, putFile } from "./storage.js";
 import { PART_FIX_SOURCES, type PartFixInput, type RemixStatus } from "./types.js";
+import { loadSkeleton, recordPartFixVersion } from "./versions.js";
 import { runPartFix } from "../v2/lib/part-fix.js";
 
 // Part fixes repaint a few regions of a finished remix and update it in place. Each one is a
@@ -42,6 +43,11 @@ interface LiveFix {
 
 const live = new Map<string, LiveFix>();
 
+/** True while a part fix on `assetId` is queued or running here. */
+export function isFixRunning(assetId: string): boolean {
+  return [...live.values()].some((j) => j.assetId === assetId && (j.status === "queued" || j.status === "running"));
+}
+
 export type StartPartFixResult = { ok: true; job: PartFixJobView } | { ok: false; status: 402 | 404 | 409; error: string };
 
 export async function startPartFix(userId: string, assetId: string, input: PartFixInput, isAdmin: boolean): Promise<StartPartFixResult> {
@@ -49,7 +55,7 @@ export async function startPartFix(userId: string, assetId: string, input: PartF
   if (!asset?.files || asset.owner_id !== userId) return { ok: false, status: 404, error: "You can only fix parts of your own remixes." };
   if (limitError) return { ok: false, status: 402, error: limitError };
   // Two fixes on one remix would each start from the same pages, and the later save would undo the other.
-  if ([...live.values()].some((j) => j.assetId === assetId && (j.status === "queued" || j.status === "running"))) {
+  if (isFixRunning(assetId)) {
     return { ok: false, status: 409, error: "Another fix on this remix is still running. Wait for it to finish." };
   }
 
@@ -148,14 +154,9 @@ async function runJob(id: string, job: LiveFix, asset: AssetRow, original: Asset
     const boxed = boxMeshes(skeleton, input.regions);
     await putFile(result.folder, "meshes.json", JSON.stringify({ checks: meshChecks, boxed }, null, 2));
     const skeletonKey = boxed.length > 0 ? await putFile(result.folder, "skeleton.json", JSON.stringify(skeleton)) : current.files.skeleton;
-    check(
-      await db()
-        .from("assets")
-        .update({ files: { ...current.files, skeleton: skeletonKey, atlas: result.atlas, textures: result.textures } })
-        .eq("id", asset.id)
-        .select(ASSET_COLUMNS)
-        .single(),
-    );
+    const files = { ...current.files, skeleton: skeletonKey, atlas: result.atlas, textures: result.textures };
+    check(await db().from("assets").update({ files }).eq("id", asset.id).select(ASSET_COLUMNS).single());
+    await recordPartFixVersion(asset, id, input.prompt, input.regions, boxed, current.files, files);
   } catch (e) {
     console.error(`Part fix ${id} failed`, e);
     error = deadline.aborted || e instanceof AiTimeoutError
@@ -170,20 +171,6 @@ async function runJob(id: string, job: LiveFix, asset: AssetRow, original: Asset
     console.error(`Recording part fix ${id} failed`, e);
   }
   live.delete(id);
-}
-
-/** The remix's skeleton JSON, or null for a binary .skel or one that can't be read (meshes are then left as they are). */
-async function loadSkeleton(key: string, signal: AbortSignal): Promise<unknown> {
-  if (!key.toLowerCase().endsWith(".json")) return null;
-  try {
-    const res = await fetch(objectUrl(key), { signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (error) {
-    signal.throwIfAborted();
-    console.error(`Couldn't read skeleton ${key} for a part fix`, error);
-    return null;
-  }
 }
 
 /** The part fix if it's the user's, with live progress while it runs. */

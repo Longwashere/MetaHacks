@@ -3,7 +3,7 @@
 // token the backend verifies. See BACKEND.md for the endpoint contract.
 
 import type { Session } from "~/lib/auth.server";
-import type { AnimateInput, AnimateResult, AssetQuery, AutoTweakInput, AutoTweakReview, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AnimateInput, AnimateResult, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -238,6 +238,29 @@ export async function createPartFix(
 /** GET /me/part-fixes/:id — null if it isn't the user's. */
 export async function getPartFix(session: Session, jobId: string): Promise<PartFixJob | null> {
   return backendOrNull<PartFixJob>(`/me/part-fixes/${id(jobId)}`, { session });
+}
+
+/** GET /me/remixes/:assetId/versions — the remix's sprite sheet history, newest first; empty before its first part fix. */
+export async function getRemixVersions(session: Session, assetId: string): Promise<AssetVersion[]> {
+  return (await backendOrNull<AssetVersion[]>(`/me/remixes/${id(assetId)}/versions`, { session })) ?? [];
+}
+
+/**
+ * POST /me/remixes/:assetId/restore — makes an earlier version of the remix current again. No model
+ * runs, so it doesn't use the allowance.
+ */
+export async function restoreRemixVersion(
+  session: Session,
+  assetId: string,
+  versionId: string,
+): Promise<{ ok: true; asset: SpineAsset } | { ok: false; error: string }> {
+  try {
+    const asset = await backend<SpineAsset>(`/me/remixes/${id(assetId)}/restore`, { session, method: "POST", body: { versionId } });
+    return { ok: true, asset };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status === 401 || error.status >= 500) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't restore that version.") };
+  }
 }
 
 /**
