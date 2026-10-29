@@ -283,6 +283,20 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-28 — Signing in from "Make a copy" landed on raw `.data` output
+- **What happened:** A guest clicked "Make a copy", signed in with Google, and was sent to `/assets/<id>.data`, which shows React Router's serialized loader data instead of the page.
+- **Cost:** User time.
+- **Cause:** React Router form posts go to the route's data URL (`/path.data`, `/_root.data` for `/`). `requireSession` used `request.url` as `?next=`, so the data URL became the post-login destination.
+- **Workaround / status:** Fixed in `frontend/app/lib/auth.server.ts`: `requireSession` strips `.data` and `_routes` before building `?next=`. Checked with a guest POST: `next` is now `/assets/<id>`.
+- **Lesson:** In an action, `request.url` is the data URL, not the page URL. Normalize it before using it as a link.
+
+### 2026-10-28 — Local Google sign-in landed on rigforge.app instead of localhost
+- **What happened:** Signing in with Google on the local dev server sent the user back to `https://rigforge.app` after Google.
+- **Cost:** User time, plus a round of debugging.
+- **Cause:** The app sends the right `redirect_to` (`http://localhost:5173/auth/callback?next=...`; checked by POSTing to local `/login`), but Supabase ignores any `redirect_to` that isn't on its Redirect URLs allow list and falls back to the project's Site URL (rigforge.app).
+- **Workaround / status:** Add `http://localhost:5173/**` under Supabase → Authentication → URL Configuration → Redirect URLs. Keep Site URL as `https://rigforge.app`. Exact entries like `http://localhost:5173/auth/callback` don't work: the callback carries `?next=...`, and Supabase matches the whole URL, query included. Use `/**` (or `/auth/callback**`) for every host.
+- **Lesson:** An OAuth redirect to the wrong host with the right `redirect_to` in the request is the Supabase allow list, not app code. Allow-list entries need a `**` wildcard whenever the redirect has a query string.
+
 ### 2026-10-28 — Stripe webhook rejected every event: secret retyped with lookalike characters
 - **What happened:** The first test checkout on rigforge.app succeeded in Stripe, but the account stayed Free. All 4 webhook deliveries to `https://api.rigforge.app/billing/webhook` failed with 400 "Invalid Stripe signature."
 - **Cost:** One failed checkout, plus a round of debugging and a redeploy.

@@ -86,8 +86,11 @@ export function getSession(context: Readonly<RouterContextProvider>): Session | 
 export function requireSession(context: Readonly<RouterContextProvider>, request: Request): Session {
   const session = getSession(context);
   if (session) return session;
+  // Form posts go to the route's data URL (/path.data, or /_root.data for "/"), so return to the page instead.
   const url = new URL(request.url);
-  throw redirect(`/login?${new URLSearchParams({ next: url.pathname + url.search })}`);
+  const path = url.pathname === "/_root.data" ? "/" : url.pathname.replace(/\.data$/, "");
+  url.searchParams.delete("_routes");
+  throw redirect(`/login?${new URLSearchParams({ next: path + url.search })}`);
 }
 
 /** The request's Supabase client, for the sign-in, callback and sign-out routes. */
