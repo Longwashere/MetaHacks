@@ -84,3 +84,30 @@ export async function listOwnedAssets(userId: string): Promise<SpineAsset[]> {
   );
   return (rows ?? []).map(toSpineAsset);
 }
+
+export type DeleteAssetResult = { ok: true } | { ok: false; status: 404 | 409; error: string };
+
+/**
+ * Deletes an asset: the owner can delete their own, admins can delete any (official rigs included).
+ * Library entries go with it (cascade); remix jobs and copies keep their rows with the link cleared.
+ * Stored files are left alone, since copies share the source's storage keys.
+ * Remixes built on this asset would lose their original (no part fixes, no copying), so the owner
+ * can't delete one that has remixes; admins can, for moderation.
+ */
+export async function deleteAsset(id: string, userId: string, isAdmin: boolean): Promise<DeleteAssetResult> {
+  const row = await getAssetRow(id, userId, isAdmin);
+  if (!row || (row.owner_id !== userId && !isAdmin)) return { ok: false, status: 404, error: "You can only delete your own remixes." };
+  if (!isAdmin) {
+    const { count, error } = await db().from("assets").select("id", { count: "exact", head: true }).eq("remix_of", id);
+    if (error) throw new Error(`Database error: ${error.message}`);
+    if (count) {
+      return {
+        ok: false,
+        status: 409,
+        error: `${count} ${count === 1 ? "remix is" : "remixes are"} built on this one, so it can't be deleted. Make it private instead.`,
+      };
+    }
+  }
+  check(await db().from("assets").delete().eq("id", id));
+  return { ok: true };
+}

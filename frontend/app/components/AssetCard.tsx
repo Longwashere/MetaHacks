@@ -1,5 +1,6 @@
 import { Bookmark, Film } from "lucide-react";
 import { Link } from "react-router";
+import { DeleteAssetButton } from "~/components/DeleteAssetButton";
 import { SaveButton } from "~/components/SaveButton";
 import { SpinePreview } from "~/components/SpinePreview";
 import { VisibilityToggle } from "~/components/VisibilityToggle";
@@ -13,7 +14,7 @@ import { cn } from "~/lib/utils";
 interface AssetCardProps {
   asset: SpineAsset;
   saved: boolean;
-  /** Show the public/private toggle (for the user's own remixes). */
+  /** Show the public/private toggle and Delete (for the user's own remixes). */
   manage?: boolean;
   className?: string;
 }
@@ -57,7 +58,12 @@ export function AssetCard({ asset, saved, manage = false, className }: AssetCard
           </span>
           <span className="ml-auto truncate">by {asset.author.name}</span>
         </div>
-        {manage && <VisibilityToggle assetId={asset.id} assetName={asset.name} visibility={asset.visibility} size="sm" className="self-start" />}
+        {manage && (
+          <div className="flex flex-wrap gap-2">
+            <VisibilityToggle assetId={asset.id} assetName={asset.name} visibility={asset.visibility} size="sm" />
+            <DeleteAssetButton assetId={asset.id} assetName={asset.name} size="sm" />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

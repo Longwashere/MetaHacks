@@ -22,6 +22,7 @@ import { AssetPlayer } from "~/components/AssetPlayer";
 import { ReferenceImageField } from "~/components/ReferenceImageField";
 import { RigPicker } from "~/components/RigPicker";
 import { SaveButton } from "~/components/SaveButton";
+import { DeleteAssetButton } from "~/components/DeleteAssetButton";
 import { VisibilityToggle } from "~/components/VisibilityToggle";
 import { SpinePreview } from "~/components/SpinePreview";
 import { SpriteSheet } from "~/components/SpriteSheet";
@@ -470,6 +471,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                         <ExternalLink /> View public page
                       </Link>
                     </Button>
+                    <DeleteAssetButton assetId={savedRemix.id} assetName={savedRemix.name} redirectTo="/library?tab=remixes" />
                   </div>
                 </>
               ) : !job ? (

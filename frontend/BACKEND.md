@@ -27,6 +27,7 @@ Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `pr
 | `removeFromLibrary(session, assetId)` | `DELETE /me/library/:assetId` | `204`. Idempotent. |
 | `getMyRemixes(session)` | `GET /me/remixes` | The user's own `SpineAsset[]`, newest first |
 | `setRemixVisibility(session, assetId, visibility)` | `PATCH /me/remixes/:assetId` (JSON `{ visibility }`) | Updated `SpineAsset`, or `null` if it isn't the user's |
+| `deleteAsset(session, assetId)` | `DELETE /me/remixes/:assetId` | `204`; `404` if it isn't the user's (admins can delete any asset), `409 { error }` if other remixes are built on it (admins bypass this) |
 | `copyRemix(session, assetId)` | `POST /me/remixes/:assetId/copy` | `201` new private copy as `SpineAsset`; `200` with the user's existing copy, or the remix itself if it's theirs; `{ ok: false, error }` on 400/404. Free: no model runs. See **Copies** below. |
 | `saveRemixSkeleton(session, assetId, skeleton, skin)` | `POST /me/remixes/:assetId/skeleton` (JSON `{ skeleton, skin }`, up to 8 MB) | Updated `SpineAsset` pointing at the stored skeleton, or `null` if it isn't the user's |
 | `autoTweakRemix(session, assetId, input)` | `POST /me/remixes/:assetId/auto-tweak` (JSON `AutoTweakInput`, up to 12 MB) | `AutoTweakReview` (one Muse Spark call, nothing stored); `{ ok: false, error }` on 400/404/502. See **Auto-tweak** below. |

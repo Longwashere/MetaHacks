@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import express, { Router } from "express";
-import { getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
+import { deleteAsset, getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
 import { AnimateError, generateAnimation, parseAnimateInput } from "../lib/animate.js";
@@ -117,6 +117,16 @@ meRouter.patch("/remixes/:assetId", json, async (req, res) => {
       .overrideTypes<AssetRow, { merge: false }>(),
   );
   res.json(toSpineAsset(row));
+});
+
+/** DELETE /me/remixes/:assetId → 204, 404 (not theirs) or 409 (other remixes are built on it). Admins can delete any asset. */
+meRouter.delete("/remixes/:assetId", async (req, res) => {
+  const result = await deleteAsset(req.params.assetId, userIdOf(res), isAdminOf(res));
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.status(204).end();
 });
 
 /**

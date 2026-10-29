@@ -25,6 +25,7 @@ export default [
   route("logout", "routes/logout.ts"),
   route("api/library", "routes/api.library.ts"),
   route("api/remix-visibility", "routes/api.remix-visibility.ts"),
+  route("api/asset-delete", "routes/api.asset-delete.ts"),
   route("api/remix-skeleton", "routes/api.remix-skeleton.ts"),
   route("api/auto-tweak", "routes/api.auto-tweak.ts"),
   route("api/remix-animation", "routes/api.remix-animation.ts"),

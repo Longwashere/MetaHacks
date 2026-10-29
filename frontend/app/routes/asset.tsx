@@ -4,6 +4,7 @@ import type { Route } from "./+types/asset";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
 import { SaveButton } from "~/components/SaveButton";
+import { DeleteAssetButton } from "~/components/DeleteAssetButton";
 import { VisibilityToggle } from "~/components/VisibilityToggle";
 import type { SpineViewMode } from "~/lib/types";
 import { Badge } from "~/components/ui/badge";
@@ -58,6 +59,7 @@ export async function loader({ request, params, context }: Route.LoaderArgs) {
     savedIds,
     // Remixes are authored by their owner's user id; official rigs never match. Admins can moderate any asset.
     canManage: isOwner || session?.user.isAdmin === true,
+    isOwner,
     editable,
     siteUrl: getSiteUrl(request),
   };
@@ -99,7 +101,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function AssetPage({ loaderData, actionData }: Route.ComponentProps) {
-  const { asset, animation, related, remixes, savedIds, canManage, editable } = loaderData;
+  const { asset, animation, related, remixes, savedIds, canManage, isOwner, editable } = loaderData;
   const navigation = useNavigation();
   const copying = navigation.state !== "idle" && navigation.formData?.get("intent") === "copy";
   const saved = savedIds.includes(asset.id);
@@ -283,6 +285,7 @@ export default function AssetPage({ loaderData, actionData }: Route.ComponentPro
                   <Download /> Download
                 </Link>
               </Button>
+              {canManage && <DeleteAssetButton assetId={asset.id} assetName={asset.name} redirectTo={isOwner ? "/library?tab=remixes" : "/explore"} />}
             </div>
             {actionData?.copyError && <p className="-mt-3 text-sm text-destructive">{actionData.copyError}</p>}
 

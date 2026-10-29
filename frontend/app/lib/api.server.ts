@@ -146,6 +146,20 @@ export async function setRemixVisibility(
   return backendOrNull<SpineAsset>(`/me/remixes/${id(assetId)}`, { session, method: "PATCH", body: { visibility } });
 }
 
+/**
+ * DELETE /me/remixes/:assetId — deletes one of the user's remixes (admins: any asset).
+ * Fails when it isn't theirs, or when other remixes are built on it.
+ */
+export async function deleteAsset(session: Session, assetId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await backend(`/me/remixes/${id(assetId)}`, { session, method: "DELETE" });
+    return { ok: true };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status >= 500) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't delete the asset.") };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Remixing (re-texture an existing rig)
 // ---------------------------------------------------------------------------
