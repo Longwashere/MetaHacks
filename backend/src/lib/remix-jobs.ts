@@ -6,6 +6,7 @@ import { getAssetRow } from "./assets.js";
 import { getProfile, remixesUsed } from "./billing.js";
 import { PLAN_LIMITS } from "./config.js";
 import { REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
+import { fingerprintFiles } from "./fingerprint.js";
 import { objectUrl, putFile } from "./storage.js";
 import { REMIX_STYLES, type RemixInput, type RemixJob, type RemixStyle } from "./types.js";
 
@@ -137,6 +138,9 @@ async function saveRemixAsset(
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const id = `${slug || "remix"}-${jobId.slice(4)}`;
   const accent = input.keepPalette ? base.accent : ACCENTS[(ACCENTS.indexOf(base.accent) + 1) % ACCENTS.length];
+  // createRemixJob only starts jobs on rigs with files.
+  if (!base.files) throw new Error(`${base.id} has no files to remix`);
+  const files = { ...base.files, atlas: result.atlas, textures: result.textures, ...(result.skeleton ? { skeleton: result.skeleton } : {}) };
 
   check(
     await db().from("assets").insert({
@@ -158,7 +162,8 @@ async function saveRemixAsset(
       slot_count: base.slot_count,
       animations: base.animations,
       accent,
-      files: { ...base.files, atlas: result.atlas, textures: result.textures, ...(result.skeleton ? { skeleton: result.skeleton } : {}) },
+      files,
+      ...(await fingerprintFiles(files)),
     }),
   );
   return id;

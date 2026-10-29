@@ -6,6 +6,8 @@
 //
 // Mirrors @esotericsoftware/spine-core 4.2 (SkeletonBinary.js / SkeletonJson.js); keep in step
 // when the runtime is upgraded.
+//
+// backend/src/lib/spine-skel-json.ts is a copy, used to fingerprint stored .skel rigs; change both together.
 
 type Json = Record<string, unknown>;
 

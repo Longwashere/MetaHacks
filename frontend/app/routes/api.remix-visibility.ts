@@ -20,5 +20,6 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   const asset = await setRemixVisibility(session, assetId, visibility);
   if (!asset) return data({ ok: false, error: "You can only change your own remixes." }, { status: 403 });
+  if ("error" in asset) return data({ ok: false, error: asset.error }, { status: 409 });
   return { ok: true, visibility: asset.visibility };
 }

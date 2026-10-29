@@ -10,7 +10,8 @@
     "upload:spine": "tsx --env-file-if-exists=.env src/scripts/upload-spine.ts",
     "create-judge": "tsx --env-file-if-exists=.env src/scripts/create-judge.ts",
     "set-admin": "tsx --env-file-if-exists=.env src/scripts/set-admin.ts",
-    "pull:remixes": "tsx --env-file-if-exists=.env src/scripts/pull-remixes.ts"
+    "pull:remixes": "tsx --env-file-if-exists=.env src/scripts/pull-remixes.ts",
+    "backfill:fingerprints": "tsx --env-file-if-exists=.env src/scripts/backfill-fingerprints.ts"
   },
   "dependencies": {
     "@esotericsoftware/spine-core": "^4.2.120",

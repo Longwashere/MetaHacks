@@ -2,6 +2,7 @@ import { AiTimeoutError } from "./ai-fetch.js";
 import { getAssetRow } from "./assets.js";
 import { REMIX_JOB_TIMEOUT_MS } from "./config.js";
 import { ASSET_COLUMNS, REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
+import { fingerprintFiles } from "./fingerprint.js";
 import { newRemixJobId } from "./jobs.js";
 import { boxMeshes, checkMeshes, meshOutlines } from "./mesh.js";
 import { allowanceError } from "./remix-jobs.js";
@@ -155,7 +156,7 @@ async function runJob(id: string, job: LiveFix, asset: AssetRow, original: Asset
     await putFile(result.folder, "meshes.json", JSON.stringify({ checks: meshChecks, boxed }, null, 2));
     const skeletonKey = boxed.length > 0 ? await putFile(result.folder, "skeleton.json", JSON.stringify(skeleton)) : current.files.skeleton;
     const files = { ...current.files, skeleton: skeletonKey, atlas: result.atlas, textures: result.textures };
-    check(await db().from("assets").update({ files }).eq("id", asset.id).select(ASSET_COLUMNS).single());
+    check(await db().from("assets").update({ files, ...(await fingerprintFiles(files)) }).eq("id", asset.id).select(ASSET_COLUMNS).single());
     await recordPartFixVersion(asset, id, input.prompt, input.regions, boxed, current.files, files);
   } catch (e) {
     console.error(`Part fix ${id} failed`, e);

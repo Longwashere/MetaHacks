@@ -44,7 +44,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 type RigStatus =
   | { state: "ready" }
   | { state: "uploading" }
-  | { state: "done"; assetId: string }
+  | { state: "done"; assetId: string; note?: string }
   | { state: "error"; error: string };
 
 export default function UploadPage({ loaderData }: Route.ComponentProps) {
@@ -134,7 +134,7 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
         result = { ok: false, error: "The upload didn't reach the server. Check your connection and try again.", rigErrors: {} };
       }
       batch.forEach((item, i) => {
-        if (result.ok) set(item.folder.key, { state: "done", assetId: result.assets[i].id });
+        if (result.ok) set(item.folder.key, { state: "done", assetId: result.assets[i].id, note: result.notes[i] });
         else set(item.folder.key, { state: "error", error: result.rigErrors[i] ?? result.error });
       });
     }
@@ -240,6 +240,7 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
                       {folder.key} · {folder.files.length} files
                     </p>
                     {s.state === "error" && <p className="text-sm text-destructive">{s.error}</p>}
+                    {s.state === "done" && s.note && <p className="text-sm text-muted-foreground">{s.note}</p>}
                   </li>
                 );
               })}

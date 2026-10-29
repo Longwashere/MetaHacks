@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getAssetRow } from "./assets.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetFileKeys, type AssetRow, type SpineAsset } from "./db.js";
+import { fingerprintFiles } from "./fingerprint.js";
 import { copyRegionAttachments } from "./mesh.js";
 import { objectUrl, putFile } from "./storage.js";
 
@@ -129,7 +130,7 @@ export async function restoreVersion(userId: string, assetId: string, versionId:
   const row = check(
     await db()
       .from("assets")
-      .update({ files })
+      .update({ files, ...(await fingerprintFiles(files)) })
       .eq("id", asset.id)
       .select(ASSET_COLUMNS)
       .single()

@@ -64,6 +64,8 @@ export interface SpineAsset {
   remixOf: { id: string; name: string } | null;
   /** The remix this asset is a free copy of (same files, new owner). Null unless it's a copy. */
   copyOf: { id: string; name: string } | null;
+  /** The rig an upload shares its art or its skeleton with (a re-rig, re-skin or new animations). */
+  basedOn: { id: string; name: string } | null;
   /** Only public assets appear in Explore, the sitemap, and search engines. */
   visibility: "public" | "private";
   author: { id: string; name: string };

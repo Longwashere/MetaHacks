@@ -64,6 +64,9 @@ export async function copyRemix(userId: string, sourceId: string, isAdmin: boole
         thumbnail_url: source.thumbnail_url,
         files: source.files,
         tint: source.tint,
+        // Same files, so the same fingerprints.
+        art_hash: source.art_hash,
+        rig_hash: source.rig_hash,
       })
       .select(ASSET_COLUMNS)
       .single()

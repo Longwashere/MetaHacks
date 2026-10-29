@@ -137,13 +137,21 @@ export async function removeFromLibrary(session: Session, assetId: string): Prom
   await backend(`/me/library/${id(assetId)}`, { session, method: "DELETE" });
 }
 
-/** PATCH /me/remixes/:assetId — publish or unpublish one of the user's remixes. Null if it isn't theirs. */
+/**
+ * PATCH /me/remixes/:assetId — publish or unpublish one of the user's remixes. Null if it isn't theirs;
+ * an error when it can't be published (an upload reusing someone else's art stays private).
+ */
 export async function setRemixVisibility(
   session: Session,
   assetId: string,
   visibility: SpineAsset["visibility"],
-): Promise<SpineAsset | null> {
-  return backendOrNull<SpineAsset>(`/me/remixes/${id(assetId)}`, { session, method: "PATCH", body: { visibility } });
+): Promise<SpineAsset | { error: string } | null> {
+  try {
+    return await backendOrNull<SpineAsset>(`/me/remixes/${id(assetId)}`, { session, method: "PATCH", body: { visibility } });
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status !== 409) throw error;
+    return { error: errorMessage(error.body, "This rig can't be made public.") };
+  }
 }
 
 /**
@@ -322,7 +330,8 @@ export async function animateRemix(
 // ---------------------------------------------------------------------------
 
 export type UploadRigsResult =
-  | { ok: true; assets: SpineAsset[] }
+  /** `notes` maps a rig's index in the request to a remark, e.g. that it was kept private. */
+  | { ok: true; assets: SpineAsset[]; notes: Record<string, string> }
   /** `rigErrors` maps a rig's index in the request to what's wrong with it; nothing was stored. */
   | { ok: false; error: string; rigErrors: Record<string, string> };
 
@@ -343,7 +352,10 @@ export async function uploadRigs(session: Session, body: ReadableStream<Uint8Arr
   } catch {
     // A proxy error page; handled as a failure below.
   }
-  if (res.ok) return { ok: true, assets: (parsed as { assets: SpineAsset[] }).assets };
+  if (res.ok) {
+    const { assets, notes } = parsed as { assets: SpineAsset[]; notes?: Record<string, string> };
+    return { ok: true, assets, notes: notes ?? {} };
+  }
   if (res.status >= 500) throw new BackendError(res.status, parsed ?? text.slice(0, 300), "/me/uploads");
   const rigErrors = (parsed as { rigErrors?: unknown } | null)?.rigErrors;
   return {

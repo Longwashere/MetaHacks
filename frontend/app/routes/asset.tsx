@@ -237,6 +237,13 @@ export default function AssetPage({ loaderData, actionData }: Route.ComponentPro
                 ) : (
                   <Badge variant="outline">Original rig</Badge>
                 )}
+                {asset.basedOn && (
+                  <Badge variant="outline" asChild>
+                    <Link to={assetPath(asset.basedOn)}>
+                      <GitFork /> Based on {asset.basedOn.name}
+                    </Link>
+                  </Badge>
+                )}
                 {asset.copyOf && (
                   <Badge variant="outline" asChild>
                     <Link to={assetPath(asset.copyOf)}>

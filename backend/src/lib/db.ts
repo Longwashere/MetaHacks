@@ -60,6 +60,11 @@ export interface AssetRow {
   remix_of_name: string | null;
   copy_of: string | null;
   copy_of_name: string | null;
+  based_on: string | null;
+  based_on_name: string | null;
+  /** Re-upload fingerprints (lib/fingerprint.ts); not sent to the frontend. */
+  art_hash: string | null;
+  rig_hash: string | null;
   visibility: Visibility;
   spine_version: string;
   bone_count: number;
@@ -76,7 +81,7 @@ export interface AssetRow {
 
 /** Columns to select for an asset (everything but search_text). */
 export const ASSET_COLUMNS =
-  "id, owner_id, author_id, author_name, name, description, category, style, tags, prompt, remix_of, remix_of_name, copy_of, copy_of_name, visibility, spine_version, bone_count, slot_count, animations, accent, downloads, saves, thumbnail_url, files, tint, created_at";
+  "id, owner_id, author_id, author_name, name, description, category, style, tags, prompt, remix_of, remix_of_name, copy_of, copy_of_name, based_on, based_on_name, art_hash, rig_hash, visibility, spine_version, bone_count, slot_count, animations, accent, downloads, saves, thumbnail_url, files, tint, created_at";
 
 export const PROFILE_COLUMNS =
   "id, name, avatar_url, stripe_customer_id, plan, subscription_id, subscription_status, current_period_end, created_at";
@@ -109,6 +114,7 @@ export interface SpineAsset {
   prompt: string | null;
   remixOf: { id: string; name: string } | null;
   copyOf: { id: string; name: string } | null;
+  basedOn: { id: string; name: string } | null;
   visibility: Visibility;
   author: { id: string; name: string };
   createdAt: string;
@@ -141,6 +147,7 @@ export function toSpineAsset(row: AssetRow): SpineAsset {
     prompt: row.prompt,
     remixOf: row.remix_of ? { id: row.remix_of, name: row.remix_of_name ?? "" } : null,
     copyOf: row.copy_of ? { id: row.copy_of, name: row.copy_of_name ?? "" } : null,
+    basedOn: row.based_on ? { id: row.based_on, name: row.based_on_name ?? "" } : null,
     visibility: row.visibility,
     author: { id: row.author_id, name: row.author_name },
     createdAt: row.created_at,

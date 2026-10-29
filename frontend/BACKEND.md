@@ -26,7 +26,7 @@ Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `pr
 | `saveToLibrary(session, assetId)` | `PUT /me/library/:assetId` | `204`. Idempotent. |
 | `removeFromLibrary(session, assetId)` | `DELETE /me/library/:assetId` | `204`. Idempotent. |
 | `getMyRemixes(session)` | `GET /me/remixes` | The user's own `SpineAsset[]`, newest first |
-| `setRemixVisibility(session, assetId, visibility)` | `PATCH /me/remixes/:assetId` (JSON `{ visibility }`) | Updated `SpineAsset`, or `null` if it isn't the user's |
+| `setRemixVisibility(session, assetId, visibility)` | `PATCH /me/remixes/:assetId` (JSON `{ visibility }`) | Updated `SpineAsset`, `null` if it isn't the user's, or `{ error }` on `409` (an upload reusing someone else's art can't be made public; see **Uploads**) |
 | `deleteAsset(session, assetId)` | `DELETE /me/remixes/:assetId` | `204`; `404` if it isn't the user's (admins can delete any asset), `409 { error }` if other remixes are built on it (admins bypass this) |
 | `copyRemix(session, assetId)` | `POST /me/remixes/:assetId/copy` | `201` new private copy as `SpineAsset`; `200` with the user's existing copy, or the remix itself if it's theirs; `{ ok: false, error }` on 400/404. Free: no model runs. See **Copies** below. |
 | `getRemixVersions(session, assetId)` | `GET /me/remixes/:assetId/versions` | `AssetVersion[]`, newest first, ending with `original`; `[]` before the first part fix or if it isn't the user's. See **Version history** below. |
@@ -37,7 +37,7 @@ Frontend env vars (in `frontend/.env` in dev; `vite.config.ts` loads it into `pr
 | `createRemixJob(session, input, apiVersion)` | `POST /me/remix-jobs` (JSON `RemixInput` + `apiVersion`) | `202` `RemixJob`; `400 { errors }`; `402 { error }` when the monthly allowance is used up |
 | `getRemixJob(session, jobId)` | `GET /me/remix-jobs/:id` | `RemixJob \| null` |
 | `getAccount(session)` | `GET /me` | `Account`: profile, plan, subscription, `usage: { used, limit, resetsAt }` (remixes) and `downloads: { used, limit, resetsAt }` (`limit` null = unlimited) |
-| `uploadRigs(session, body)` | `POST /me/uploads` (JSON `{ category, style, visibility, rigs }`, up to 64 MB; streamed through `/api/upload`) | `201 { assets: SpineAsset[] }`; `400 { error, rigErrors? }` with nothing stored. Up to 3 rigs per request (admins 50). See **Uploads** below. |
+| `uploadRigs(session, body)` | `POST /me/uploads` (JSON `{ category, style, visibility, rigs }`, up to 64 MB; streamed through `/api/upload`) | `201 { assets: SpineAsset[], notes }` (`notes` maps a rig's index to a remark, e.g. kept private); `400 { error, rigErrors? }` with nothing stored, including for re-uploads. Up to 3 rigs per request (admins 50). See **Uploads** below. |
 | `recordDownload(session, assetId)` | `POST /me/downloads/:assetId` | `{ used, limit, resetsAt }` once recorded; `402 { error, used, limit, resetsAt }` when the monthly download allowance is used up; `404` if the asset isn't visible. Re-downloading an asset already downloaded this month is free. |
 | `updateDisplayName(session, name)` | `PATCH /me` (JSON `{ name }`) | Updated `Account`; `{ ok: false, error }` on 400 (2–40 characters, no control characters). Sets `profiles.name` and `author_name` on every asset the user authored. The account action then also stores it as `user_metadata.display_name` so the header menu shows it. |
 | `createCheckoutUrl(session)` | `POST /billing/checkout` | `{ url }` of Stripe Checkout (or the portal for existing subscribers) |
@@ -131,6 +131,14 @@ Below the remix result, the **Fix parts** card sits beside the sprite sheet. Onc
 `/upload` (signed in) lets users add their own Spine 4.2 rigs, one folder per rig. They pick a parent folder (`<input webkitdirectory>`) or drop several folders; `app/lib/rig-folder.ts` turns every directory holding a `.atlas` (or `.atlas.txt`) into a rig, named after the folder (editable). In the browser it reads the skeleton (`.json`, or `.skel` converted with `skelToJson`), the atlas and the PNG pages the atlas names, and sends pages as base64. Regular users can add 3 rigs per upload; admins any number. The page sends at most 3 rigs and ~40 MB per request, one request after another, and shows each rig's result.
 
 The backend (`backend/src/lib/uploads.ts`) loads every rig with the Spine runtime against its atlas (a missing region or page is a per-rig error), requires Spine 4.2 and real PNGs, and rejects the whole request if any rig fails. It then stores the files under `remixes/<time>_upload_<id>/` and creates original assets (`remix_of` null) owned by the uploader, with the batch's category, style and visibility, bone/slot counts and animations (durations from the runtime; `loop` guessed from the name). They show under the library's remixes tab, can be remixed, and their visibility can be changed like a remix's.
+
+**Re-uploads.** Each rig is fingerprinted by its art (the page PNGs, in any order and under any name) and its rig (the skeleton JSON, keys sorted, without the header fields Spine rewrites on every export). Official rigs, uploads, remixes and copies carry both hashes (`supabase/migrations/20261029040000_asset_fingerprints.sql`; existing rows via `npm run backfill:fingerprints -w backend`), and every save that changes an asset's files updates them: remix creation, part fixes, version restores, tweak saves and Muse animations.
+
+- Same art and same rig as a public rig or remix, or as one of the uploader's own (including their copies): a `rigError` ("already in the library as …"). The same rig twice in one request is one too.
+- New art on an existing rig, or new animations/bones on existing art: accepted. `SpineAsset.basedOn` credits the earliest matching rig the uploader can see (the asset page shows "Based on …"). Someone else's private rig is never named.
+- Art that someone else (an official rig, or another user's upload or remix) put in the library first: accepted but kept private, with a `notes` entry if public was asked for. `PATCH /me/remixes/:assetId` to public answers `409 { error }` for these, and `<VisibilityToggle>` shows it as a toast. Admins are exempt.
+
+Admin uploads are tagged by Muse Spark after the response is sent (`backend/src/lib/upload-tags.ts`), so the returned assets have empty `tags`. The tags show up on the next load, usually within a few seconds per rig.
 
 ## Asset files
 

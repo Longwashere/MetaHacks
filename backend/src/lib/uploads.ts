@@ -4,7 +4,9 @@ import { ASSET_CATEGORIES } from "./assets.js";
 import { getProfile } from "./billing.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow, type SpineAsset, type Visibility } from "./db.js";
 import { isSafePageName } from "./atlas.js";
+import { fingerprintRig, type RigFingerprint } from "./fingerprint.js";
 import { putFile } from "./storage.js";
+import { tagUploads } from "./upload-tags.js";
 import { ART_STYLES, type ArtStyle } from "./types.js";
 import { parseSkeleton } from "./validate.js";
 
@@ -13,6 +15,13 @@ import { parseSkeleton } from "./validate.js";
 // JSON. Each rig is loaded with the Spine runtime against its atlas before anything is stored,
 // so a rig that's missing a region or page is rejected with the reason. Uploads are original
 // rigs (no remix_of), owned by the uploader, and can be remixed like the official ones.
+//
+// Re-uploads: each rig is fingerprinted by its art (page PNGs) and its rig (skeleton), as are
+// remixes (lib/fingerprint.ts). A rig whose art and rig both match a public rig or remix, or one
+// of the uploader's own, is rejected. New art on an
+// existing rig, or new animations on existing art, is new work: it's accepted and credited with
+// based_on. A rig reusing someone else's art stays private (publishBlocked), so it's in the
+// uploader's workspace but not listed twice in Explore. Admins can publish anything.
 
 /** Rigs per upload for everyone but admins. */
 export const MAX_RIGS_PER_UPLOAD = 3;
@@ -31,6 +40,7 @@ interface UploadRig {
   skeleton: Record<string, unknown>;
   atlas: string;
   pages: { name: string; data: Buffer }[];
+  fingerprint: RigFingerprint;
   /** Read by the Spine runtime while validating. */
   meta: {
     spineVersion: string;
@@ -127,12 +137,14 @@ function parseRig(raw: unknown): UploadRig | string {
   const defaultIsEmpty = !defaultSkin || defaultSkin.attachments.every((slot) => !slot || Object.keys(slot).length === 0);
   const skin = defaultIsEmpty ? (data.skins.find((s) => s.name !== "default")?.name ?? null) : null;
 
+  // Only the pages the atlas uses, in its order.
+  const usedPages = textureAtlas.pages.map((p) => ({ name: p.name, data: images.get(p.name)! }));
   return {
     name,
     skeleton: skeleton as Record<string, unknown>,
     atlas,
-    // Only the pages the atlas uses, in its order.
-    pages: textureAtlas.pages.map((p) => ({ name: p.name, data: images.get(p.name)! })),
+    pages: usedPages,
+    fingerprint: fingerprintRig(skeleton as Record<string, unknown>, usedPages.map((p) => p.data)),
     meta: {
       spineVersion: "4.2",
       boneCount: data.bones.length,
@@ -148,12 +160,28 @@ function parseRig(raw: unknown): UploadRig | string {
   };
 }
 
-/** Stores every rig's files, then creates their assets in one insert. */
-export async function createUploads(userId: string, input: UploadInput): Promise<SpineAsset[]> {
+export type CreateUploadsResult =
+  /** `notes` maps a rig's index to a remark on how it was stored (e.g. kept private). */
+  | { ok: true; assets: SpineAsset[]; notes: Record<number, string> }
+  | { ok: false; error: string; rigErrors: Record<number, string> };
+
+/**
+ * Checks every rig against the library, stores their files, then creates their assets in one
+ * insert. For admin uploads, Muse Spark then writes each asset's tags in the background
+ * (lib/upload-tags.ts).
+ */
+export async function createUploads(userId: string, input: UploadInput, isAdmin = false): Promise<CreateUploadsResult> {
+  const matched = await matchExisting(userId, input.rigs, isAdmin);
+  if (!matched.ok) return { ok: false, error: "Some rigs are already in the library. Nothing was uploaded.", rigErrors: matched.rigErrors };
+  const notes: Record<number, string> = {};
   const profile = await getProfile(userId);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const rows = await Promise.all(
-    input.rigs.map(async (rig) => {
+    input.rigs.map(async (rig, i) => {
+      const { basedOn, privateOnly } = matched.matches[i]!;
+      if (privateOnly && input.visibility === "public") {
+        notes[i] = "Kept private: its art matches a rig already in the library, so it's only in your workspace.";
+      }
       const suffix = randomUUID().slice(0, 8);
       const slug = rig.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "rig";
       const folder = `${stamp}_upload_${suffix}`;
@@ -172,7 +200,11 @@ export async function createUploads(userId: string, input: UploadInput): Promise
         category: input.category,
         style: input.style,
         tags: [],
-        visibility: input.visibility,
+        visibility: privateOnly ? "private" : input.visibility,
+        based_on: basedOn?.id ?? null,
+        based_on_name: basedOn?.name ?? null,
+        art_hash: rig.fingerprint.artHash,
+        rig_hash: rig.fingerprint.rigHash,
         spine_version: rig.meta.spineVersion,
         bone_count: rig.meta.boneCount,
         slot_count: rig.meta.slotCount,
@@ -188,8 +220,101 @@ export async function createUploads(userId: string, input: UploadInput): Promise
       };
     }),
   );
-  const inserted = check(await db().from("assets").insert(rows).select(ASSET_COLUMNS).overrideTypes<AssetRow[], { merge: false }>());
-  return (inserted ?? []).map(toSpineAsset);
+  const res = await db().from("assets").insert(rows).select(ASSET_COLUMNS).overrideTypes<AssetRow[], { merge: false }>();
+  // assets_owner_fingerprint: the same rig went in from another request since matchExisting ran.
+  if (res.error?.code === "23505") return { ok: false, error: "You just uploaded one of these rigs. Check your library.", rigErrors: {} };
+  const inserted = check(res);
+  if (isAdmin) {
+    tagUploads(
+      input.rigs.map((rig, i) => ({
+        assetId: rows[i]!.id,
+        name: rig.name,
+        category: input.category,
+        style: input.style,
+        skeleton: rig.skeleton,
+        animations: rig.meta.animations.map((a) => a.name),
+        pages: rig.pages.map((p) => p.data),
+      })),
+    );
+  }
+  return { ok: true, assets: (inserted ?? []).map(toSpineAsset), notes };
+}
+
+interface FingerprintedRow {
+  id: string;
+  name: string;
+  owner_id: string | null;
+  visibility: Visibility;
+  art_hash: string;
+  rig_hash: string;
+}
+
+type MatchResult =
+  | { ok: true; matches: { basedOn: { id: string; name: string } | null; privateOnly: boolean }[] }
+  | { ok: false; rigErrors: Record<number, string> };
+
+/** Each rig's credit and whether it has to stay private, or why it's a re-upload. */
+async function matchExisting(userId: string, rigs: UploadRig[], isAdmin: boolean): Promise<MatchResult> {
+  const artHashes = [...new Set(rigs.map((r) => r.fingerprint.artHash))];
+  const rigHashes = [...new Set(rigs.map((r) => r.fingerprint.rigHash))];
+  // Hashes are hex, so they're safe in the filter string. Oldest first: credit goes to the earliest rig.
+  const existing = check(
+    await db()
+      .from("assets")
+      .select("id, name, owner_id, visibility, art_hash, rig_hash")
+      .or(`art_hash.in.(${artHashes.join(",")}),rig_hash.in.(${rigHashes.join(",")})`)
+      .order("created_at", { ascending: true })
+      .overrideTypes<FingerprintedRow[], { merge: false }>(),
+  );
+  // Someone else's private rig is never named or credited.
+  const visible = (row: FingerprintedRow) => row.visibility === "public" || row.owner_id === userId;
+
+  const matches: Extract<MatchResult, { ok: true }>["matches"] = [];
+  const rigErrors: Record<number, string> = {};
+  rigs.forEach((rig, i) => {
+    const { artHash, rigHash } = rig.fingerprint;
+    const twin = rigs.findIndex((r) => r.fingerprint.artHash === artHash && r.fingerprint.rigHash === rigHash);
+    if (twin < i) {
+      rigErrors[i] = `This is the same rig as “${rigs[twin]!.name}” in this upload.`;
+      return;
+    }
+    const sameArt = existing.filter((row) => row.art_hash === artHash);
+    const same = sameArt.find((row) => row.rig_hash === rigHash && visible(row));
+    if (same) {
+      rigErrors[i] = same.owner_id === userId ? `You already have this rig as “${same.name}”.` : `This rig is already in the library as “${same.name}”.`;
+      return;
+    }
+    const credit = sameArt.find(visible) ?? existing.find((row) => row.rig_hash === rigHash && visible(row));
+    matches[i] = {
+      basedOn: credit ? { id: credit.id, name: credit.name } : null,
+      privateOnly: !isAdmin && sameArt.some((row) => row.owner_id !== userId),
+    };
+  });
+  return Object.keys(rigErrors).length > 0 ? { ok: false, rigErrors } : { ok: true, matches };
+}
+
+/**
+ * Why the user can't make `assetId` public, or null if they can: an upload whose art was in the
+ * library first under someone else (an official rig, or another user's upload or remix) stays private.
+ */
+export async function publishBlocked(assetId: string, userId: string): Promise<string | null> {
+  const row = check(
+    await db()
+      .from("assets")
+      .select("art_hash, remix_of, created_at")
+      .eq("id", assetId)
+      .maybeSingle()
+      .overrideTypes<{ art_hash: string | null; remix_of: string | null; created_at: string } | null, { merge: false }>(),
+  );
+  if (!row?.art_hash || row.remix_of) return null;
+  const { count, error } = await db()
+    .from("assets")
+    .select("id", { count: "exact", head: true })
+    .eq("art_hash", row.art_hash)
+    .lt("created_at", row.created_at)
+    .or(`owner_id.is.null,owner_id.neq.${userId}`);
+  if (error) throw new Error(`Database error: ${error.message}`);
+  return count ? "This rig's art is already in the library under someone else, so it stays private. Remix it to make it your own." : null;
 }
 
 function message(error: unknown): string {

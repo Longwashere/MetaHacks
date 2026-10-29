@@ -11,7 +11,8 @@ import { listVersions, restoreVersion } from "../lib/versions.js";
 import { getAccount, recordDownload, setDisplayName } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
-import { createUploads, parseUploadInput } from "../lib/uploads.js";
+import { rigHashOf } from "../lib/fingerprint.js";
+import { createUploads, parseUploadInput, publishBlocked } from "../lib/uploads.js";
 import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
 import { putFile } from "../lib/storage.js";
 import { MAX_REFERENCE_BYTES, parseDisplayName, parsePartFixInput, parseReferenceImage, parseRemixInput, parseSkeleton } from "../lib/validate.js";
@@ -102,16 +103,24 @@ meRouter.delete("/library/:assetId", async (req, res) => {
 
 /**
  * POST /me/uploads  body = { category, style, visibility, rigs: [{ name, skeleton, atlas, pages: [{ name, data }] }] }
- * → 201 { assets: SpineAsset[] }, or 400 { error, rigErrors? } (nothing stored). `data` is base64 PNG.
- * Up to 3 rigs per request; admins up to 50. See lib/uploads.ts.
+ * → 201 { assets: SpineAsset[], notes }, or 400 { error, rigErrors? } (nothing stored). `data` is base64 PNG.
+ * `notes` maps a rig's index to a remark, e.g. that it was kept private because its art was already in the library.
+ * A rig that's already in the library is a rigError. Up to 3 rigs per request; admins up to 50, and Muse Spark
+ * tags admin uploads in the background. See lib/uploads.ts.
  */
 meRouter.post("/uploads", express.json({ limit: MAX_UPLOAD_BYTES }), async (req, res) => {
-  const parsed = parseUploadInput(req.body, isAdminOf(res));
+  const isAdmin = isAdminOf(res);
+  const parsed = parseUploadInput(req.body, isAdmin);
   if (!parsed.ok) {
     res.status(400).json({ error: parsed.error, rigErrors: parsed.rigErrors });
     return;
   }
-  res.status(201).json({ assets: await createUploads(userIdOf(res), parsed.input) });
+  const result = await createUploads(userIdOf(res), parsed.input, isAdmin);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error, rigErrors: result.rigErrors });
+    return;
+  }
+  res.status(201).json({ assets: result.assets, notes: result.notes });
 });
 
 // ---------------------------------------------------------------------------
@@ -152,7 +161,10 @@ meRouter.get("/remixes", async (_req, res) => {
   res.json(await listOwnedAssets(userIdOf(res)));
 });
 
-/** PATCH /me/remixes/:assetId  body = { visibility: "public" | "private" } → SpineAsset. Admins can change any asset. */
+/**
+ * PATCH /me/remixes/:assetId  body = { visibility: "public" | "private" } → SpineAsset, or 409 { error } when an
+ * upload reuses art someone else put in the library first (it stays private). Admins can change any asset.
+ */
 meRouter.patch("/remixes/:assetId", json, async (req, res) => {
   const visibility: unknown = req.body?.visibility;
   if (visibility !== "public" && visibility !== "private") {
@@ -163,6 +175,11 @@ meRouter.patch("/remixes/:assetId", json, async (req, res) => {
   const allowed = isAdminOf(res) ? await getAssetRow(req.params.assetId, userId, true) : await ownedAsset(userId, req.params.assetId);
   if (!allowed) {
     res.status(404).json({ error: "You can only change your own remixes." });
+    return;
+  }
+  const blocked = visibility === "public" && !isAdminOf(res) ? await publishBlocked(allowed.id, userId) : null;
+  if (blocked) {
+    res.status(409).json({ error: blocked });
     return;
   }
   const row = check(
@@ -223,7 +240,7 @@ meRouter.post("/remixes/:assetId/skeleton", express.json({ limit: MAX_SKELETON_B
   const row = check(
     await db()
       .from("assets")
-      .update({ files: { ...asset.files, skeleton: key, skin: skin ?? asset.files.skin } })
+      .update({ files: { ...asset.files, skeleton: key, skin: skin ?? asset.files.skin }, rig_hash: rigHashOf(skeleton) })
       .eq("id", asset.id)
       .select(ASSET_COLUMNS)
       .single()

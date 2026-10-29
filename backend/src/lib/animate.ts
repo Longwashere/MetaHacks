@@ -5,6 +5,7 @@ import { aiFetch } from "./ai-fetch.js";
 import { getAssetRow } from "./assets.js";
 import { ANIMATE_REASONING_EFFORT, ANIMATION_LOG_DIR, META_API_BASE_URL, MUSE_MODEL, MUSE_TIMEOUT_MS } from "./config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "./db.js";
+import { rigHashOf } from "./fingerprint.js";
 import * as spine from "@esotericsoftware/spine-core";
 import { FX_PREFIX, applyFx, coreBones, describeSlots, readFx, readSlots, stubLoader, type Fx } from "./animate-fx.js";
 import { apiKey, getPath, logPrompt } from "./meta.js";
@@ -793,7 +794,7 @@ async function save(asset: AssetRow, skeleton: Record<string, unknown>, built: B
   const row = check(
     await db()
       .from("assets")
-      .update({ files: { ...current.files, skeleton: key }, animations: [...current.animations, animation] })
+      .update({ files: { ...current.files, skeleton: key }, animations: [...current.animations, animation], rig_hash: rigHashOf(next) })
       .eq("id", asset.id)
       .select(ASSET_COLUMNS)
       .single()
