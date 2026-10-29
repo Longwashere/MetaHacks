@@ -29,6 +29,7 @@ const CONCURRENCY = 4;
 /** A short structured reply; Spark otherwise reasons for a minute or more (see FRICTION_LOG). */
 const REASONING_EFFORT = "low";
 const TIMEOUT_MS = 2 * 60 * 1000;
+const RETRY_DELAY_MS = 5_000;
 /** Pages sent per rig, and their longest side: enough to recognise the character. */
 const MAX_PAGES = 2;
 const PAGE_SIDE = 768;
@@ -71,7 +72,7 @@ export function tagUploads(rigs: TagRig[]): void {
 async function drain(): Promise<void> {
   for (let rig = queue.shift(); rig; rig = queue.shift()) {
     try {
-      const tags = [...new Set([...(await suggestTags(rig)), ...rigFeatureTags(rig.skeleton)])];
+      const tags = [...new Set([...(await suggestTagsWithRetry(rig)), ...rigFeatureTags(rig.skeleton)])];
       if (tags.length === 0) continue;
       check(await db().from("assets").update({ tags }).eq("id", rig.assetId));
       // Later rigs in the same batch reuse what this one added.
@@ -79,6 +80,26 @@ async function drain(): Promise<void> {
       console.log(`[upload-tags] ${rig.assetId}: ${tags.join(", ")}`);
     } catch (error) {
       console.error(`[upload-tags] ${rig.assetId} failed:`, error instanceof Error ? error.message : error);
+    }
+  }
+}
+
+/**
+ * In a 62-rig batch about 1 in 8 calls failed and the same rig tagged fine on a retry, so try
+ * twice. If Muse still fails the rig keeps its skeleton tags.
+ */
+async function suggestTagsWithRetry(rig: TagRig): Promise<string[]> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await suggestTags(rig);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt === 2) {
+        console.error(`[upload-tags] ${rig.assetId} Muse failed twice, keeping skeleton tags only:`, message);
+        return [];
+      }
+      console.warn(`[upload-tags] ${rig.assetId} Muse failed, retrying:`, message);
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
   }
 }

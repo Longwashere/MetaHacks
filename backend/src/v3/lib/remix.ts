@@ -216,7 +216,7 @@ export async function runRemix(
 
   const atlasDir = base.atlasUrl.slice(0, base.atlasUrl.lastIndexOf("/") + 1);
   const [images, skeletonFile] = await Promise.all([
-    Promise.all(pages.map(async (p) => decodePage(await fetchBaseFile(atlasDir + p.name, signal), base.premultipliedAlpha))),
+    Promise.all(pages.map(async (p) => decodePage(await fetchBaseFile(atlasDir + p.name, signal), base.premultipliedAlpha, p.size))),
     fetchBaseFile(base.skeletonUrl, signal),
   ]);
   const binarySkeleton = !new URL(base.skeletonUrl).pathname.toLowerCase().endsWith(".json");

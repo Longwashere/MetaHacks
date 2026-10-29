@@ -116,8 +116,21 @@ export interface PageImage {
   rgba: Buffer;
 }
 
-export async function decodePage(file: Buffer, premultipliedAlpha: boolean): Promise<PageImage> {
-  const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+/**
+ * With `size` (the atlas's `size:` line), an image of another size is resized to it, since
+ * region bounds are measured in that size. Remixes are then saved at that size too.
+ */
+export async function decodePage(
+  file: Buffer,
+  premultipliedAlpha: boolean,
+  size: { width: number; height: number } | null = null,
+): Promise<PageImage> {
+  let image = sharp(file).ensureAlpha();
+  const meta = await sharp(file).metadata();
+  if (size && (meta.width !== size.width || meta.height !== size.height)) {
+    image = image.resize(size.width, size.height, { fit: "fill", kernel: "lanczos3" });
+  }
+  const { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
   if (premultipliedAlpha) {
     for (let i = 0; i < data.length; i += 4) {
       const a = data[i + 3];
