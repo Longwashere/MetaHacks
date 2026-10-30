@@ -32,8 +32,11 @@ export interface RemixJobView {
   promptStatus: RemixJob["promptStatus"];
   /** URL of the user's reference image, or null. */
   referenceUrl: string | null;
-  /** What a running v2 or v3 remix is painting (and, in v3, checking), for the live view; null otherwise. */
-  live: RemixLive | null;
+  /**
+   * What a v2 or v3 remix is painting (and, in v3, checking), for the live view. Once it has
+   * finished, the saved log (activity null); null for v1 and jobs from before the log was saved.
+   */
+  live: (RemixLive & { eventsFrom: number }) | null;
   asset: SpineAsset | null;
   error: string | null;
 }
@@ -104,6 +107,12 @@ export async function startRemix(
         .update({ status, error, edit_prompt: job.editPrompt, prompt_status: job.promptStatus, asset_id: assetId })
         .eq("id", id),
     );
+    // Saved on its own, so a failed log write never loses the job's status.
+    const live = apiVersion === "v3" ? getV3Job(id)?.live : apiVersion === "v2" ? getV2Job(id)?.live : null;
+    if (live) {
+      const { error: logError } = await db().from("remix_jobs").update({ live: { ...live, activity: null } }).eq("id", id);
+      if (logError) console.error(`Saving remix ${id}'s live log failed`, logError);
+    }
   };
   if (apiVersion === "v1") createV1Job(request, { id, onSettled });
   else if (apiVersion === "v2") createV2Job(request, { id, onSettled });
@@ -172,8 +181,11 @@ async function saveRemixAsset(
   return id;
 }
 
-/** The job if it's the user's, with live progress while it runs. */
-export async function getRemixJobView(userId: string, jobId: string): Promise<RemixJobView | null> {
+/**
+ * The job if it's the user's, with live progress while it runs. `eventsFrom` skips that many log
+ * events, so a poller only gets the ones it doesn't have yet.
+ */
+export async function getRemixJobView(userId: string, jobId: string, eventsFrom = 0): Promise<RemixJobView | null> {
   const row = check(
     await db()
       .from("remix_jobs")
@@ -221,10 +233,30 @@ export async function getRemixJobView(userId: string, jobId: string): Promise<Re
     editPrompt: live?.editPrompt ?? row.edit_prompt,
     promptStatus: live?.promptStatus ?? (row.prompt_status === "reworded" ? "reworded" : "original"),
     referenceUrl: input.referenceImage ? objectUrl(input.referenceImage) : null,
-    live: !live ? null : row.api_version === "v3" ? (getV3Job(jobId)?.live ?? null) : row.api_version === "v2" ? (getV2Job(jobId)?.live ?? null) : null,
+    live: logFrom(!live ? row.live : row.api_version === "v3" ? (getV3Job(jobId)?.live ?? null) : row.api_version === "v2" ? (getV2Job(jobId)?.live ?? null) : null, eventsFrom),
     asset: live ? null : asset && toSpineAsset(asset),
     error: lost ? "The remix service restarted. Try again." : live ? null : row.error,
   };
+}
+
+function logFrom(live: RemixLive | null, eventsFrom: number) {
+  return live && { ...live, events: live.events.slice(eventsFrom), eventsFrom };
+}
+
+/** The job that made the user's remix `assetId`, or null (copies, uploads, someone else's). */
+export async function getRemixJobViewForAsset(userId: string, assetId: string): Promise<RemixJobView | null> {
+  const rows = check(
+    await db()
+      .from("remix_jobs")
+      .select("id, input")
+      .eq("asset_id", assetId)
+      .eq("user_id", userId)
+      .order("created_at")
+      .overrideTypes<Pick<RemixJobRow, "id" | "input">[], { merge: false }>(),
+  );
+  // Part fixes on the remix share its asset_id.
+  const made = rows.find((r) => r.input.kind !== "parts");
+  return made ? getRemixJobView(userId, made.id) : null;
 }
 
 function parseStoredInput(value: Record<string, unknown>): RemixInput {

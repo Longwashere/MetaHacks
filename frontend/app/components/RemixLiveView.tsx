@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, Loader2, Move, Paintbrush, PenLine, Sparkles, Trophy, Undo2, Wrench } from "lucide-react";
+import { ChevronRight, CircleAlert, MessageSquareText, CircleCheck, Loader2, Move, Paintbrush, PenLine, ShieldAlert, Sparkles, Trophy, Undo2, Wrench } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { SpinePreview } from "~/components/SpinePreview";
 import { Badge } from "~/components/ui/badge";
@@ -281,14 +281,17 @@ function Legend({ className, children }: { className: string; children: ReactNod
   );
 }
 
-/** Everything the remix has done so far, newest first, with what it's doing now on top. */
-export function RemixTimeline({ job, className }: { job: RemixJob; className?: string }) {
+/**
+ * Everything the remix has done so far, newest first, with what it's doing now on top. Renders a
+ * card's header and content, for a card (or card tab) the caller provides.
+ */
+export function RemixTimeline({ job }: { job: RemixJob }) {
   const events = job.live?.events ?? [];
   const activity = job.live?.activity ?? null;
   const started = new Date(job.createdAt).getTime();
 
   return (
-    <Card className={className}>
+    <>
       <CardHeader>
         <CardTitle>What Muse is doing</CardTitle>
         <CardDescription>
@@ -309,9 +312,10 @@ export function RemixTimeline({ job, className }: { job: RemixJob; className?: s
             <TimelineItem key={`${event.at}:${event.type}`} event={event} offset={(new Date(event.at).getTime() - started) / 1000} />
           ))}
           {events.length === 0 && !activity && <li className="text-sm text-muted-foreground">Waiting for a free slot…</li>}
+          <RequestItem job={job} />
         </ol>
       </CardContent>
-    </Card>
+    </>
   );
 }
 
@@ -325,23 +329,39 @@ function TimelineItem({ event, offset }: { event: RemixEvent; offset: number }) 
     case "planned":
       icon = <Sparkles className="text-primary" />;
       title = `Planned “${event.name}”`;
-      body = event.style && <p className="line-clamp-3">{event.style}</p>;
+      body = (
+        <>
+          {event.style && <p className="line-clamp-3">{event.style}</p>}
+          {event.referenceLook && <PromptBlock label="Look taken from your reference" text={event.referenceLook} />}
+          <PromptBlock label="Expanded prompt" text={event.editPrompt} />
+        </>
+      );
       break;
     case "painted":
       icon = <Paintbrush className="text-primary" />;
       title = `Painted ${event.page}${attempt}`;
-      body = event.shrunk.length > 0 && (
-        <p>
-          Shrunk {event.shrunk.length} {event.shrunk.length === 1 ? "part" : "parts"} that were drawn too big:{" "}
-          {event.shrunk.map((s) => `${s.part} ${Math.round(s.scale * 100)}%`).join(", ")}
-        </p>
+      body = (
+        <>
+          {event.shrunk.length > 0 && (
+            <p>
+              Shrunk {event.shrunk.length} {event.shrunk.length === 1 ? "part" : "parts"} that were drawn too big:{" "}
+              {event.shrunk.map((s) => `${s.part} ${Math.round(s.scale * 100)}%`).join(", ")}
+            </p>
+          )}
+          {event.prompt && <PromptBlock label="Sent to Muse Image" text={event.prompt} />}
+        </>
       );
       image = event.url;
       break;
     case "rejected":
       icon = <Undo2 className="text-destructive" />;
       title = `Threw out a paint of ${event.page}`;
-      body = <p>Muse Image moved the parts: only {Math.round(event.insideBoxes * 100)}% landed in their boxes. Painting it again.</p>;
+      body = (
+        <>
+          <p>Muse Image moved the parts: only {Math.round(event.insideBoxes * 100)}% landed in their boxes. Painting it again.</p>
+          {event.prompt && <PromptBlock label="Sent to Muse Image" text={event.prompt} />}
+        </>
+      );
       image = event.url;
       break;
     case "checked":
@@ -367,12 +387,26 @@ function TimelineItem({ event, offset }: { event: RemixEvent; offset: number }) 
     case "fixed":
       icon = <Wrench className={event.error ? "text-destructive" : "text-primary"} />;
       title = event.error ? `Couldn't fix ${event.regions.join(", ")}` : `Repainted ${event.regions.join(", ")}`;
-      body = <p>{event.error ?? event.prompt}</p>;
+      body = (
+        <>
+          {event.error && <p>{event.error}</p>}
+          <PromptBlock label="What the check asked for" text={event.prompt} />
+          {event.plan && <PromptBlock label="Expanded fix" text={event.plan} />}
+          {event.imagePrompts?.map((prompt, i) => (
+            <PromptBlock key={i} label={event.imagePrompts.length > 1 ? `Sent to Muse Image · page ${i + 1}` : "Sent to Muse Image"} text={prompt} />
+          ))}
+        </>
+      );
       break;
     case "revised":
       icon = <PenLine className="text-primary" />;
       title = "Rewrote the plan for the next attempt";
-      body = event.editPrompt ? <p className="line-clamp-3">{event.editPrompt}</p> : <p>Added the checks' fixes to the image prompt.</p>;
+      body = event.editPrompt ? <PromptBlock label="New expanded prompt" text={event.editPrompt} /> : <p>Added the checks' fixes to the image prompt.</p>;
+      break;
+    case "reworded":
+      icon = <ShieldAlert className="text-destructive" />;
+      title = "Re-worded the prompt for Muse Image's content policy";
+      body = <PromptBlock label="Re-worded expanded prompt" text={event.editPrompt} />;
       break;
     case "chosen":
       icon = event.quality === "passed" ? <Trophy className="text-primary" /> : <CircleAlert className="text-destructive" />;
@@ -407,6 +441,47 @@ function TimelineItem({ event, offset }: { event: RemixEvent; offset: number }) 
         )}
       </div>
     </li>
+  );
+}
+
+/** Where every remix starts: what the user asked for, with their settings and reference image. */
+function RequestItem({ job }: { job: RemixJob }) {
+  const { input } = job;
+  const kept = [input.keepPalette && "palette", input.keepPosition && "position", input.keepSize && "size", input.keepOutline && "outline"].filter(Boolean);
+  return (
+    <li className="flex gap-3 text-sm">
+      <MessageSquareText className="mt-0.5 size-4 shrink-0 text-primary" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="font-medium">Your request</span>
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{formatOffset(0)}</span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          <p className="whitespace-pre-wrap text-foreground">{input.prompt ? `“${input.prompt}”` : "No prompt: match the reference image."}</p>
+          <p className="mt-1">
+            Style {input.style} · strength {Math.round(input.strength * 100)}%{kept.length > 0 && ` · keep ${kept.join(", ")}`}
+          </p>
+        </div>
+        {job.referenceUrl && (
+          <a href={job.referenceUrl} target="_blank" rel="noreferrer" className="w-fit">
+            <img src={job.referenceUrl} alt="Reference image" loading="lazy" className="h-20 w-auto rounded-md border bg-muted object-contain" />
+          </a>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** A prompt as sent, folded so the timeline stays scannable. */
+function PromptBlock({ label, text }: { label: string; text: string }) {
+  return (
+    <details className="group mt-1 rounded-md border bg-muted/40">
+      <summary className="flex cursor-pointer list-none items-center gap-1 px-2 py-1 font-medium text-foreground select-none [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+        {label}
+      </summary>
+      <p className="max-h-64 overflow-y-auto border-t px-2 py-1.5 whitespace-pre-wrap">{text}</p>
+    </details>
   );
 }
 

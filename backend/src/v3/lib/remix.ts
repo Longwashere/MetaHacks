@@ -414,6 +414,8 @@ export async function runRemix(
     for (const [i, page] of pages.entries()) {
       report.activity({ kind: "painting", round: log.round, page: page.name });
       const shrunkBefore = shrunk.length;
+      // The text of the newest paint request, for the live view.
+      let sent = "";
       const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background, layouts[i], soften);
       const generated = await withProgress(
         onProgress,
@@ -424,12 +426,8 @@ export async function runRemix(
         async () => {
           const paint = (note: string) => {
             const prompt = [buildImagePrompt(editPrompt), log.feedback, note].filter(Boolean).join(" ");
-            return repaintPage(
-              modelInput,
-              reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
-              reference,
-              signal,
-            );
+            sent = reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt;
+            return repaintPage(modelInput, sent, reference, signal);
           };
           const paintOnce = async (note: string) => {
             try {
@@ -445,6 +443,7 @@ export async function runRemix(
               }
               editPrompt = reworded;
               onPrompt(editPrompt, "reworded");
+              report.event({ type: "reworded", round: log.round, editPrompt });
               await writePrompts();
               return await paint(note);
             }
@@ -458,7 +457,7 @@ export async function runRemix(
             await writePrompts();
             if (fit >= MIN_LAYOUT_FIT) return image;
             const rejected = await putFile(roundFolder, `${path.parse(page.name).name}.rejected-${attempt}.png`, image);
-            report.event({ type: "rejected", round: log.round, page: page.name, attempt, insideBoxes: Math.round(fit * 100) / 100, url: objectUrl(rejected) });
+            report.event({ type: "rejected", round: log.round, page: page.name, attempt, insideBoxes: Math.round(fit * 100) / 100, url: objectUrl(rejected), prompt: sent });
           }
           return null;
         },
@@ -503,7 +502,7 @@ export async function runRemix(
       const pageKey = await putFile(roundFolder, page.name, pagePng);
       pageKeys.push(pageKey);
       const pageUrl = objectUrl(pageKey);
-      report.event({ type: "painted", round: log.round, page: page.name, url: pageUrl, shrunk: shrunk.slice(shrunkBefore) });
+      report.event({ type: "painted", round: log.round, page: page.name, url: pageUrl, shrunk: shrunk.slice(shrunkBefore), prompt: sent });
       show({ round: log.round, pages: { ...preview.pages, [page.name]: pageUrl } });
       fitted.push(await decodePage(pagePng, base.premultipliedAlpha));
       reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
@@ -553,6 +552,8 @@ export async function runRemix(
     const entry: RoundLog["partFixes"][number] = { regions, prompt };
     log.partFixes.push(entry);
     report.activity({ kind: "fixing", round: log.round, regions });
+    // Spark's expansion of the request, reported by the part fix before it paints.
+    let fixPlan: string | null = null;
     const fixMeshes = meshes.filter((m) => regions.includes(m.region) && m.hull.length >= 6);
     const runFix = () =>
       runPartFix(
@@ -573,7 +574,7 @@ export async function runRemix(
           original: { atlasUrl: base.atlasUrl, premultipliedAlpha: base.premultipliedAlpha },
         },
         (p, stage) => onProgress(from + (to - from) * p, `Fixing ${regions.join(", ").slice(0, 60)}: ${stage}`),
-        () => {},
+        (expanded) => (fixPlan = expanded),
         signal,
       );
     try {
@@ -596,7 +597,7 @@ export async function runRemix(
       const shrunk = candidate.shrunk.filter((s) => !regions.includes(s.part));
       const fixed: Candidate = { ...candidate, atlas: result.atlas, textures: result.textures, images: fixedImages, rig: null, render: null, renderUrl: null, shrunk };
       assess(fixed);
-      report.event({ type: "fixed", round: log.round, regions, prompt, error: null });
+      report.event({ type: "fixed", round: log.round, regions, prompt, plan: fixPlan, imagePrompts: result.imagePrompts, error: null });
       await showCandidate(fixed);
       return fixed;
     } catch (error) {
@@ -604,7 +605,7 @@ export async function runRemix(
       // A failed part fix keeps the candidate as it was.
       console.warn(`Part fix in remix ${jobId} failed`, error);
       entry.error = error instanceof Error ? error.message : String(error);
-      report.event({ type: "fixed", round: log.round, regions, prompt, error: entry.error });
+      report.event({ type: "fixed", round: log.round, regions, prompt, plan: fixPlan, imagePrompts: [], error: entry.error });
       return null;
     } finally {
       await writePrompts();

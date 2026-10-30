@@ -173,6 +173,8 @@ export async function runRemix(
   const shown: Record<string, string> = {};
   for (const [i, page] of pages.entries()) {
     report.activity({ kind: "painting", round: 1, page: page.name });
+    // The text of the newest paint request, for the live view.
+    let sent = "";
     const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background, layouts[i], soften);
     const generated = await withProgress(
       onProgress,
@@ -183,12 +185,8 @@ export async function runRemix(
       async () => {
         const paint = (note: string) => {
           const prompt = [buildImagePrompt(editPrompt), note].filter(Boolean).join(" ");
-          return repaintPage(
-            modelInput,
-            reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt,
-            reference,
-            signal,
-          );
+          sent = reference ? `${prompt} The second image is an already repainted page of the same asset; match its colors and materials.` : prompt;
+          return repaintPage(modelInput, sent, reference, signal);
         };
         const paintOnce = async (note: string) => {
           try {
@@ -204,6 +202,7 @@ export async function runRemix(
             }
             editPrompt = reworded;
             onPrompt(editPrompt, "reworded");
+            report.event({ type: "reworded", round: 1, editPrompt });
             await writePrompts();
             return await paint(note);
           }
@@ -221,7 +220,7 @@ export async function runRemix(
         const first = await paintOnce("");
         if (await check(first, 1)) return first;
         const rejected = await putFile(folder, `${path.parse(page.name).name}.rejected.png`, first);
-        report.event({ type: "rejected", round: 1, page: page.name, attempt: 1, insideBoxes, url: objectUrl(rejected) });
+        report.event({ type: "rejected", round: 1, page: page.name, attempt: 1, insideBoxes, url: objectUrl(rejected), prompt: sent });
         const second = await paintOnce(LAYOUT_RETRY_NOTE);
         if (await check(second, 2)) return second;
         await putFile(folder, `${path.parse(page.name).name}.generated.png`, second);
@@ -240,7 +239,7 @@ export async function runRemix(
     );
     pageKeys.push(pageKey);
     shown[page.name] = objectUrl(pageKey);
-    report.event({ type: "painted", round: 1, page: page.name, url: shown[page.name], shrunk: [] });
+    report.event({ type: "painted", round: 1, page: page.name, url: shown[page.name], shrunk: [], prompt: sent });
     report.preview({ round: 1, pages: { ...shown }, skeletonUrl: null });
     reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
   }

@@ -13,7 +13,7 @@ import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { rigHashOf } from "../lib/fingerprint.js";
 import { createUploads, parseUploadInput, publishBlocked } from "../lib/uploads.js";
-import { REMIX_API_VERSIONS, getRemixJobView, startRemix } from "../lib/remix-jobs.js";
+import { REMIX_API_VERSIONS, getRemixJobView, getRemixJobViewForAsset, startRemix } from "../lib/remix-jobs.js";
 import { putFile } from "../lib/storage.js";
 import { MAX_REFERENCE_BYTES, parseDisplayName, parsePartFixInput, parseReferenceImage, parseRemixInput, parseSkeleton } from "../lib/validate.js";
 
@@ -330,11 +330,25 @@ meRouter.post("/remix-jobs", express.json({ limit: MAX_REMIX_BODY_BYTES }), asyn
   res.status(202).json(result.job);
 });
 
-/** GET /me/remix-jobs/:id → RemixJob, or 404 if it isn't the user's */
+/**
+ * GET /me/remix-jobs/:id?eventsFrom=<n> → RemixJob, or 404 if it isn't the user's. `live.events` skips
+ * the first n events (`live.eventsFrom`), for pollers that already have them.
+ */
 meRouter.get("/remix-jobs/:id", async (req, res) => {
-  const job = await getRemixJobView(userIdOf(res), req.params.id);
+  const eventsFrom = Number(req.query.eventsFrom ?? 0);
+  const job = await getRemixJobView(userIdOf(res), req.params.id, Number.isSafeInteger(eventsFrom) && eventsFrom > 0 ? eventsFrom : 0);
   if (!job) {
     res.status(404).json({ error: "Remix job not found." });
+    return;
+  }
+  res.json(job);
+});
+
+/** GET /me/remixes/:assetId/job → the RemixJob that made the user's remix (with its saved log), or 404 */
+meRouter.get("/remixes/:assetId/job", async (req, res) => {
+  const job = await getRemixJobViewForAsset(userIdOf(res), req.params.assetId);
+  if (!job) {
+    res.status(404).json({ error: "No remix job made this asset." });
     return;
   }
   res.json(job);

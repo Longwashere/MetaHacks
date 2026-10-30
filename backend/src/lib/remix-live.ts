@@ -41,11 +41,18 @@ export type RemixQuality = "passed" | "below-bar" | "unchecked";
 /** Something that happened in a remix, for the live view's timeline. */
 export type RemixEventData =
   | { type: "planned"; name: string; editPrompt: string; style: string | null; referenceLook: string | null }
-  | { type: "painted"; round: number; page: string; url: string; shrunk: { part: string; scale: number }[] }
+  /** `prompt` is the exact text Muse Image got for the kept paint. */
+  | { type: "painted"; round: number; page: string; url: string; shrunk: { part: string; scale: number }[]; prompt: string }
   /** Muse Image moved the parts on a page; `url` is its raw output. */
-  | { type: "rejected"; round: number; page: string; attempt: number; insideBoxes: number; url: string }
+  | { type: "rejected"; round: number; page: string; attempt: number; insideBoxes: number; url: string; prompt: string }
+  /** Muse Image declined the edit prompt under its content policy, and Spark re-worded it. */
+  | { type: "reworded"; round: number; editPrompt: string }
   | { type: "checked"; round: number; check: "style" | "rig"; pass: boolean; score: number; summary: string; issues: RemixIssue[]; renderUrl: string | null }
-  | { type: "fixed"; round: number; regions: string[]; prompt: string; error: string | null }
+  /**
+   * `prompt` is the check's request, `plan` Spark's expansion of it (null when unusable or not
+   * reached), and `imagePrompts` the text Muse Image got for each page, without retry notes.
+   */
+  | { type: "fixed"; round: number; regions: string[]; prompt: string; plan: string | null; imagePrompts: string[]; error: string | null }
   /** The plan was rewritten for the next round, or (null) the issues were added to its prompt instead. */
   | { type: "revised"; round: number; editPrompt: string | null }
   /** The version that ships, and whether it cleared the quality bar (see RemixQuality). */

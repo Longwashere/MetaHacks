@@ -39,6 +39,9 @@ export function createRemixJob(input: RemixRequest, { id = newRemixJobId(), onSe
       await onSettled?.(job);
     } catch (error) {
       console.error(`Recording remix job ${job.id} failed`, error);
+    } finally {
+      // The remix_jobs row has it from here; keeping it would grow memory with every remix.
+      jobs.delete(job.id);
     }
   });
   return job;

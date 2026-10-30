@@ -220,9 +220,14 @@ export async function copyRemix(
   }
 }
 
-/** GET /me/remix-jobs/:id — null if it isn't the user's. */
-export async function getRemixJob(session: Session, jobId: string): Promise<RemixJob | null> {
-  return backendOrNull<RemixJob>(`/me/remix-jobs/${id(jobId)}`, { session });
+/** GET /me/remix-jobs/:id — null if it isn't the user's. `eventsFrom` skips log events the caller has. */
+export async function getRemixJob(session: Session, jobId: string, eventsFrom = 0): Promise<RemixJob | null> {
+  return backendOrNull<RemixJob>(`/me/remix-jobs/${id(jobId)}${eventsFrom > 0 ? `?eventsFrom=${eventsFrom}` : ""}`, { session });
+}
+
+/** GET /me/remixes/:assetId/job — the job that made the user's remix, with its saved log; null if none. */
+export async function getRemixJobForAsset(session: Session, assetId: string): Promise<RemixJob | null> {
+  return backendOrNull<RemixJob>(`/me/remixes/${id(assetId)}/job`, { session });
 }
 
 /**

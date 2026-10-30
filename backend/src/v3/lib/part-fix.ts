@@ -69,6 +69,8 @@ export interface PartFixResult {
   /** Storage keys of the new .atlas and every page, in atlas order. */
   atlas: string;
   textures: string[];
+  /** The image prompt for each page it repainted, without retry notes. */
+  imagePrompts: string[];
 }
 
 /**
@@ -227,7 +229,7 @@ export async function runPartFix(
   onProgress(0.95, "Saving the remix");
   const textures = await Promise.all(pages.map((p, i) => putFile(folder, p.name, out[i])));
   const atlas = await putFile(folder, "remix.atlas", atlasText);
-  return { folder, atlas, textures };
+  return { folder, atlas, textures, imagePrompts: Object.values(prompts) };
 }
 
 /**

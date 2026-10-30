@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, Download, ExternalLink, Film, History, Loader2, Paintbrush, Palette, Repeat, RotateCcw, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { Activity, AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, Download, ExternalLink, Film, History, Loader2, Paintbrush, Palette, Repeat, RotateCcw, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -65,6 +65,7 @@ import {
   getMyRemixes,
   getPartFix,
   getRemixJob,
+  getRemixJobForAsset,
   getRemixVersions,
   getSavedAssetIds,
   listAssets,
@@ -121,7 +122,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const remix = await loadOwnRemix(params.get("asset"), session);
   const baseId = remix?.remixOf?.id ?? params.get("base") ?? job?.base.id ?? null;
 
-  const [loadedBase, copySource, savedIds, myRemixes, pickerRigs, account, fix, versions] = await Promise.all([
+  const [loadedBase, copySource, savedIds, myRemixes, pickerRigs, account, fix, versions, remixJob] = await Promise.all([
     baseId ? getAsset(baseId, session) : null,
     remix?.copyOf ? getAsset(remix.copyOf.id, session) : null,
     getSavedAssetIds(session),
@@ -135,6 +136,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     session ? getAccount(session) : null,
     fixId && session ? getPartFix(session, fixId) : null,
     remix && session ? getRemixVersions(session, remix.id) : [],
+    // The job that made the remix, for its Muse log.
+    remix && session ? getRemixJobForAsset(session, remix.id) : null,
   ]);
   // The rig a remix was made from can be gone or private (a copy of someone's remix of their own
   // private remix). The remix then stands in for it, so the workspace still opens.
@@ -149,6 +152,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     fromOriginal: params.get("from") === "original",
     remix,
     job,
+    remixJob,
     fix,
     versions,
     anim: params.get("anim"),
@@ -307,8 +311,19 @@ const EXAMPLE_PROMPTS = [
   "Cyberpunk neon trims and chrome plating",
 ];
 
+/** `next` with the log events its poll skipped taken from `prev`, the same job as seen last. */
+function withEarlierEvents(next: RemixJob, prev: RemixJob | null): RemixJob {
+  if (!next.live || next.live.eventsFrom === 0) return next;
+  const earlier = prev?.id === next.id ? (prev.live?.events ?? []).slice(0, next.live.eventsFrom) : [];
+  return { ...next, live: { ...next.live, events: [...earlier, ...next.live.events], eventsFrom: 0 } };
+}
+
+/** A folder tab on the panel card's top edge; the active one merges into the card below. */
+const FOLDER_TAB =
+  "h-auto! flex-none rounded-t-lg rounded-b-none border-border bg-muted px-4 py-2 data-[state=inactive]:border-b data-[state=active]:border-b-0 data-[state=active]:bg-card data-[state=active]:shadow-none dark:data-[state=active]:border-border dark:data-[state=active]:bg-card";
+
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, copyBase, fromOriginal, remix, job: loadedJob, fix, versions, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
+  const { base, copyBase, fromOriginal, remix, job: loadedJob, remixJob, fix, versions, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
@@ -317,15 +332,22 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   // A running job is polled through /api/remix-job, which skips the rest of this page's loader.
   const jobFetcher = useFetcher<typeof remixJobLoader>();
   const fetchedJob = jobFetcher.data?.job;
-  const job = fetchedJob && fetchedJob.id === loadedJob?.id ? fetchedJob : loadedJob;
+  // Each poll returns only the log events after the ones the page has; this puts them back together.
+  const [polled, setPolled] = useState<{ from: RemixJob; job: RemixJob } | null>(null);
+  if (fetchedJob && fetchedJob !== polled?.from) {
+    setPolled({ from: fetchedJob, job: withEarlierEvents(fetchedJob, polled?.job.id === fetchedJob.id ? polled.job : loadedJob) });
+  }
+  const polledJob = polled && polled.from === fetchedJob ? polled.job : null;
+  const job = polledJob && polledJob.id === loadedJob?.id ? polledJob : loadedJob;
   const jobActive = job?.status === "queued" || job?.status === "running";
   const jobId = job?.id;
+  const eventCount = job?.live?.events.length ?? 0;
   useEffect(() => {
     if (!jobId || !jobActive || jobFetcher.state !== "idle") return;
     // The next poll starts a second after the last one returned, so slow polls never pile up.
-    const t = setTimeout(() => jobFetcher.load(`/api/remix-job?${new URLSearchParams({ id: jobId })}`), 1000);
+    const t = setTimeout(() => jobFetcher.load(`/api/remix-job?${new URLSearchParams({ id: jobId, events: String(eventCount) })}`), 1000);
     return () => clearTimeout(t);
-  }, [jobId, jobActive, jobFetcher.state, jobFetcher.data, jobFetcher.load]);
+  }, [jobId, jobActive, eventCount, jobFetcher.state, jobFetcher.data, jobFetcher.load]);
   // Once it has finished, the page loader shows the result (or redirects to the new remix).
   const finished = loadedJob && fetchedJob?.id === loadedJob.id && !jobActive && fetchedJob.status !== loadedJob.status;
   useEffect(() => {
@@ -345,8 +367,14 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   // Tweaks need a rig on screen: the original before a remix, or the finished remix.
   const canTweak = !job || savedRemix !== null;
   const [panelTab, setPanelTab] = useState<"generate" | "tweak" | "animate">("generate");
-  const tweaking = canTweak && panelTab === "tweak";
-  const animating = savedRemix !== null && panelTab === "animate";
+  // The folder tab the user picked, and the job running when they picked it: a newly started job
+  // switches to "What Muse is doing" until the user picks again.
+  const [picked, setPicked] = useState<{ view: "edit" | "muse"; jobId: string | null }>({ view: "edit", jobId: null });
+  // The log to show: the job on screen, else the one that made the open remix.
+  const logJob = job ?? remixJob;
+  const watching = (jobActive && picked.jobId !== jobId) || picked.view === "muse";
+  const tweaking = canTweak && !watching && panelTab === "tweak";
+  const animating = savedRemix !== null && !watching && panelTab === "animate";
   const navigate = useNavigate();
   // Picking and the part outline only make sense while the Tweak tab is open.
   const playerTweaks: SpineTweakBinding = {
@@ -456,53 +484,81 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                   }
                 }
               />
-              <Card>
-                <Tabs
-                  value={tweaking ? "tweak" : animating ? "animate" : "generate"}
-                  onValueChange={(v) => setPanelTab(v === "tweak" || v === "animate" ? v : "generate")}
-                  className="gap-6"
-                >
-                  <div className="px-6">
-                    <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="generate">
-                        <Sparkles /> Generate
-                      </TabsTrigger>
-                      <TabsTrigger value="tweak" disabled={!canTweak} title={canTweak ? undefined : "Available once the remix finishes"}>
-                        <SlidersHorizontal /> Tweak
-                      </TabsTrigger>
-                      <TabsTrigger value="animate" disabled={!savedRemix} title={savedRemix ? undefined : "Available once the remix finishes"}>
-                        <Film /> Animate
-                      </TabsTrigger>
-                    </TabsList>
-                  </div>
-                  {/* Both tabs stay mounted so the prompt and the tweak panel keep their state. */}
-                  <TabsContent value="generate" forceMount className="flex flex-col gap-6 data-[state=inactive]:hidden">
-                    <CardHeader>
-                      <CardTitle>
-                        <span className="text-muted-foreground">Step 2 ·</span> Describe the new look
-                      </CardTitle>
-                      <CardDescription>Textures are repainted to fit the existing atlas regions, so every animation keeps working.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <RemixForm key={fromCopy ? copyBase.id : base.id} base={fromCopy ? copyBase : base} errors={errors} signedIn={signedIn} usage={usage} />
-                    </CardContent>
+              <Tabs value={watching ? "muse" : "edit"} onValueChange={(v) => setPicked({ view: v === "muse" ? "muse" : "edit", jobId: jobId ?? null })} className="gap-0">
+                {/* Overlaps the card's top border by a pixel, so the active tab joins the card. */}
+                <TabsList className="relative z-10 -mb-px h-auto! gap-1 rounded-none bg-transparent p-0">
+                  <TabsTrigger value="edit" className={FOLDER_TAB}>
+                    <Sparkles /> Remix
+                  </TabsTrigger>
+                  <TabsTrigger value="muse" className={FOLDER_TAB}>
+                    {jobActive ? <Loader2 className="animate-spin" /> : <Activity />} What Muse is doing
+                  </TabsTrigger>
+                </TabsList>
+                <Card className="rounded-tl-none">
+                  <TabsContent value="edit" forceMount className="data-[state=inactive]:hidden">
+                    <Tabs
+                      value={tweaking ? "tweak" : animating ? "animate" : "generate"}
+                      onValueChange={(v) => setPanelTab(v === "tweak" || v === "animate" ? v : "generate")}
+                      className="gap-6"
+                    >
+                      <div className="px-6">
+                        <TabsList className="grid w-full grid-cols-3">
+                          <TabsTrigger value="generate">
+                            <Sparkles /> Generate
+                          </TabsTrigger>
+                          <TabsTrigger value="tweak" disabled={!canTweak} title={canTweak ? undefined : "Available once the remix finishes"}>
+                            <SlidersHorizontal /> Tweak
+                          </TabsTrigger>
+                          <TabsTrigger value="animate" disabled={!savedRemix} title={savedRemix ? undefined : "Available once the remix finishes"}>
+                            <Film /> Animate
+                          </TabsTrigger>
+                        </TabsList>
+                      </div>
+                      {/* Both tabs stay mounted so the prompt and the tweak panel keep their state. */}
+                      <TabsContent value="generate" forceMount className="flex flex-col gap-6 data-[state=inactive]:hidden">
+                        <CardHeader>
+                          <CardTitle>
+                            <span className="text-muted-foreground">Step 2 ·</span> Describe the new look
+                          </CardTitle>
+                          <CardDescription>Textures are repainted to fit the existing atlas regions, so every animation keeps working.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <RemixForm key={fromCopy ? copyBase.id : base.id} base={fromCopy ? copyBase : base} errors={errors} signedIn={signedIn} usage={usage} />
+                        </CardContent>
+                      </TabsContent>
+                      <TabsContent value="tweak" forceMount className="data-[state=inactive]:hidden">
+                        <CardContent>
+                          <TweakPanel {...tweakPanel} />
+                        </CardContent>
+                      </TabsContent>
+                      <TabsContent value="animate" forceMount className="data-[state=inactive]:hidden">
+                        <CardContent>
+                          <AnimatePanel
+                            key={savedRemix?.id ?? ""}
+                            remix={savedRemix}
+                            onAnimated={(name) => navigate(withParams({ anim: name }), { replace: true, preventScrollReset: true })}
+                          />
+                        </CardContent>
+                      </TabsContent>
+
+                    </Tabs>
                   </TabsContent>
-                  <TabsContent value="tweak" forceMount className="data-[state=inactive]:hidden">
-                    <CardContent>
-                      <TweakPanel {...tweakPanel} />
-                    </CardContent>
+                  <TabsContent value="muse" className="flex flex-col gap-6">
+                    {logJob?.live ? (
+                      <RemixTimeline job={logJob} />
+                    ) : (
+                      <CardHeader>
+                        <CardTitle>What Muse is doing</CardTitle>
+                        <CardDescription>
+                          {logJob
+                            ? "This remix didn't keep a log of Muse's steps."
+                            : "Start a remix and Muse's steps show up here: planning the look, painting each page and checking the result."}
+                        </CardDescription>
+                      </CardHeader>
+                    )}
                   </TabsContent>
-                  <TabsContent value="animate" forceMount className="data-[state=inactive]:hidden">
-                    <CardContent>
-                      <AnimatePanel
-                        key={savedRemix?.id ?? ""}
-                        remix={savedRemix}
-                        onAnimated={(name) => navigate(withParams({ anim: name }), { replace: true, preventScrollReset: true })}
-                      />
-                    </CardContent>
-                  </TabsContent>
-                </Tabs>
-              </Card>
+                </Card>
+              </Tabs>
             </div>
 
             {/* Sticks while the tweak panel scrolls, so the rig stays beside the controls. */}
@@ -596,10 +652,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
           </div>
 
           {job?.live && jobActive ? (
-            <div className="grid gap-8 lg:grid-cols-3">
-              <RemixTimeline job={job} className="lg:self-start" />
-              <RemixLiveSheet job={job} className="lg:col-span-2" />
-            </div>
+            <RemixLiveSheet job={job} />
           ) : (
             <PartFixSection
               // Remount per rig/result so page, source and part selection start fresh.

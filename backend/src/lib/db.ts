@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE } from "./config.js";
 import { objectUrl } from "./storage.js";
+import type { RemixLive } from "./remix-live.js";
 import type { ArtStyle } from "./types.js";
 
 // Supabase client (service role: bypasses RLS) and the row shapes of supabase/migrations/.
@@ -87,7 +88,7 @@ export const PROFILE_COLUMNS =
   "id, name, avatar_url, stripe_customer_id, plan, subscription_id, subscription_status, current_period_end, created_at";
 
 export const REMIX_JOB_COLUMNS =
-  "id, user_id, base_asset_id, api_version, input, status, error, edit_prompt, prompt_status, asset_id, created_at";
+  "id, user_id, base_asset_id, api_version, input, status, error, edit_prompt, prompt_status, asset_id, live, created_at";
 
 export interface RemixJobRow {
   id: string;
@@ -100,6 +101,8 @@ export interface RemixJobRow {
   edit_prompt: string | null;
   prompt_status: string;
   asset_id: string | null;
+  /** The live view's log, saved when a v2 or v3 job settles; null before then and for v1. */
+  live: RemixLive | null;
   created_at: string;
 }
 
