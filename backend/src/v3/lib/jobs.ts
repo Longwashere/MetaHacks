@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AiTimeoutError } from "../../lib/ai-fetch.js";
 import { REMIX_JOB_TIMEOUT_MS } from "../../lib/config.js";
+import { queuedStage, runInSlot } from "../../lib/job-slots.js";
 import { type ModelCall, recordModelCalls, totalUsage } from "./meta.js";
 import { runRemix } from "./remix.js";
 import type { RemixJob, RemixRequest } from "./types.js";
@@ -34,7 +35,7 @@ export function createRemixJob(input: RemixRequest, { id = newRemixJobId(), onSe
     error: null,
   };
   jobs.set(job.id, job);
-  void runJob(job).then(async () => {
+  void runInSlot(() => runJob(job), (ahead) => (job.stage = queuedStage(ahead))).then(async () => {
     try {
       await onSettled?.(job);
     } catch (error) {

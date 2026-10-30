@@ -18,6 +18,11 @@ export const PORT = Number(process.env.PORT ?? 4000);
 
 /** Hard cap on a whole remix job (Muse + image model + packing). */
 export const REMIX_JOB_TIMEOUT_MS = ms("REMIX_JOB_TIMEOUT_MS", 30 * MINUTE);
+/**
+ * How many remixes and part fixes run at once; the rest wait in line. Each job makes many Meta
+ * calls in parallel (one per page, plus checks), and a burst of 4 Spark calls already hit failures.
+ */
+export const MAX_RUNNING_JOBS = Math.floor(ms("MAX_RUNNING_JOBS", 3));
 /** Cap on a single Muse request. */
 export const MUSE_TIMEOUT_MS = ms("MUSE_TIMEOUT_MS", 5 * MINUTE);
 /** Cap on a single image model request. */

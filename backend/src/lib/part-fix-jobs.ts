@@ -4,6 +4,7 @@ import { REMIX_JOB_TIMEOUT_MS } from "./config.js";
 import { ASSET_COLUMNS, REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
 import { fingerprintFiles } from "./fingerprint.js";
 import { newRemixJobId } from "./jobs.js";
+import { queuedStage, runInSlot } from "./job-slots.js";
 import { boxMeshes, checkMeshes, meshOutlines } from "./mesh.js";
 import { allowanceError } from "./remix-jobs.js";
 import { objectUrl, putFile } from "./storage.js";
@@ -76,7 +77,7 @@ export async function startPartFix(userId: string, assetId: string, input: PartF
 
   const job: LiveFix = { assetId: asset.id, status: "queued", progress: 0, stage: "Queued", editPrompt: null };
   live.set(id, job);
-  void runJob(id, job, asset, original, editPrompt, input);
+  void runInSlot(() => runJob(id, job, asset, original, editPrompt, input), (ahead) => (job.stage = queuedStage(ahead)));
 
   const view = await getPartFixView(userId, id);
   if (!view) throw new Error(`Part fix ${id} vanished right after it was created`);
