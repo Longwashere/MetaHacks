@@ -7,9 +7,10 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
-import { getAsset, getSavedAssetIds, listFeaturedAssets, listRemixesOf } from "~/lib/api.server";
+import { getAsset, getSavedAssetIds, listFeaturedAssets } from "~/lib/api.server";
 import { getSession } from "~/lib/auth.server";
 import { SITE_NAME, seoMeta } from "~/lib/seo";
+import { SHOWCASE_RIGS } from "~/lib/showcase";
 import { getSiteUrl } from "~/lib/site.server";
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -47,26 +48,17 @@ const PINNED_ASSET_IDS = [
 ];
 const FEATURED_COUNT = 8;
 
-/** The rig whose public remixes cycle through the before/after showcase. */
-const SHOWCASE_ASSET_ID = "windmill";
-const SHOWCASE_REMIX_LIMIT = 24;
-
 export async function loader({ request, context }: Route.LoaderArgs) {
-  const [pinned, popular, savedIds, showcaseOriginal, showcaseRemixes] = await Promise.all([
+  const [pinned, popular, savedIds] = await Promise.all([
     Promise.all(PINNED_ASSET_IDS.map((assetId) => getAsset(assetId, null))),
     listFeaturedAssets(FEATURED_COUNT),
     getSavedAssetIds(getSession(context)),
-    getAsset(SHOWCASE_ASSET_ID, null),
-    // The showcase is decoration: the page still renders without it.
-    listRemixesOf(SHOWCASE_ASSET_ID, SHOWCASE_REMIX_LIMIT).catch(() => []),
   ]);
-  const remixes = showcaseRemixes.filter((asset) => asset.files !== null);
-  const showcase = showcaseOriginal?.files && remixes.length > 0 ? { original: showcaseOriginal, remixes } : null;
   // Pinned first, topped up with the most-saved assets so the row is never short.
   const picked = pinned.filter((asset) => asset !== null);
   const pickedIds = new Set(picked.map((asset) => asset.id));
   const featured = [...picked, ...popular.filter((asset) => !pickedIds.has(asset.id))].slice(0, FEATURED_COUNT);
-  return { featured, savedIds, showcase, siteUrl: getSiteUrl(request) };
+  return { featured, savedIds, siteUrl: getSiteUrl(request) };
 }
 
 const STEPS = [
@@ -88,7 +80,7 @@ const STEPS = [
 ];
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-  const { featured, savedIds, showcase } = loaderData;
+  const { featured, savedIds } = loaderData;
   return (
     <div className="flex flex-col gap-16">
       <section className="mx-auto flex max-w-3xl flex-col items-center gap-6 pt-8 text-center">
@@ -121,7 +113,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </div>
       </section>
 
-      {showcase && (
+      {SHOWCASE_RIGS.length > 0 && (
         <section aria-labelledby="showcase-title" className="mx-auto flex w-full max-w-3xl flex-col gap-4">
           <div className="text-center">
             <h2 id="showcase-title" className="text-2xl font-semibold tracking-tight">
@@ -129,7 +121,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </h2>
             <p className="text-sm text-muted-foreground">Same bones, same animation. Drag the slider to compare with the original.</p>
           </div>
-          <RemixShowcase original={showcase.original} remixes={showcase.remixes} />
+          <RemixShowcase rigs={SHOWCASE_RIGS} />
         </section>
       )}
 

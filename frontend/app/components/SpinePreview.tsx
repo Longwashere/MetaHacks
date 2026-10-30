@@ -77,8 +77,8 @@ export function SpinePreview({
       role="img"
       aria-label={`${asset.category} preview playing ${name}`}
       className={cn(
-        "relative flex aspect-square items-center justify-center overflow-hidden bg-muted/40",
-        "bg-[linear-gradient(to_right,var(--color-border)_1px,transparent_1px),linear-gradient(to_bottom,var(--color-border)_1px,transparent_1px)] bg-size-[16px_16px]",
+        "relative flex aspect-square items-center justify-center overflow-hidden",
+        STAGE_GRID,
         ACCENT_TEXT[asset.accent],
         className,
       )}
@@ -173,66 +173,67 @@ export function SpinePreview({
   );
 }
 
-interface CompareLayerProps {
-  /** The original rig's runtime, drawn left of the divider. */
-  original: ReactNode;
-  ready: boolean;
-  /** Percent of the stage, from the left, showing the original. Uncontrolled (starting at 50) when omitted. */
-  split?: number;
-  onSplitChange?: (split: number) => void;
-  /** Label for the right side. */
-  remixLabel?: string;
-}
+/** The stage's grid background, for a layer that has to hide what's under it. */
+export const STAGE_GRID =
+  "bg-muted/40 bg-[linear-gradient(to_right,var(--color-border)_1px,transparent_1px),linear-gradient(to_bottom,var(--color-border)_1px,transparent_1px)] bg-size-[16px_16px]";
 
 /**
  * Clips the original rig to the left of a draggable divider, over the remix. The divider is the
  * only thing taking pointer input, so clicks elsewhere still reach the remix (part picking).
  */
-export function CompareLayer({ original, ready, split: controlledSplit, onSplitChange, remixLabel = "Remix" }: CompareLayerProps) {
-  const [internalSplit, setInternalSplit] = useState(50);
-  const split = controlledSplit ?? internalSplit;
-  const setSplit = (next: number) => {
-    setInternalSplit(next);
-    onSplitChange?.(next);
-  };
+function CompareLayer({ original, ready }: { original: ReactNode; ready: boolean }) {
+  const [split, setSplit] = useState(50);
+  return (
+    <div className={cn("pointer-events-none absolute inset-0 transition-opacity duration-300", ready ? "opacity-100" : "opacity-0")}>
+      {/* The stage's grid, so the remix doesn't show through where the original is transparent. */}
+      <div className="absolute inset-0 bg-card" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
+        <div className={cn("absolute inset-0", STAGE_GRID)}>{original}</div>
+      </div>
+      <CompareDivider split={split} onSplitChange={setSplit} leftLabel="Original" rightLabel="Remix" />
+    </div>
+  );
+}
+
+interface CompareDividerProps {
+  /** Percent of the stage, from the left, showing the left layer. */
+  split: number;
+  onSplitChange: (split: number) => void;
+  leftLabel: string;
+  rightLabel: string;
+}
+
+/** The draggable divider and side labels of a before/after stage. Fills its positioned parent. */
+export function CompareDivider({ split, onSplitChange, leftLabel, rightLabel }: CompareDividerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const setSplit = (next: number) => onSplitChange(Math.min(100, Math.max(0, next)));
 
   const moveTo = (e: PointerEvent<HTMLDivElement>) => {
     const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect?.width) return;
-    setSplit(Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)));
+    if (rect?.width) setSplit(((e.clientX - rect.left) / rect.width) * 100);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.shiftKey ? 10 : 2;
     const next = { ArrowLeft: split - step, ArrowRight: split + step, Home: 0, End: 100 }[e.key];
     if (next === undefined) return;
     e.preventDefault();
-    setSplit(Math.min(100, Math.max(0, next)));
+    setSplit(next);
   };
+  const label = "absolute bottom-3 max-w-[45%] truncate rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs transition-opacity duration-200";
 
   return (
-    <div ref={rootRef} className={cn("pointer-events-none absolute inset-0 transition-opacity duration-300", ready ? "opacity-100" : "opacity-0")}>
-      {/* The stage's grid, so the remix doesn't show through where the original is transparent. */}
-      <div className="absolute inset-0 bg-card" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
-        <div className="absolute inset-0 bg-muted/40 bg-[linear-gradient(to_right,var(--color-border)_1px,transparent_1px),linear-gradient(to_bottom,var(--color-border)_1px,transparent_1px)] bg-size-[16px_16px]">
-          {original}
-        </div>
-      </div>
-      <span className="absolute bottom-3 left-3 rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
-        Original
-      </span>
-      <span className="absolute right-3 bottom-3 max-w-[45%] truncate rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
-        {remixLabel}
-      </span>
-      <div className="absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_var(--color-border)]" style={{ left: `${split}%` }}>
+    <div ref={rootRef} className="pointer-events-none absolute inset-0 z-20">
+      {/* Each label shows only while its side is on screen. */}
+      <span className={cn(label, "left-3", split > 2 ? "opacity-100" : "opacity-0")}>{leftLabel}</span>
+      <span className={cn(label, "right-3", split < 98 ? "opacity-100" : "opacity-0")}>{rightLabel}</span>
+      <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_var(--color-border)]" style={{ left: `${split}%` }}>
         <div
           role="slider"
           tabIndex={0}
-          aria-label="Compare original and remix"
+          aria-label={`Compare ${leftLabel} and ${rightLabel}`}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(split)}
-          aria-valuetext={`${Math.round(split)}% original`}
+          aria-valuetext={`${Math.round(split)}% ${leftLabel}`}
           onPointerDown={(e) => {
             e.currentTarget.setPointerCapture(e.pointerId);
             moveTo(e);
