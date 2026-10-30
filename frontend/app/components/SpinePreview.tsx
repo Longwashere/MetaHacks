@@ -173,12 +173,28 @@ export function SpinePreview({
   );
 }
 
+interface CompareLayerProps {
+  /** The original rig's runtime, drawn left of the divider. */
+  original: ReactNode;
+  ready: boolean;
+  /** Percent of the stage, from the left, showing the original. Uncontrolled (starting at 50) when omitted. */
+  split?: number;
+  onSplitChange?: (split: number) => void;
+  /** Label for the right side. */
+  remixLabel?: string;
+}
+
 /**
  * Clips the original rig to the left of a draggable divider, over the remix. The divider is the
  * only thing taking pointer input, so clicks elsewhere still reach the remix (part picking).
  */
-function CompareLayer({ original, ready }: { original: ReactNode; ready: boolean }) {
-  const [split, setSplit] = useState(50);
+export function CompareLayer({ original, ready, split: controlledSplit, onSplitChange, remixLabel = "Remix" }: CompareLayerProps) {
+  const [internalSplit, setInternalSplit] = useState(50);
+  const split = controlledSplit ?? internalSplit;
+  const setSplit = (next: number) => {
+    setInternalSplit(next);
+    onSplitChange?.(next);
+  };
   const rootRef = useRef<HTMLDivElement>(null);
 
   const moveTo = (e: PointerEvent<HTMLDivElement>) => {
@@ -205,8 +221,8 @@ function CompareLayer({ original, ready }: { original: ReactNode; ready: boolean
       <span className="absolute bottom-3 left-3 rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
         Original
       </span>
-      <span className="absolute right-3 bottom-3 rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
-        Remix
+      <span className="absolute right-3 bottom-3 max-w-[45%] truncate rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
+        {remixLabel}
       </span>
       <div className="absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_var(--color-border)]" style={{ left: `${split}%` }}>
         <div
