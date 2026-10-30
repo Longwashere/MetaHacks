@@ -1,11 +1,12 @@
 import { ChevronRight, CircleAlert, MessageSquareText, CircleCheck, Loader2, Move, Paintbrush, PenLine, ShieldAlert, Sparkles, Trophy, Undo2, Wrench } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { SpinePreview } from "~/components/SpinePreview";
+import { defaultAnimation } from "~/lib/animation";
 import { Badge } from "~/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { type AtlasPage, parseAtlas } from "~/lib/atlas";
-import type { RemixActivity, RemixEvent, RemixIssue, RemixJob } from "~/lib/types";
+import type { RemixActivity, RemixEvent, RemixIssue, RemixJob, SpineAnimation } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
 // The live view of a running v2 or v3 remix (RemixJob.live): the rig redrawn as each page is painted,
@@ -40,18 +41,48 @@ export function activityLabel(activity: RemixActivity): string {
   }
 }
 
+/** Activities before any painting starts, while the bones are drawn over the original skin. */
+const PLANNING: RemixActivity["kind"][] = ["reading", "reference", "planning"];
+
+/** How many times a clip plays before the live player moves on: twitches once, real motion three times. */
+const clipLoops = (durationSec: number) => (durationSec < 1 ? 1 : 3);
+
+/**
+ * Cycles through the rig's animations, starting from the default one. 0s clips are setup poses
+ * and never move, so they're skipped.
+ */
+function useAnimationCycle(animations: SpineAnimation[]) {
+  const clips = animations.filter((a) => a.durationSec > 0);
+  const first = defaultAnimation(animations);
+  const start = Math.max(0, clips.findIndex((a) => a.name === first?.name));
+  const [step, setStep] = useState(0);
+  const clip = clips.length > 0 ? clips[(start + step) % clips.length] : first;
+  const duration = clip?.durationSec ?? 0;
+
+  useEffect(() => {
+    if (clips.length < 2 || duration <= 0) return;
+    const timer = setTimeout(() => setStep((s) => s + 1), duration * clipLoops(duration) * 1000);
+    return () => clearTimeout(timer);
+  }, [step, clips.length, duration]);
+
+  return clip?.name;
+}
+
 /** The rig with the newest painted pages swapped in, so the user watches it change. */
 export function RemixLivePlayer({ job, className }: { job: RemixJob; className?: string }) {
   const preview = job.live?.preview ?? null;
   const activity = job.live?.activity ?? null;
   const files = job.base.files && { ...job.base.files, skeletonUrl: preview?.skeletonUrl ?? job.base.files.skeletonUrl };
   const painted = preview !== null && Object.keys(preview.pages).length > 0;
+  // The rig is drawn over the skin only until painting starts; after that the skin is the point.
+  const planning = !painted && (activity === null || PLANNING.includes(activity.kind));
+  const animation = useAnimationCycle(job.base.animations);
   // Changes whenever new art lands, which replays the reveal flash.
   const revealKey = preview ? JSON.stringify(preview) : "";
 
   return (
     <div className={cn("relative overflow-hidden rounded-lg", className)}>
-      <SpinePreview asset={{ ...job.base, files }} pageUrls={preview?.pages} showBones className={cn(!painted && "opacity-60")} />
+      <SpinePreview asset={{ ...job.base, files }} animation={animation} pageUrls={preview?.pages} showBones={planning} className={cn(!painted && "opacity-60")} />
       {activity && SCANNING.includes(activity.kind) && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
           <div className="absolute inset-x-0 h-1/3 animate-remix-scan bg-linear-to-b from-transparent via-primary/15 to-transparent" />
@@ -62,6 +93,11 @@ export function RemixLivePlayer({ job, className }: { job: RemixJob; className?:
         <Badge variant="secondary" className="bg-background/85 backdrop-blur-xs">
           {painted ? versionLabel(preview.round) : "Original"}
         </Badge>
+        {animation && (
+          <Badge variant="outline" className="bg-background/85 font-mono text-[11px] backdrop-blur-xs">
+            {animation}
+          </Badge>
+        )}
       </div>
       {activity && (
         <div className="pointer-events-none absolute inset-x-3 bottom-3 flex">
