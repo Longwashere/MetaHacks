@@ -46,6 +46,20 @@ export const IMAGE_MODEL = modelId("IMAGE_MODEL", "muse-image-1.0");
  */
 export const ANIMATE_REASONING_EFFORT = process.env.ANIMATE_REASONING_EFFORT || "high";
 
+/**
+ * Baseten's OpenAI-compatible API, serving Muse Spark Open (hackathon credits). The key only works
+ * with that one model. Null until BASETEN_API_KEY is set; nothing calls it yet.
+ */
+export const BASETEN = (() => {
+  const apiKey = process.env.BASETEN_API_KEY?.trim();
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    baseUrl: url("BASETEN_API_BASE_URL", "https://inference.baseten.co/v1"),
+    model: modelId("BASETEN_MODEL", "meta-models/muse-spark-open-1026"),
+  };
+})();
+
 /** Where the base rigs' files are served from (the frontend serves /spine/… in dev). */
 export const ASSET_BASE_URL = url("ASSET_BASE_URL", "http://localhost:5173");
 /** This server's public origin, used to build URLs for generated textures. */
