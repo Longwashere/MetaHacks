@@ -375,9 +375,15 @@ function TimelineItem({ event, offset }: { event: RemixEvent; offset: number }) 
       body = event.editPrompt ? <p className="line-clamp-3">{event.editPrompt}</p> : <p>Added the checks' fixes to the image prompt.</p>;
       break;
     case "chosen":
-      icon = <Trophy className="text-primary" />;
-      title = `Keeping attempt ${event.round}`;
-      body = <p>Best score of all attempts: {Math.round(event.score * 100)}%.</p>;
+      icon = event.quality === "passed" ? <Trophy className="text-primary" /> : <CircleAlert className="text-destructive" />;
+      title = `Keeping attempt ${event.round}${event.quality === "below-bar" ? " · below the quality bar" : event.quality === "unchecked" ? " · not fully checked" : ""}`;
+      body = (
+        <p>
+          Best score of all attempts: {Math.round(event.score * 100)}%.
+          {event.quality === "below-bar" && " It didn't pass every check, so look it over before using it, or try again."}
+          {event.quality === "unchecked" && " A check couldn't run, so look it over before using it."}
+        </p>
+      );
       break;
     case "tweaked":
       icon = <Move className="text-primary" />;

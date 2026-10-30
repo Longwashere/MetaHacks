@@ -288,9 +288,16 @@ Add the entry in the same task, not later.
 - **Keyed mode is untested in a full run.** The despill fix for keyed mode (outline not kept) was only checked offline on saved model output. Still to see: gaps at joints, parts cut off at their region rectangle, and art close to the key colour turning transparent. (2026-10-27)
 - **Spine viewer `dispose` crash.** A failed skeleton download makes the Spine runtime throw `Cannot read properties of null (reading 'dispose')`. The cause was found, but the fix (fetch the rig files ourselves, fall back to the placeholder) was never applied. (2026-10-26)
 - **Node version.** React Router needs Node > 22.22.0; the dev machine's nvm default is 22.20.0. Most frontend commands only warn, but `npm run typecheck` fails outright in `react-router typegen` ("Oops, Node v22.20.0 detected"), which cost a retry on 2026-10-28. Workaround: Homebrew's Node 24 is installed, so run `PATH=/opt/homebrew/bin:$PATH npm run typecheck`, or `nvm install 24` and make it the default. Watch for a quieter failure too: on 2026-10-29 the typegen step bailed on the old Node, and a plain `tsc -b` then passed because the new routes had no generated `+types` yet, so it looked green. After adding a route, check that `.react-router/types/app/routes/+types/<route>.ts` exists. (2026-10-27)
-- **API keys appeared in plain text in chat sessions.** The Meta key and the Cloudflare API token (which the R2 credentials are derived from) are stored in `backend/.env` (gitignored), but rotate both before the repo goes public. Rolling the Cloudflare token changes `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` too. (2026-10-27)
+- **API keys appeared in plain text in chat sessions.** The Meta key and the Cloudflare API token (which the R2 credentials are derived from) are stored in `backend/.env` (gitignored), but rotate both before the repo goes public. The Baseten key (`BASETEN_API_KEY`) was pasted in chat on 2026-10-30 too. Rolling the Cloudflare token changes `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` too. (2026-10-27)
 
 ### Log
+
+### 2026-10-30 — Cloudflare Workers Build failed: wrangler ran in the monorepo root
+- **What happened:** The `rigforge-frontend` Git build ran `npm run build` from the repo root (it built every workspace), and the build never reached a deploy. The pasted dashboard log stopped at "rendering chunks...".
+- **Evidence (verified locally):** the root build succeeds. `npx wrangler deploy --dry-run` from the repo root fails with "The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project"; from `frontend/` it succeeds. The full CI log couldn't be fetched: the wrangler OAuth token gets "Authentication error" on the Workers Builds API. That the CI deploy step hit this same error is inferred.
+- **Cost:** User time and a failed deploy.
+- **Workaround / status:** In the dashboard (Settings → Build), set the deploy command to `cd frontend && npx wrangler deploy` (build `npm run build -w frontend`), or set the root directory to `frontend`.
+- **Lesson:** In this monorepo, every wrangler command has to run from `frontend/`.
 
 ### 2026-10-28 — Signing in from "Make a copy" landed on raw `.data` output
 - **What happened:** A guest clicked "Make a copy", signed in with Google, and was sent to `/assets/<id>.data`, which shows React Router's serialized loader data instead of the page.

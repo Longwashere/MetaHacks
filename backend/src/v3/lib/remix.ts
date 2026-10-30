@@ -9,6 +9,7 @@ import {
   type Inspection,
   type InspectionContext,
   type InspectionIssue,
+  type RejectedPrompt,
   STYLE_LOOKS,
   describeReference,
   describeStyle,
@@ -40,7 +41,7 @@ import {
   toDataUrl,
   toModelInput,
 } from "./textures.js";
-import type { RemixIssue, RemixPreview, RemixReporter } from "../../lib/remix-live.js";
+import type { RemixIssue, RemixPreview, RemixQuality, RemixReporter } from "../../lib/remix-live.js";
 import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
 
 export interface RemixProgress {
@@ -98,11 +99,6 @@ const MAX_PART_FIXES = 2;
 const MAX_FIX_PARTS = 6;
 /** No new round or part fix starts after this long; the job's own deadline is REMIX_JOB_TIMEOUT_MS. */
 const LOOP_BUDGET_MS = 8 * 60_000;
-/**
- * A rig check scoring at least this, after its part fixes, ships: the first live run scored a
- * passing style 0.88, then spent three more repaints chasing the rig check (FRICTION_LOG.md, 2026-10-29).
- */
-const GOOD_ENOUGH_RIG = 0.6;
 /** Tries per part fix, for network errors only; the part fix retries its own bad paint. */
 const PART_FIX_ATTEMPTS = 2;
 /** Spark took 47 s to revise a plan with one page and a render (2026-10-29). */
@@ -117,8 +113,11 @@ const TWEAK_EXPECTED_MS = 60_000;
 const MAX_STAGE_SUMMARY = 90;
 /** Inspector feedback carried into the next repaint, at most. */
 const MAX_FEEDBACK_CHARS = 700;
-/** A check whose inspector reply was unusable counts as passed with this score, so it never blocks a remix. */
-const UNCHECKED_SCORE = 0.7;
+/**
+ * Score for a check that couldn't run (no drawing, or Spark failed twice). Below SHIP_SCORE, so a
+ * version that was checked and passed outranks one that wasn't checked.
+ */
+const UNCHECKED_SCORE = 0.5;
 
 /** One painted version of the sheet, as stored. */
 interface Candidate {
@@ -139,6 +138,8 @@ interface Candidate {
   boxed: string[];
   /** Regions still cut off by a mesh the game clips them to, after boxing (see crop.ts). */
   crops: CropResult[];
+  /** A check had a drawing to judge but Spark gave no usable verdict, even on a retry. */
+  unchecked: boolean;
 }
 
 /** What the tweak step did, for prompts.json. */
@@ -192,10 +193,13 @@ interface RoundLog {
  *    parts go to a part fix (part-fix.ts) and are checked again, and the loop ends there either
  *    way. Broader problems rewrite the edit prompt and repaint the sheet.
  *
- * It stops when both checks pass, when the rig check reaches GOOD_ENOUGH_RIG, when a round scores
- * no better than the best so far, or after MAX_ROUNDS / LOOP_BUDGET_MS, and then returns the
- * best-scoring version. Each round is stored under <timestamp>_<jobId>/round-<n>/, with
+ * It stops when both checks pass (score at least SHIP_SCORE), when a round scores no better than
+ * the best so far, or after MAX_ROUNDS / LOOP_BUDGET_MS, and then returns the best-scoring version,
+ * whether or not it cleared the bar (the "chosen" event says which, see qualityOf). Each round is stored under <timestamp>_<jobId>/round-<n>/, with
  * prompts.json in the job folder recording every check.
+ *
+ * Diagrams of the loop: https://claude.ai/artifact/BCV5nnvZ98CbmB44K5Sqy6. Update it when the
+ * loop changes (see backend/AGENTS.md, Living docs).
  *
  * Throw an Error with a user-facing message on failure; the job runner stores it as
  * `job.error`. `signal` fires when the whole job runs out of time — pass it through.
@@ -327,14 +331,16 @@ export async function runRemix(
   let editPrompt = plan.editPrompt;
   let reworded: string | null = null;
   const regionNames = [...new Set(pages.flatMap((p) => p.regions))];
-  const inspection = (): InspectionContext => ({
+  const inspection: InspectionContext = {
     prompt: input.prompt,
-    editPrompt,
+    editPrompt: plan.editPrompt,
     styleLook,
     referenceLook: referenceLook?.look ?? null,
     keepPalette: input.keepPalette,
     parts: regionNames,
-  });
+  };
+  /** Edit prompts the inspectors rejected, oldest first, so a revision doesn't undo an earlier one. */
+  const rejectedPrompts: RejectedPrompt[] = [];
   const rounds: RoundLog[] = [];
 
   // Timestamp first so folders sort by creation time when browsing the output.
@@ -505,7 +511,7 @@ export async function runRemix(
     // Regions are unchanged and page names are kept, so the base atlas works as-is.
     const atlas = await putFile(roundFolder, "remix.atlas", atlasText);
     log.shrunk = shrunk;
-    const candidate: Candidate = { round: log.round, atlas, textures: pageKeys, images: fitted, style: null, rig: null, render: null, renderUrl: null, shrunk, boxed: [], crops: [] };
+    const candidate: Candidate = { round: log.round, atlas, textures: pageKeys, images: fitted, style: null, rig: null, render: null, renderUrl: null, shrunk, boxed: [], crops: [], unchecked: false };
     assess(candidate);
     log.boxed = candidate.boxed;
     log.crops = candidate.crops;
@@ -527,11 +533,13 @@ export async function runRemix(
     candidate.render = after.dataUrl;
     candidate.renderUrl = objectUrl(await putFile(`${folder}/round-${candidate.round}`, `${name}.png`, after.png));
     report.activity({ kind: kind === "style" ? "checking-style" : "checking-rig", round: candidate.round });
-    return withProgress(onProgress, from, to, stage, INSPECT_EXPECTED_MS, () =>
+    const result = await withProgress(onProgress, from, to, stage, INSPECT_EXPECTED_MS, () =>
       kind === "style"
-        ? inspectStyle(inspection(), before.dataUrl, after.dataUrl, referenceImage, signal)
-        : inspectRig({ ...inspection(), shrunk: candidate.shrunk }, before.dataUrl, after.dataUrl, signal),
+        ? inspectStyle(inspection, before.dataUrl, after.dataUrl, referenceImage, signal)
+        : inspectRig({ ...inspection, shrunk: candidate.shrunk }, before.dataUrl, after.dataUrl, signal),
     );
+    if (!result) candidate.unchecked = true;
+    return result;
   };
 
   // Mesh outlines the game clips parts to, so part fixes keep inside them (see part-fix.ts).
@@ -618,9 +626,10 @@ export async function runRemix(
     report.activity({ kind: "revising", round: log.round });
     const revised = candidate.render
       ? await withProgress(onProgress, from, to, stage, REVISE_EXPECTED_MS, () =>
-          revisePlan({ prompt: input.prompt, editPrompt, parts, issues }, pageImages, candidate.render ?? "", signal),
+          revisePlan({ prompt: input.prompt, editPrompt, parts, issues, earlier: rejectedPrompts }, pageImages, candidate.render ?? "", signal),
         )
       : null;
+    rejectedPrompts.push({ editPrompt, issues });
     if (revised) {
       editPrompt = revised;
       log.revisedEditPrompt = revised;
@@ -693,7 +702,7 @@ export async function runRemix(
     keep(candidate, log);
     await writePrompts();
     const rig = candidate.rig;
-    if (!rig || rig.pass || rig.score >= GOOD_ENOUGH_RIG) break;
+    if (!rig || rig.pass) break;
     // Problems in a few parts were the part fixes' to solve; repainting the sheet would throw away
     // everything that passed. A round that didn't beat the last one won't be beaten by another.
     if (isLocal(rig) || (bestBefore !== null && scoreOf(candidate) <= bestBefore)) break;
@@ -706,7 +715,7 @@ export async function runRemix(
   const chosen = best as { candidate: Candidate; score: number } | null;
   if (!chosen) throw new Error("The image model moved the parts out of place every time. Try a smaller change or a lower strength.");
   await writePrompts();
-  report.event({ type: "chosen", round: chosen.candidate.round, score: Math.round(chosen.score * 100) / 100 });
+  report.event({ type: "chosen", round: chosen.candidate.round, score: Math.round(chosen.score * 100) / 100, quality: qualityOf(chosen.candidate) });
   await showCandidate(chosen.candidate);
 
   // Tweak step: parts are moved and scaled back to fit like the original. Only a JSON skeleton can
@@ -850,6 +859,16 @@ function scoreOf(candidate: Candidate): number {
   const style = candidate.style?.score ?? UNCHECKED_SCORE;
   if (candidate.style && !candidate.style.pass) return style / 2;
   return 0.5 + (style + (candidate.rig?.score ?? UNCHECKED_SCORE)) / 4;
+}
+
+/**
+ * Whether the shipped version clears the quality bar (SHIP_SCORE): "below-bar" when a check it got
+ * failed, else "unchecked" when a check didn't run, else "passed". A remix ships either way; the
+ * live view warns about the first two.
+ */
+function qualityOf(candidate: Candidate): RemixQuality {
+  if (candidate.style?.pass === false || candidate.rig?.pass === false) return "below-bar";
+  return candidate.style && candidate.rig && !candidate.unchecked ? "passed" : "unchecked";
 }
 
 /**

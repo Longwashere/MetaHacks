@@ -510,6 +510,7 @@ export interface InspectionIssue {
 
 /** An inspector's verdict on a painted remix (see inspectStyle and inspectRig). */
 export interface Inspection {
+  /** score >= SHIP_SCORE. */
   pass: boolean;
   /** 0–1: how well the remix does on this check. Ranks the attempts when none pass. */
   score: number;
@@ -517,20 +518,26 @@ export interface Inspection {
   issues: InspectionIssue[];
 }
 
-/** Least score an inspector must give, besides saying pass, for a check to pass. */
-const MIN_PASS_SCORE = 0.7;
+/**
+ * The quality bar: a check passes at this score, and a remix ships without a warning only when
+ * every check passed. Pass is worked out from the score, not asked for, so the two can't disagree.
+ * On the first eight v3 jobs, every score Spark called a pass was 0.88 or more and every fail 0.65
+ * or less; job_5247d4f1 shipped a split head at style 0.6 (2026-10-30).
+ */
+export const SHIP_SCORE = 0.7;
 const MAX_ISSUES = 8;
+/** Tries per inspection; a failed or unusable reply is asked again once before the check counts as unchecked. */
+const INSPECT_ATTEMPTS = 2;
 
-const INSPECTION_REPLY = `Reply with JSON only, no markdown: {"pass": true or false, "score": 0.0 to 1.0, "summary": "...", "issues": [{"part": "..." or null, "problem": "...", "fix": "..."}]}
-- score: 1.0 is exactly right, 0.7 is good enough to ship, below 0.5 is clearly wrong.
-- pass: true only when nothing in the issues list would bother a player; small nitpicks may still pass.
+const INSPECTION_REPLY = `Reply with JSON only, no markdown: {"score": 0.0 to 1.0, "summary": "...", "issues": [{"part": "..." or null, "problem": "...", "fix": "..."}]}
+- score: 1.0 is exactly right. ${SHIP_SCORE} is good enough to ship: nothing in the issues list would bother a player, though small nitpicks may remain. Below 0.5 is clearly wrong.
 - summary: one sentence.
 - issues: at most ${MAX_ISSUES}, most important first, empty when there is nothing to fix. problem says what is wrong and where; fix says what to paint instead in concrete visual terms (colours, materials, surfaces), at most 200 characters, written as an instruction to a painter.
 - Every part is a fixed cut-out: the painter can only repaint inside its original shape (as in the before image), filling it fully. A fix may say what the piece is and how to paint it ("paint this shin piece as wrapped green goblin skin, filling its whole shape"), never ask to add a piece that isn't there (a foot on a shin, a hand on an arm), move a part, or change its outline.`;
 
 const STYLE_INSPECT_SYSTEM_PROMPT = `You are the art director checking a repainted 2D game character before it ships. The character is a Spine rig: separate cut-out parts assembled on a plain solid-colour background (ignore the background). An image model repainted its parts to a new look the user asked for.
 
-You are given: first the character as it looked before, then the repainted character, and, when the user uploaded one, their reference image last. The user message has the request and what the painter was asked to do.
+You are given: first the character as it looked before, then the repainted character, and, when the user uploaded one, their reference image last. The user message has the request and the look that was planned for it.
 
 Judge the look only, not how the parts join (another check does that):
 - Does the repainted character match the requested look: the colours, materials, costume and details asked for?
@@ -562,7 +569,10 @@ ${INSPECTION_REPLY}`;
 /** What the inspectors are told about the remix. */
 export interface InspectionContext {
   prompt: string;
-  /** Muse's edit prompt the image model was given. */
+  /**
+   * The original plan's edit prompt, not a revised one, so every round is judged against the same
+   * brief and their scores compare.
+   */
   editPrompt: string;
   /** The target art style in paint terms, or null when the remix keeps the pages' style. */
   styleLook: string | null;
@@ -589,7 +599,7 @@ export async function inspectStyle(
 ): Promise<Inspection | null> {
   const request = [
     `Requested look: ${context.prompt}`,
-    `Painter's instructions: ${context.editPrompt}`,
+    `Planned look: ${context.editPrompt}`,
     context.styleLook ? `Target art style: ${context.styleLook}` : "Target art style: keep the original art style",
     context.referenceLook ? `From the reference image: ${context.referenceLook}` : "",
     `Keep palette: ${context.keepPalette ? "on" : "off"}`,
@@ -624,31 +634,43 @@ async function inspect(
   signal: AbortSignal,
 ): Promise<Inspection | null> {
   logPrompt(`chat/completions (${MUSE_MODEL}) inspect ${kind} + ${images.length} image(s)`, request);
-  const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model: MUSE_MODEL,
-      messages: [
-        { role: "system", content: system },
-        {
-          role: "user",
-          content: [{ type: "text", text: request }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))],
-        },
-      ],
-    }),
-    timeoutMs: MUSE_TIMEOUT_MS,
-    signal,
+  const body = JSON.stringify({
+    model: MUSE_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [{ type: "text", text: request }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))],
+      },
+    ],
   });
-  if (!res.ok) {
-    console.error(`Muse ${kind} inspection failed (${res.status}) with ${MUSE_MODEL}`, await res.text());
-    return null;
+  for (let attempt = 1; attempt <= INSPECT_ATTEMPTS; attempt++) {
+    try {
+      const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
+        body,
+        timeoutMs: MUSE_TIMEOUT_MS,
+        signal,
+      });
+      if (!res.ok) {
+        console.error(`Muse ${kind} inspection failed (${res.status}) with ${MUSE_MODEL}, attempt ${attempt}`, await res.text());
+        continue;
+      }
+      const content = getPath(await readJson(res, `inspect ${kind}`, MUSE_MODEL), ["choices", 0, "message", "content"]);
+      const inspection = typeof content === "string" ? parseInspection(content, parts) : null;
+      if (inspection) {
+        logPrompt(`chat/completions (${MUSE_MODEL}) ${kind} inspection`, JSON.stringify(inspection, null, 2));
+        return inspection;
+      }
+      console.warn(`Muse returned an unusable ${kind} inspection, attempt ${attempt}`);
+    } catch (error) {
+      // The job's deadline ends the job; a timeout or network error on this call is tried again.
+      signal.throwIfAborted();
+      console.warn(`Muse ${kind} inspection errored, attempt ${attempt}`, error);
+    }
   }
-  const content = getPath(await readJson(res, `inspect ${kind}`, MUSE_MODEL), ["choices", 0, "message", "content"]);
-  const inspection = typeof content === "string" ? parseInspection(content, parts) : null;
-  if (inspection) logPrompt(`chat/completions (${MUSE_MODEL}) ${kind} inspection`, JSON.stringify(inspection, null, 2));
-  else console.warn(`Muse returned an unusable ${kind} inspection`);
-  return inspection;
+  return null;
 }
 
 /** Spark's reply as an Inspection, or null when it isn't one. Part names it made up become null. */
@@ -661,11 +683,10 @@ function parseInspection(content: string, parts: string[]): Inspection | null {
   } catch {
     return null;
   }
-  const pass = getPath(parsed, ["pass"]);
   const score = getPath(parsed, ["score"]);
   const summary = getPath(parsed, ["summary"]);
   const rawIssues = getPath(parsed, ["issues"]);
-  if (typeof pass !== "boolean" || typeof score !== "number" || !Number.isFinite(score)) return null;
+  if (typeof score !== "number" || !Number.isFinite(score)) return null;
   const known = new Set(parts);
   const clean = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
   const issues = (Array.isArray(rawIssues) ? rawIssues : []).slice(0, MAX_ISSUES).flatMap((issue): InspectionIssue[] => {
@@ -676,38 +697,48 @@ function parseInspection(content: string, parts: string[]): Inspection | null {
     return [{ part: typeof part === "string" && known.has(part) ? part : null, problem, fix }];
   });
   const clamped = Math.min(1, Math.max(0, score));
-  return { pass: pass && clamped >= MIN_PASS_SCORE, score: clamped, summary: clean(summary, 300), issues };
+  return { pass: clamped >= SHIP_SCORE, score: clamped, summary: clean(summary, 300), issues };
 }
 
 const REVISE_SYSTEM_PROMPT = `You are the art director for 2D game assets. You wrote instructions (the editPrompt) for an image-editing model that repaints the sprite sheet of a rigged Spine character: separate cut-out body parts packed on a plain solid-colour background (ignore the background). The repainted character was put together and rejected by a reviewer.
 
-You are given: the atlas page(s) the model repaints, then the rejected character assembled from its repainted parts. The user message has the request, your editPrompt, the Parts list (each part's page and position as percentages of the page image, x from the left, y from the top) and the reviewer's issues.
+You are given: the atlas page(s) the model repaints, then the rejected character assembled from its repainted parts. The user message has the request, your editPrompt, the Parts list (each part's page and position as percentages of the page image, x from the left, y from the top), the reviewer's issues and, after more than one rejection, your earlier editPrompts with the issues each was rejected for.
 
 Rewrite the editPrompt so the next repaint fixes the issues:
 - Work out from the Parts list and the images which piece on the page each issue is about, and name it in the editPrompt by what it is and where it sits on the page (e.g. "the long shin piece at top left"). Most problems come from a piece being mistaken for something else (a leg piece painted as part of a helmet); say clearly what each such piece is.
 - Keep everything the reviewer didn't flag as it was asked for before.
+- Don't bring back wording from an earlier editPrompt that was rejected for the problem it caused; an issue fixed before must stay fixed.
 - Every part keeps its shape and position. Only describe paint inside each part, filling it fully; never ask for new pieces, extra limbs, feet or hands, or changed outlines, even if a reviewer note asks for one.
 - Same form as before: one paragraph, imperative voice, specific paintable language, at most 1000 characters. Don't include the art style sentence; it's added for you.
 
 Reply with JSON only, no markdown: {"editPrompt": "..."}`;
 
+/** An edit prompt an inspector rejected, with its issues, for revisePlan. */
+export interface RejectedPrompt {
+  editPrompt: string;
+  issues: InspectionIssue[];
+}
+
 /**
  * Asks Muse Spark to rewrite its edit prompt after an inspector rejected the result, so the next
  * repaint changes what the image model is told rather than repeating it. `pageImages` are the
- * atlas pages as the planner saw them, `rejected` the assembled character (see render.ts). Returns
- * null when the reply is unusable.
+ * atlas pages as the planner saw them, `rejected` the assembled character (see render.ts), and
+ * `input.earlier` the edit prompts rejected before this one, oldest first. Returns null when the
+ * reply is unusable.
  */
 export async function revisePlan(
-  input: { prompt: string; editPrompt: string; parts: string[]; issues: InspectionIssue[] },
+  input: { prompt: string; editPrompt: string; parts: string[]; issues: InspectionIssue[]; earlier: RejectedPrompt[] },
   pageImages: string[],
   rejected: string,
   signal: AbortSignal,
 ): Promise<string | null> {
+  const issueLines = (issues: InspectionIssue[]) => issues.map((i) => `- ${i.part ? `${i.part}: ` : ""}${i.problem} Fix: ${i.fix}`).join("\n");
   const request = [
     `Requested look: ${input.prompt}`,
     `Your editPrompt: ${input.editPrompt}`,
     `Parts:\n${input.parts.slice(0, 120).join("\n")}`,
-    `Reviewer's issues:\n${input.issues.map((i) => `- ${i.part ? `${i.part}: ` : ""}${i.problem} Fix: ${i.fix}`).join("\n")}`,
+    `Reviewer's issues:\n${issueLines(input.issues)}`,
+    ...input.earlier.map((e, n) => `Earlier editPrompt ${n + 1}, also rejected: ${e.editPrompt}\nIts issues:\n${issueLines(e.issues)}`),
   ].join("\n");
   logPrompt(`chat/completions (${MUSE_MODEL}) revise plan + ${pageImages.length + 1} image(s)`, request);
   const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {

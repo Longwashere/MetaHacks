@@ -32,6 +32,12 @@ export interface RemixIssue {
   fix: string;
 }
 
+/**
+ * How the shipped version did against the quality bar: every check passed, a check failed, or a
+ * check couldn't run (no drawing of the character, or Spark gave no usable verdict).
+ */
+export type RemixQuality = "passed" | "below-bar" | "unchecked";
+
 /** Something that happened in a remix, for the live view's timeline. */
 export type RemixEventData =
   | { type: "planned"; name: string; editPrompt: string; style: string | null; referenceLook: string | null }
@@ -42,7 +48,8 @@ export type RemixEventData =
   | { type: "fixed"; round: number; regions: string[]; prompt: string; error: string | null }
   /** The plan was rewritten for the next round, or (null) the issues were added to its prompt instead. */
   | { type: "revised"; round: number; editPrompt: string | null }
-  | { type: "chosen"; round: number; score: number }
+  /** The version that ships, and whether it cleared the quality bar (see RemixQuality). */
+  | { type: "chosen"; round: number; score: number; quality: RemixQuality }
   /** The tweak step moved or scaled this many parts back into place. */
   | { type: "tweaked"; parts: number };
 export type RemixEvent = RemixEventData & { at: string };
