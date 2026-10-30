@@ -145,10 +145,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // A copy generates from the remix it was copied from; ?from=original swaps to the original rig.
   // Tweaks, part fixes and the sprite sheet still compare against the original either way.
   const copyBase = copySource?.files && copySource.id !== base?.id ? copySource : null;
+  // Before a remix is generated, a base that is itself a remix previews against its own original.
+  const baseOriginal = !remix && base?.remixOf ? await getAsset(base.remixOf.id, session) : null;
 
   return {
     base,
     copyBase,
+    baseOriginal,
     fromOriginal: params.get("from") === "original",
     remix,
     job,
@@ -341,7 +344,7 @@ const FOLDER_TAB =
   "h-auto! flex-none rounded-t-lg rounded-b-none border-border bg-muted px-4 py-2 data-[state=inactive]:border-b data-[state=active]:border-b-0 data-[state=active]:bg-card data-[state=active]:shadow-none dark:data-[state=active]:border-border dark:data-[state=active]:bg-card";
 
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, copyBase, fromOriginal, remix, job: loadedJob, remixJob, fix, versions, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
+  const { base, copyBase, baseOriginal, fromOriginal, remix, job: loadedJob, remixJob, fix, versions, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
@@ -588,6 +591,8 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                     animation={anim ?? defaultAnimation(savedRemix.animations)?.name ?? "idle"}
                     animationHref={(name) => withParams({ anim: name })}
                     tweaks={playerTweaks}
+                    // When the original rig is gone, the remix stands in as the base.
+                    compareWith={base.id === savedRemix.id ? undefined : base}
                   />
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="mr-auto">
@@ -619,6 +624,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                     animation={anim ?? defaultAnimation(base.animations)?.name ?? "idle"}
                     animationHref={(name) => withParams({ anim: name })}
                     tweaks={playerTweaks}
+                    compareWith={baseOriginal ?? undefined}
                   />
                   <p className="text-center text-sm text-muted-foreground">Previewing the original rig. Your remix will appear here.</p>
                 </>

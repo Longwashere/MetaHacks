@@ -1,4 +1,4 @@
-import { Bone, Eye, Layers, Pause, Play, Repeat, Tag } from "lucide-react";
+import { Bone, Eye, Layers, Pause, Play, Repeat, SquareSplitHorizontal, Tag } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { SpinePreview } from "~/components/SpinePreview";
@@ -30,6 +30,8 @@ interface AssetPlayerProps {
   onShowLabelsChange?: (show: boolean) => void;
   /** Live rig edits from a TweakPanel. */
   tweaks?: SpineTweakBinding;
+  /** The rig this asset was remixed from: adds a toggle for a before/after slider over the stage. */
+  compareWith?: SpineAsset;
   className?: string;
 }
 
@@ -54,6 +56,7 @@ export function AssetPlayer({
   showLabels: controlledShowLabels,
   onShowLabelsChange,
   tweaks,
+  compareWith,
   className,
 }: AssetPlayerProps) {
   const [internalViewMode, setInternalViewMode] = useState<SpineViewMode>("skin");
@@ -71,10 +74,14 @@ export function AssetPlayer({
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [showBones, setShowBones] = useState(false);
+  const [comparing, setComparing] = useState(true);
   const current = asset.animations.find((a) => a.name === animation) ?? defaultAnimation(asset.animations);
 
   const hideSkin = viewMode === "skeleton";
   const bonesActive = viewMode === "skeleton" || viewMode === "overlay" || showBones;
+  const canCompare = Boolean(asset.files && compareWith?.files);
+  // Remixes can gain generated animations the original doesn't have.
+  const originalHasClip = compareWith?.animations.some((a) => a.name === current?.name) ?? false;
 
   return (
     <div className={cn("flex flex-col overflow-hidden rounded-xl border bg-card", className)}>
@@ -106,6 +113,21 @@ export function AssetPlayer({
         </Tabs>
 
         <div className="flex flex-wrap items-center gap-3">
+          {canCompare && (
+            <Toggle
+              size="sm"
+              pressed={comparing && originalHasClip}
+              onPressedChange={setComparing}
+              disabled={!originalHasClip}
+              variant="outline"
+              className="h-7 gap-1.5 px-2.5 text-xs font-medium"
+              title={originalHasClip ? "Slide between the original rig and the remix" : "The original rig doesn't have this animation"}
+            >
+              <SquareSplitHorizontal className="size-3.5" />
+              Compare
+            </Toggle>
+          )}
+
           {/* Bone Color Picker & Labels Toggle (active whenever skeleton/bones are shown) */}
           {bonesActive && (
             <div className="flex flex-wrap items-center gap-2.5">
@@ -183,6 +205,7 @@ export function AssetPlayer({
         showLabels={bonesActive && showLabels}
         tweaks={tweaks}
         origin={assetOrigin(asset)}
+        compareWith={canCompare && comparing ? compareWith : undefined}
         className="border-b"
       />
       <div className="flex flex-col gap-4 p-4">

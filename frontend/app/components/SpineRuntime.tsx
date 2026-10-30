@@ -11,6 +11,20 @@ import { cn } from "~/lib/utils";
 
 export type SpineRuntimeStatus = "idle" | "loading" | "ready" | "error";
 
+/** Animation time shared between two players so they pose in step (the compare slider). */
+export interface SpineClock {
+  trackTime: number;
+  reverse: boolean;
+  /** performance.now() when the leading player last wrote it. */
+  at: number;
+}
+
+/** The leading player writes the clock every frame; the following one copies it. */
+export interface SpineClockSync {
+  clock: SpineClock;
+  lead: boolean;
+}
+
 interface SpineRuntimeProps {
   files: SpineAssetFiles;
   animation: string;
@@ -33,6 +47,7 @@ interface SpineRuntimeProps {
    * (the live remix view). Pages not listed show the atlas's own images.
    */
   pageUrls?: Record<string, string>;
+  sync?: SpineClockSync;
   onStatusChange?: (status: SpineRuntimeStatus) => void;
   className?: string;
 }
@@ -68,6 +83,7 @@ export function SpineRuntime({
   tint,
   tweaks,
   pageUrls,
+  sync,
   onStatusChange,
   className,
 }: SpineRuntimeProps) {
@@ -93,12 +109,12 @@ export function SpineRuntime({
     hulls: false,
   });
   // Lets the (async) callbacks see the latest props without re-creating the player.
-  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks });
+  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, sync });
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
   const inView = useInView(containerRef);
 
   useEffect(() => {
-    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks };
+    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, sync };
   });
 
   useEffect(() => {
@@ -138,7 +154,35 @@ export function SpineRuntime({
           if (controllerRef.current) controllerRef.current.pose(Physics.update);
           else player.skeleton?.updateWorldTransform(Physics.update);
         },
-        update: () => controllerRef.current?.frame(),
+        frame: (player, delta) => {
+          const sync = latest.current.sync;
+          const state = player.animationState;
+          const entry = state?.getCurrent(0);
+          if (!sync || sync.lead || !state || !entry || !player.skeleton) return;
+          const { clock } = sync;
+          entry.reverse = clock.reverse;
+          if (player.paused) {
+            // Paused players skip posing, so pose at the leader's time here.
+            entry.trackTime = clock.trackTime;
+            state.apply(player.skeleton);
+            player.skeleton.updateWorldTransform(Physics.pose);
+          } else {
+            // This frame's update adds delta. If the leader already ticked this frame its time
+            // is current; otherwise it's about to add its own delta too.
+            const fresh = performance.now() - clock.at < 4;
+            entry.trackTime = Math.max(0, clock.trackTime - (fresh ? delta : 0));
+          }
+        },
+        update: (player) => {
+          controllerRef.current?.frame();
+          const sync = latest.current.sync;
+          const entry = player.animationState?.getCurrent(0);
+          if (sync?.lead && entry) {
+            sync.clock.trackTime = entry.trackTime;
+            sync.clock.reverse = entry.reverse;
+            sync.clock.at = performance.now();
+          }
+        },
         draw: (player) => {
           const overlay = overlayCanvasRef.current;
           if (!overlay) return;

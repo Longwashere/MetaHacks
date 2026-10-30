@@ -1,7 +1,7 @@
-import { Bone, Loader2, Sparkles, Upload } from "lucide-react";
-import { useState } from "react";
+import { Bone, ChevronsLeftRight, Loader2, Sparkles, Upload } from "lucide-react";
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useRef, useState } from "react";
 import { SpinePlaceholder } from "~/components/SpinePlaceholder";
-import { SpineRuntime, type SpineRuntimeStatus } from "~/components/SpineRuntime";
+import { type SpineClock, SpineRuntime, type SpineRuntimeStatus } from "~/components/SpineRuntime";
 import type { AssetOrigin } from "~/lib/format";
 import type { SpineTweakBinding } from "~/lib/spine-tweaks";
 import { defaultAnimation } from "~/lib/animation";
@@ -35,6 +35,11 @@ export interface SpinePreviewProps {
   pageUrls?: Record<string, string>;
   /** Shown as a badge in the top-left corner: the model that made a remix, or "Original upload". */
   origin?: AssetOrigin;
+  /**
+   * The rig this one was remixed from. When set, it's drawn over the left of the stage, in step
+   * with this one, and a draggable divider sets how much of each shows.
+   */
+  compareWith?: PreviewableAsset;
   className?: string;
 }
 
@@ -54,13 +59,18 @@ export function SpinePreview({
   tweaks,
   pageUrls,
   origin,
+  compareWith,
   className,
 }: SpinePreviewProps) {
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
+  const [compareStatus, setCompareStatus] = useState<SpineRuntimeStatus>("idle");
+  const clock = useRef<SpineClock>({ trackTime: 0, reverse: false, at: 0 });
   const clip = asset.animations.find((a) => a.name === animation) ?? defaultAnimation(asset.animations);
   const name = clip?.name ?? "idle";
   const live = asset.files !== null && status !== "error";
   const bonesActive = showBones || hideSkin;
+  const compareFiles = live && compareWith?.animations.some((a) => a.name === name) ? compareWith.files : null;
+  const comparing = compareFiles !== null && compareStatus !== "error";
 
   return (
     <div
@@ -89,8 +99,31 @@ export function SpinePreview({
             tint={asset.tint}
             tweaks={tweaks}
             pageUrls={pageUrls}
+            sync={compareFiles ? { clock: clock.current, lead: true } : undefined}
             onStatusChange={setStatus}
           />
+          {compareWith && compareFiles && comparing && (
+            <CompareLayer
+              ready={status === "ready" && compareStatus === "ready"}
+              original={
+                <SpineRuntime
+                  files={compareFiles}
+                  animation={name}
+                  loop
+                  // The remix holds still while a tweak scrubs; follow it.
+                  playing={playing && tweaks?.tweaks.scrub == null}
+                  speed={speed}
+                  showBones={bonesActive}
+                  hideSkin={hideSkin}
+                  boneColor={boneColor}
+                  showLabels={showLabels}
+                  tint={compareWith.tint}
+                  sync={{ clock: clock.current, lead: false }}
+                  onStatusChange={setCompareStatus}
+                />
+              }
+            />
+          )}
           {status !== "ready" && <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />}
         </>
       ) : (
@@ -136,6 +169,67 @@ export function SpinePreview({
           Preview unavailable
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * Clips the original rig to the left of a draggable divider, over the remix. The divider is the
+ * only thing taking pointer input, so clicks elsewhere still reach the remix (part picking).
+ */
+function CompareLayer({ original, ready }: { original: ReactNode; ready: boolean }) {
+  const [split, setSplit] = useState(50);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const moveTo = (e: PointerEvent<HTMLDivElement>) => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect?.width) return;
+    setSplit(Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)));
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 10 : 2;
+    const next = { ArrowLeft: split - step, ArrowRight: split + step, Home: 0, End: 100 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    setSplit(Math.min(100, Math.max(0, next)));
+  };
+
+  return (
+    <div ref={rootRef} className={cn("pointer-events-none absolute inset-0 transition-opacity duration-300", ready ? "opacity-100" : "opacity-0")}>
+      {/* The stage's grid, so the remix doesn't show through where the original is transparent. */}
+      <div className="absolute inset-0 bg-card" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
+        <div className="absolute inset-0 bg-muted/40 bg-[linear-gradient(to_right,var(--color-border)_1px,transparent_1px),linear-gradient(to_bottom,var(--color-border)_1px,transparent_1px)] bg-size-[16px_16px]">
+          {original}
+        </div>
+      </div>
+      <span className="absolute bottom-3 left-3 rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
+        Original
+      </span>
+      <span className="absolute right-3 bottom-3 rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs">
+        Remix
+      </span>
+      <div className="absolute inset-y-0 z-20 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_var(--color-border)]" style={{ left: `${split}%` }}>
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-label="Compare original and remix"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(split)}
+          aria-valuetext={`${Math.round(split)}% original`}
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            moveTo(e);
+          }}
+          onPointerMove={(e) => {
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) moveTo(e);
+          }}
+          onKeyDown={onKeyDown}
+          className="pointer-events-auto absolute top-1/2 left-1/2 flex size-8 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center rounded-full border bg-background text-foreground shadow-md focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <ChevronsLeftRight className="size-4" />
+        </div>
+      </div>
     </div>
   );
 }

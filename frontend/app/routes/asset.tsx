@@ -49,11 +49,14 @@ export async function loader({ request, params, context }: Route.LoaderArgs) {
     throw redirect(`/remix?${new URLSearchParams({ asset: asset.id })}`);
   }
 
-  const [related, remixes] = asset.visibility === "public"
-    ? await Promise.all([listRelatedAssets(asset), listRemixesOf(asset.id)])
-    : [[], []];
+  const [[related, remixes], original] = await Promise.all([
+    asset.visibility === "public" ? Promise.all([listRelatedAssets(asset), listRemixesOf(asset.id)]) : [[], []],
+    // A remix compares against the rig it was made from (null when that's gone or private).
+    asset.remixOf ? getAsset(asset.remixOf.id, session) : null,
+  ]);
   return {
     asset,
+    original,
     animation: animation ?? null,
     related: related.filter((a) => !remixes.some((r) => r.id === a.id)),
     remixes,
@@ -102,7 +105,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function AssetPage({ loaderData, actionData }: Route.ComponentProps) {
-  const { asset, animation, related, remixes, savedIds, canManage, isOwner, editable } = loaderData;
+  const { asset, original, animation, related, remixes, savedIds, canManage, isOwner, editable } = loaderData;
   const navigation = useNavigation();
   const copying = navigation.state !== "idle" && navigation.formData?.get("intent") === "copy";
   const saved = savedIds.includes(asset.id);
@@ -222,6 +225,7 @@ export default function AssetPage({ loaderData, actionData }: Route.ComponentPro
             onBoneColorChange={handleBoneColorChange}
             showLabels={showLabels}
             onShowLabelsChange={handleShowLabelsChange}
+            compareWith={original ?? undefined}
           />
 
           <div className="flex flex-col gap-6">
