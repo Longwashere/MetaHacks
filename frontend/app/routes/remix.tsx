@@ -306,14 +306,26 @@ const KEEP_PART_OPTIONS = [
 
 /** Prompt chips: a click puts `prompt` in the text box, or the label when there's none. */
 const EXAMPLE_PROMPTS: { label: string; prompt?: string }[] = [
-  { label: "Black and crimson ninja outfit, moonlit palette" },
-  { label: "Golden ceremonial armor with jade inlays" },
+  {
+    label: "Ukiyo-e Japanese art style",
+    prompt:
+      "[Character], Edo-period ukiyo-e style. Black ninja shozoku outfit, crimson accents, cloth wraps. Moonlit palette of indigo sumi ink washes, pale silver lunar light, vermilion brushwork. Crisp black sumi ink outlines with heavy modulated line weight, calligraphic tapered brushstrokes, sharp woodblock relief edges, and dry-brush accents. Rough textured washi paper, visible wood grain, subtle ink bleed, delicate bokashi gradients. Authentic vintage Japanese printmaking aesthetic.",
+  },
+  {
+    label: "Medieval dark fantasy",
+    prompt:
+      "[Subject] in the style of dark fantasy medieval RPG concept art, gritty oil painting aesthetic, heavy impasto brushstrokes, dramatic chiaroscuro lighting, deep umber and blackened steel tones, volumetric mist, cold moonlight piercing through fog, worn hammered plate armor, weathered leather, archaic runic etchings, grim atmosphere, cinematic composition, hyper-detailed, masterwork oil on canvas, with heavy cross stitching shading",
+  },
   {
     label: "Zombie version — torn clothes, pale green skin",
     prompt:
       "Comic book illustration of the character converted to a rotting ghoul, pale gangrenous olive-green skin with necrotic yellow undertones, stained purplish torn garments. Rendering features dense black ink crosshatching over sunken cheekbones, fine directional crosshatch shading across decayed anatomy, rough dry-brush line textures along the edges, colored with vivid murky watercolor washes and comic flats, full color, high contrast --no monochrome, black and white, grayscale, smooth 3d render",
   },
-  { label: "Cyberpunk neon trims and chrome plating" },
+  {
+    label: "Cyberpunk neon trims and chrome plating",
+    prompt:
+      "[Subject] in the visual style of Studio Trigger Cyberpunk: Edgerunners, modern Japanese anime aesthetic, harsh graphic cel shading, bold angular line art, ink contours, high-contrast neon palette with acid yellow, hot magenta, electric cyan, and deep shadows, retro-futuristic Night City cyberware, chrome augments, exposed cabling, glowing optical implants, holographic overlays, dramatic neon rim lighting, cinematic anime keyframe",
+  },
 ];
 
 
