@@ -1,5 +1,6 @@
 import type * as SpineModule from "@esotericsoftware/spine-player";
 import type { MeshAttachment, SpinePlayer, TextureRegion } from "@esotericsoftware/spine-player";
+import { pickDefaultClip } from "~/lib/animation";
 import { TweakController } from "~/lib/spine-tweak-controller";
 import { DEFAULT_PART, DEFAULT_TWEAKS, isDefaultPart, type PartTweak, type SpineTweaks } from "~/lib/spine-tweaks";
 import type { AutoTweakPart, AutoTweakReview, AutoTweakStatus, AutoTweakTransform, SpineAssetFiles } from "~/lib/types";
@@ -615,7 +616,7 @@ function openRig(spine: Spine, files: SpineAssetFiles, animation: string, tweaks
       success: (p) => {
         clearTimeout(timer);
         const data = p.skeleton?.data;
-        const name = data?.findAnimation(animation) ? animation : (data?.animations.find((a) => a.duration > 0) ?? data?.animations[0])?.name;
+        const name = data?.findAnimation(animation) ? animation : pickDefaultClip(data?.animations ?? [], (a) => a.duration)?.name;
         if (name) p.setAnimation(name, true);
         // In the setup pose here, like SpineRuntime, so rigSize matches the live preview's.
         controller = new TweakController(spine, p, files.atlasUrl, tweaks);

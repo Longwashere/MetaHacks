@@ -140,6 +140,18 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </Button>
         </div>
         <AssetGrid assets={featured} savedIds={savedIds} />
+        <div className="flex justify-center pt-4">
+          <Button
+            asChild
+            size="lg"
+            variant="outline"
+            className="group h-12 gap-2 rounded-full px-8 text-base font-semibold has-[>svg]:px-8 sm:h-14 sm:px-10 sm:text-lg sm:has-[>svg]:px-10"
+          >
+            <Link to="/explore">
+              Explore more <ArrowRight className="size-5 transition-transform group-hover:translate-x-1" />
+            </Link>
+          </Button>
+        </div>
       </section>
 
       <Card className="items-center bg-primary text-center text-primary-foreground">
