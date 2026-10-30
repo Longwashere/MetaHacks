@@ -56,6 +56,15 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-30 — Asked to erase a part, Muse Image invented new parts instead
+- **What happened:** On the slime remix (`rotting-ghoul-slime-6cc9a424`), two part fixes on `shadow` ("let's remove the shadow altogther. make it blank", "remove this piece altogether") both failed with "The image model moved the parts out of place twice."
+- **Evidence (verified):** `/images/edits`, `muse-image-1.0`. Input: one faint shadow on solid magenta. Spark's plan said "Erase the wide central shadow… leaving empty transparent nothing". Muse Image returned an invented ring of armour pieces (helmet, greaves, boots) on one attempt and five purple shards on the other. Layout checks: attached 0.1/0.22 (`job_c7be717b`), 0.2/0.89 with scale 0.235 (`job_0bdac940`). R2 folders `remixes/2026-10-30T13-3*_job_{c7be717b,0bdac940}`.
+- **Cost:** 4 image calls + 2 Spark plans, no result. Failed jobs aren't counted against the allowance.
+- **Cause:** The part fixer only repaints. "Remove" goes to the image model, which won't return an empty canvas when asked to edit one. It fills the empty square with something.
+- **Workaround / status:** Open. A remove request shouldn't call a model: hiding the part (tweak panel "Hide this part") or clearing its region pixels does it.
+- **Ask for Meta:** An edit that's told to erase everything should be able to return the background unchanged.
+- **Lesson:** Catch removal requests before the model call and handle them without the model.
+
 ### 2026-10-29 — Production remixes failed with model_not_found, and the error doesn't say which model
 - **What happened:** On rigforge.app, remixes failed and the backend logged `Muse request failed (404) {"error":{"code":"model_not_found","message":"The requested model was not found.","param":null,"type":"invalid_request_error"}}`. Locally everything worked.
 - **Evidence:** `POST /v1/chat/completions` with the local key, verified: `muse-spark-1.3` and `muse-spark-1.3-contributor` both answer; `muse-spark-1.3-typo` returns exactly the production error. `GET /v1/models` lists both Spark ids and `muse-image-1.0`. So production sent an id the API doesn't recognise: a wrong or quoted/padded `MUSE_MODEL`/`IMAGE_MODEL`, or a key without access (inferred; production env not checked yet).
