@@ -7,7 +7,7 @@ import { isSafePageName } from "./atlas.js";
 import { fingerprintRig, type RigFingerprint } from "./fingerprint.js";
 import { putFile } from "./storage.js";
 import { tagUploads } from "./upload-tags.js";
-import { ART_STYLES, type ArtStyle } from "./types.js";
+import type { ArtStyle } from "./types.js";
 import { parseSkeleton } from "./validate.js";
 
 // Bulk upload: users add their own Spine rigs (skeleton JSON, .atlas and its page images), one
@@ -34,6 +34,8 @@ const MAX_NAME_LENGTH = 80;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const LOOPING = /idle|walk|run|loop|fly|hover|breath|swim|float|wave/i;
 const ACCENTS = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
+/** Stored until Muse Spark picks the rig's style (upload-tags.ts), and kept if it can't. */
+const DEFAULT_STYLE: ArtStyle = "cartoon";
 
 interface UploadRig {
   name: string;
@@ -54,7 +56,6 @@ interface UploadRig {
 
 export interface UploadInput {
   category: string;
-  style: ArtStyle;
   visibility: Visibility;
   rigs: UploadRig[];
 }
@@ -65,12 +66,11 @@ export type ParseUploadResult =
   | { ok: false; error: string; rigErrors?: Record<number, string> };
 
 export function parseUploadInput(body: unknown, isAdmin: boolean): ParseUploadResult {
-  if (typeof body !== "object" || body === null) return { ok: false, error: "Expected { category, style, visibility, rigs }." };
-  const { category, style, visibility, rigs } = body as Record<string, unknown>;
+  if (typeof body !== "object" || body === null) return { ok: false, error: "Expected { category, visibility, rigs }." };
+  const { category, visibility, rigs } = body as Record<string, unknown>;
   if (typeof category !== "string" || !(ASSET_CATEGORIES as readonly string[]).includes(category)) {
     return { ok: false, error: "Pick a category." };
   }
-  if (typeof style !== "string" || !(ART_STYLES as readonly string[]).includes(style)) return { ok: false, error: "Pick an art style." };
   if (visibility !== "public" && visibility !== "private") return { ok: false, error: "Choose public or private." };
   if (!Array.isArray(rigs) || rigs.length === 0) return { ok: false, error: "Add at least one rig folder." };
   const max = isAdmin ? MAX_RIGS_PER_REQUEST : MAX_RIGS_PER_UPLOAD;
@@ -86,7 +86,7 @@ export function parseUploadInput(body: unknown, isAdmin: boolean): ParseUploadRe
   if (Object.keys(rigErrors).length > 0) {
     return { ok: false, error: "Some rigs couldn't be read. Nothing was uploaded.", rigErrors };
   }
-  return { ok: true, input: { category, style: style as ArtStyle, visibility, rigs: parsed } };
+  return { ok: true, input: { category, visibility, rigs: parsed } };
 }
 
 /** The rig, or what's wrong with it. */
@@ -198,7 +198,7 @@ export async function createUploads(userId: string, input: UploadInput, isAdmin 
         name: rig.name,
         description: `A Spine ${rig.meta.spineVersion} rig uploaded by ${profile.name || "a RigForge user"}.`,
         category: input.category,
-        style: input.style,
+        style: DEFAULT_STYLE,
         tags: [],
         visibility: privateOnly ? "private" : input.visibility,
         based_on: basedOn?.id ?? null,
@@ -224,19 +224,17 @@ export async function createUploads(userId: string, input: UploadInput, isAdmin 
   // assets_owner_fingerprint: the same rig went in from another request since matchExisting ran.
   if (res.error?.code === "23505") return { ok: false, error: "You just uploaded one of these rigs. Check your library.", rigErrors: {} };
   const inserted = check(res);
-  if (isAdmin) {
-    tagUploads(
-      input.rigs.map((rig, i) => ({
-        assetId: rows[i]!.id,
-        name: rig.name,
-        category: input.category,
-        style: input.style,
-        skeleton: rig.skeleton,
-        animations: rig.meta.animations.map((a) => a.name),
-        pages: rig.pages.map((p) => p.data),
-      })),
-    );
-  }
+  tagUploads(
+    input.rigs.map((rig, i) => ({
+      assetId: rows[i]!.id,
+      name: rig.name,
+      category: input.category,
+      saveTags: isAdmin,
+      skeleton: rig.skeleton,
+      animations: rig.meta.animations.map((a) => a.name),
+      pages: rig.pages.map((p) => p.data),
+    })),
+  );
   return { ok: true, assets: (inserted ?? []).map(toSpineAsset), notes };
 }
 

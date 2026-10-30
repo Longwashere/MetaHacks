@@ -1,4 +1,4 @@
-import { CheckCircle2, FolderOpen, Loader2, Trash2, TriangleAlert, Upload } from "lucide-react";
+import { CheckCircle2, FolderOpen, Lightbulb, Loader2, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { useRef, useState, type DragEvent } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/upload";
@@ -23,7 +23,7 @@ import {
   type UploadRigPayload,
 } from "~/lib/rig-folder";
 import { assetPath, categoryLabel, SITE_NAME } from "~/lib/seo";
-import { ART_STYLES, ASSET_CATEGORIES, type ArtStyle, type AssetCategory } from "~/lib/types";
+import { ASSET_CATEGORIES, type AssetCategory } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
 /** Rigs per upload for everyone but admins; the backend enforces the same limit. */
@@ -52,7 +52,6 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
   const [folders, setFolders] = useState<RigFolder[]>([]);
   const [status, setStatus] = useState<Record<string, RigStatus>>({});
   const [category, setCategory] = useState<AssetCategory>("character");
-  const [style, setStyle] = useState<ArtStyle>("cartoon");
   const [visibility, setVisibility] = useState<"public" | "private">("private");
   const [notice, setNotice] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -125,7 +124,7 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ category, style, visibility, rigs: batch.map((i) => i.rig) }),
+          body: JSON.stringify({ category, visibility, rigs: batch.map((i) => i.rig) }),
         });
         result = res.headers.get("content-type")?.includes("json")
           ? ((await res.json()) as UploadRigsResult)
@@ -152,6 +151,25 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
           {maxRigs === null ? " As an admin you can upload any number at once." : ` You can upload ${maxRigs} rigs at a time.`}
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Lightbulb className="size-4" aria-hidden />
+            Tips for the best remixes
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+            <li>The bigger and more spaced out each part is on the PNG pages, the better: the models see more detail, and neighbouring parts don't bleed into each other.</li>
+            <li>Give bones and attachments plain names (left_arm, sword, head), so the models know what each part is.</li>
+            <li>Keep each part whole and recognisable. A fragment that looks like something else gets painted as that.</li>
+            <li>Leave mesh outlines a little loose around weapons and heads, so new shapes aren't clipped in the game.</li>
+            <li>Include an idle animation with a clear pose. Remixes are checked against its first frame.</li>
+            <li>Use transparent PNG pages at full resolution.</li>
+          </ul>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -259,7 +277,7 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
           <CardTitle className="text-base">Details</CardTitle>
           <CardDescription>Applied to every rig in this upload. You can change visibility later on each rig's page.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-3">
+        <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-2">
             <Label htmlFor="category">Category</Label>
             <Select value={category} onValueChange={(v) => setCategory(v as AssetCategory)} disabled={uploading}>
@@ -270,21 +288,6 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
                 {ASSET_CATEGORIES.map((c) => (
                   <SelectItem key={c} value={c}>
                     {categoryLabel(c)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="style">Art style</Label>
-            <Select value={style} onValueChange={(v) => setStyle(v as ArtStyle)} disabled={uploading}>
-              <SelectTrigger id="style" className="w-full capitalize">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ART_STYLES.map((s) => (
-                  <SelectItem key={s} value={s} className="capitalize">
-                    {s}
                   </SelectItem>
                 ))}
               </SelectContent>

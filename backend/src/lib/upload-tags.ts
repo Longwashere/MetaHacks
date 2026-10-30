@@ -3,19 +3,22 @@ import { aiFetch } from "./ai-fetch.js";
 import { META_API_BASE_URL, MUSE_MODEL } from "./config.js";
 import { check, db } from "./db.js";
 import { apiKey, getPath, logPrompt } from "./meta.js";
+import { ART_STYLES, type ArtStyle } from "./types.js";
 
-// Admin uploads: after the rigs are stored, Muse Spark looks at each rig's atlas pages and
-// writes search tags for it (#orc, #shield, #undead…), reusing the catalogue's existing tags
-// where they fit. Rig features the pictures can't show (ik, mesh, physics…) are read from the
-// skeleton in code. It runs in the background so a big batch isn't held up by model calls; the
-// tags appear on the assets a little later. A failed call only leaves that rig without tags, so
-// the upload itself never fails here.
+// Uploads: after the rigs are stored, Muse Spark looks at each rig's atlas pages, picks its art
+// style, and writes search tags for it (#orc, #shield, #undead…), reusing the catalogue's existing
+// tags where they fit. Every upload gets its style this way; only admin uploads keep the tags. Rig
+// features the pictures can't show (ik, mesh, physics…) are read from the skeleton in code. It
+// runs in the background so a big batch isn't held up by model calls; the style and tags appear
+// on the assets a little later. A failed call only leaves that rig with the default style and no
+// tags, so the upload itself never fails here.
 
 export interface TagRig {
   assetId: string;
   name: string;
   category: string;
-  style: string;
+  /** Admin uploads only; other rigs just get their style. */
+  saveTags: boolean;
   skeleton: Record<string, unknown>;
   animations: string[];
   pages: Buffer[];
@@ -42,8 +45,14 @@ const VOCABULARY_TTL_MS = 10 * 60 * 1000;
 /** Tags that describe how an asset was made, not what it is; Muse shouldn't reuse them. */
 const RESERVED_TAGS = new Set(["remix", "ik", "mesh", "physics", "skins", "path"]);
 
-const SYSTEM_PROMPT = `You tag 2D game assets for a searchable catalogue. You are given the atlas pages of one rigged Spine asset: each page is a sprite sheet of its separate parts (head, limbs, weapons, effects…) cut apart and packed on a plain white background. You also get its name, category, art style, bone names, animation names, and the tags the catalogue already uses.
-Write the tags someone would search for to find this asset:
+const SYSTEM_PROMPT = `You tag 2D game assets for a searchable catalogue. You are given the atlas pages of one rigged Spine asset: each page is a sprite sheet of its separate parts (head, limbs, weapons, effects…) cut apart and packed on a plain white background. You also get its name, category, bone names, animation names, and the tags the catalogue already uses.
+Pick its art style, the one of these that best matches how the pages are drawn:
+- cartoon: bold dark outlines, bright colours, simple cel shading;
+- anime: thin clean outlines, flat cel colours, crisp shading and soft highlights;
+- pixel: visible square pixels, limited palette, no anti-aliasing;
+- painterly: hand-painted look, brush texture, blended shading, soft or no outlines;
+- flat: solid colour shapes, no gradients or texture, minimal outlines.
+Then write the tags someone would search for to find this asset:
 - what it is (orc, skeleton, slime, gargoyle, treasure chest);
 - notable gear or features (shield, wings, horns, lance);
 - theme or setting (fantasy, dungeon, undead, sci-fi, forest);
@@ -53,7 +62,7 @@ Rules:
 - Reuse an existing tag whenever one fits, spelt exactly as listed (e.g. "skeleton", not "skeletal"). Add a new tag only for something no existing tag covers.
 - Lower case, 1 or 2 words each, no # and no punctuation except a hyphen.
 - Only what you can see in the pages or is clear from the names. Don't repeat the category or the art style.
-Reply with JSON only: {"tags": ["...", "..."]}`;
+Reply with JSON only: {"style": "...", "tags": ["...", "..."]}`;
 
 const queue: TagRig[] = [];
 let active = 0;
@@ -72,12 +81,14 @@ export function tagUploads(rigs: TagRig[]): void {
 async function drain(): Promise<void> {
   for (let rig = queue.shift(); rig; rig = queue.shift()) {
     try {
-      const tags = [...new Set([...(await suggestTagsWithRetry(rig)), ...rigFeatureTags(rig.skeleton)])];
-      if (tags.length === 0) continue;
-      check(await db().from("assets").update({ tags }).eq("id", rig.assetId));
+      const suggestion = await suggestTagsWithRetry(rig);
+      const tags = rig.saveTags ? [...new Set([...suggestion.tags, ...rigFeatureTags(rig.skeleton)])] : [];
+      const update = { ...(suggestion.style && { style: suggestion.style }), ...(tags.length > 0 && { tags }) };
+      if (Object.keys(update).length === 0) continue;
+      check(await db().from("assets").update(update).eq("id", rig.assetId));
       // Later rigs in the same batch reuse what this one added.
       if (vocabulary) vocabulary.tags = [...new Set([...vocabulary.tags, ...tags])];
-      console.log(`[upload-tags] ${rig.assetId}: ${tags.join(", ")}`);
+      console.log(`[upload-tags] ${rig.assetId}: ${suggestion.style ?? "(default style)"}; ${tags.join(", ") || "(no tags)"}`);
     } catch (error) {
       console.error(`[upload-tags] ${rig.assetId} failed:`, error instanceof Error ? error.message : error);
     }
@@ -88,15 +99,15 @@ async function drain(): Promise<void> {
  * In a 62-rig batch about 1 in 8 calls failed and the same rig tagged fine on a retry, so try
  * twice. If Muse still fails the rig keeps its skeleton tags.
  */
-async function suggestTagsWithRetry(rig: TagRig): Promise<string[]> {
+async function suggestTagsWithRetry(rig: TagRig): Promise<Suggestion> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await suggestTags(rig);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (attempt === 2) {
-        console.error(`[upload-tags] ${rig.assetId} Muse failed twice, keeping skeleton tags only:`, message);
-        return [];
+        console.error(`[upload-tags] ${rig.assetId} Muse failed twice, keeping the default style and skeleton tags only:`, message);
+        return { style: null, tags: [] };
       }
       console.warn(`[upload-tags] ${rig.assetId} Muse failed, retrying:`, message);
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
@@ -104,12 +115,17 @@ async function suggestTagsWithRetry(rig: TagRig): Promise<string[]> {
   }
 }
 
-async function suggestTags(rig: TagRig): Promise<string[]> {
+interface Suggestion {
+  /** Null when Muse's answer isn't one of the styles. */
+  style: ArtStyle | null;
+  tags: string[];
+}
+
+async function suggestTags(rig: TagRig): Promise<Suggestion> {
   const [pageImages, existing] = await Promise.all([Promise.all(rig.pages.map(toPageDataUrl)), existingTags()]);
   const request = [
     `Name: ${rig.name}`,
     `Category: ${rig.category}`,
-    `Art style: ${rig.style}`,
     `Bones: ${boneNames(rig.skeleton).join(", ") || "(none)"}`,
     `Animations: ${rig.animations.join(", ") || "(none)"}`,
     `Existing tags: ${existing.join(", ") || "(none yet)"}`,
@@ -135,7 +151,7 @@ async function suggestTags(rig: TagRig): Promise<string[]> {
     signal: AbortSignal.timeout(TIMEOUT_MS + 10_000),
   });
   if (!res.ok) throw new Error(`Muse request failed (${res.status}) with ${MUSE_MODEL}: ${(await res.text()).slice(0, 300)}`);
-  return parseTags(getPath(await res.json(), ["choices", 0, "message", "content"]), [rig.category, rig.style]);
+  return parseSuggestion(getPath(await res.json(), ["choices", 0, "message", "content"]), rig.category);
 }
 
 /** The catalogue's tags, most used first; cached for a few minutes. */
@@ -151,18 +167,24 @@ async function existingTags(): Promise<string[]> {
   return tags;
 }
 
-/** Muse's reply is untrusted: keep only short, plain, distinct tags. */
-function parseTags(content: unknown, exclude: string[]): string[] {
-  if (typeof content !== "string") return [];
+/** Muse's reply is untrusted: keep a known style and only short, plain, distinct tags. */
+function parseSuggestion(content: unknown, category: string): Suggestion {
+  if (typeof content !== "string") return { style: null, tags: [] };
   const start = content.indexOf("{");
   const end = content.lastIndexOf("}");
-  if (start < 0 || end <= start) return [];
-  let raw: unknown;
+  if (start < 0 || end <= start) return { style: null, tags: [] };
+  let reply: unknown;
   try {
-    raw = getPath(JSON.parse(content.slice(start, end + 1)), ["tags"]);
+    reply = JSON.parse(content.slice(start, end + 1));
   } catch {
-    return [];
+    return { style: null, tags: [] };
   }
+  const rawStyle = getPath(reply, ["style"]);
+  const style = ART_STYLES.find((s) => typeof rawStyle === "string" && s === rawStyle.trim().toLowerCase()) ?? null;
+  return { style, tags: parseTags(getPath(reply, ["tags"]), [category, ...(style ? [style] : [])]) };
+}
+
+function parseTags(raw: unknown, exclude: string[]): string[] {
   if (!Array.isArray(raw)) return [];
   const tags = new Set<string>();
   for (const value of raw) {

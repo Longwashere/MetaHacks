@@ -336,7 +336,7 @@ export type UploadRigsResult =
   | { ok: false; error: string; rigErrors: Record<string, string> };
 
 /**
- * POST /me/uploads — `body` is the JSON request ({ category, style, visibility, rigs }), streamed
+ * POST /me/uploads — `body` is the JSON request ({ category, visibility, rigs }), streamed
  * through as-is: a batch can be tens of MB of base64 PNGs, more than a Worker should buffer.
  */
 export async function uploadRigs(session: Session, body: ReadableStream<Uint8Array>): Promise<UploadRigsResult> {

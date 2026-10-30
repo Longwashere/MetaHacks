@@ -3,7 +3,7 @@ import type { Route } from "./+types/api.upload";
 import { uploadRigs } from "~/lib/api.server";
 import { getSession } from "~/lib/auth.server";
 
-// Uploads a batch of rigs. The upload page posts { category, style, visibility, rigs } as JSON
+// Uploads a batch of rigs. The upload page posts { category, visibility, rigs } as JSON
 // and splits big selections into several requests; the backend validates every rig.
 export async function action({ request, context }: Route.ActionArgs) {
   const session = getSession(context);
