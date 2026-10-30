@@ -1,11 +1,11 @@
-import { ArrowRight, Bone, Library, Search, Sparkles, Wand2 } from "lucide-react";
+import { ArrowRight, Bone, Download, Search, Sparkles, Upload, Wand2 } from "lucide-react";
 import { Form, Link } from "react-router";
 import type { Route } from "./+types/home";
 import { AssetGrid } from "~/components/AssetGrid";
 import { RemixShowcase } from "~/components/RemixShowcase";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
+import { Card, CardContent } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { getAsset, getSavedAssetIds, listFeaturedAssets } from "~/lib/api.server";
 import { getSession } from "~/lib/auth.server";
@@ -65,7 +65,7 @@ const STEPS = [
   {
     icon: Bone,
     title: "Pick a rig",
-    body: "Choose any rigged, animated asset from the library — or one you've saved.",
+    body: "Any rigged, animated asset from the library, or one you've saved.",
   },
   {
     icon: Wand2,
@@ -73,79 +73,82 @@ const STEPS = [
     body: "We repaint the textures to fit the existing atlas, so bones, slots and animations stay intact.",
   },
   {
-    icon: Library,
-    title: "Preview, save, export",
-    body: "Scrub animations in the browser, save to your library, and drop into your engine.",
+    icon: Download,
+    title: "Preview and export",
+    body: "Scrub animations in the browser, then download a Spine 4.2 export for your engine.",
   },
 ];
 
 export default function Home({ loaderData }: Route.ComponentProps) {
   const { featured, savedIds } = loaderData;
   return (
-    <div className="flex flex-col gap-16">
-      <section className="mx-auto flex max-w-3xl flex-col items-center gap-6 pt-8 text-center">
-        <Badge variant="secondary" className="gap-1">
-          <Sparkles className="size-3" /> Spine 4.2 export
-        </Badge>
-        <h1 className="text-4xl font-bold tracking-tight text-balance sm:text-5xl">
-          Remix production-ready Spine2D rigs with a prompt
-        </h1>
-        <p className="max-w-xl text-lg text-pretty text-muted-foreground">
-          Start from a fully rigged, animated character or prop and give it a brand-new look. Every walk cycle, attack and idle keeps working.
-        </p>
-        <Form method="get" action="/remix" className="flex w-full max-w-xl flex-col gap-2 sm:flex-row">
-          <label htmlFor="hero-q" className="sr-only">
-            Find a rig to remix
-          </label>
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input id="hero-q" name="rq" placeholder="Find a rig: monk, knight, slime…" className="h-11 pl-9" />
+    <div className="flex flex-col gap-16 lg:gap-20">
+      <section className="grid items-center gap-10 pt-4 lg:grid-cols-2 lg:gap-12">
+        <div className="flex flex-col items-center gap-6 text-center lg:items-start lg:text-left">
+          <Badge variant="secondary" className="gap-1">
+            <Sparkles className="size-3" /> AI textures by Muse Image
+          </Badge>
+          <h1 className="text-4xl font-bold tracking-tight text-balance sm:text-5xl">
+            Remix production-ready Spine2D rigs with a prompt
+          </h1>
+          <p className="max-w-xl text-lg text-pretty text-muted-foreground">
+            Start from a fully rigged, animated character or prop and give it a brand-new look. Every walk cycle, attack and idle keeps working.
+          </p>
+          <Form method="get" action="/remix" className="flex w-full max-w-xl flex-col gap-2 sm:flex-row">
+            <label htmlFor="hero-q" className="sr-only">
+              Find a rig to remix
+            </label>
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input id="hero-q" name="rq" placeholder="Find a rig: monk, knight, slime…" className="h-11 pl-9" />
+            </div>
+            <Button type="submit" size="lg" className="h-11">
+              <Wand2 /> Remix a rig
+            </Button>
+          </Form>
+          <div className="flex gap-2 text-sm text-muted-foreground">
+            <span>or</span>
+            <Link to="/explore" className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline">
+              browse the full library
+            </Link>
           </div>
-          <Button type="submit" size="lg" className="h-11">
-            <Wand2 /> Find a rig
-          </Button>
-        </Form>
-        <div className="flex gap-2 text-sm text-muted-foreground">
-          <span>or</span>
-          <Link to="/explore" className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline">
-            browse the full library
-          </Link>
         </div>
+
+        {SHOWCASE_RIGS.length > 0 && (
+          <div className="mx-auto flex w-full max-w-xl flex-col gap-2">
+            <RemixShowcase rigs={SHOWCASE_RIGS} />
+            <p className="text-center text-sm text-muted-foreground">Same bones, same animation. Drag the slider to compare with the original.</p>
+          </div>
+        )}
       </section>
 
-      {SHOWCASE_RIGS.length > 0 && (
-        <section aria-labelledby="showcase-title" className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-          <div className="text-center">
-            <h2 id="showcase-title" className="text-2xl font-semibold tracking-tight">
-              One asset, infinite remixes
-            </h2>
-            <p className="text-sm text-muted-foreground">Same bones, same animation. Drag the slider to compare with the original.</p>
-          </div>
-          <RemixShowcase rigs={SHOWCASE_RIGS} />
-        </section>
-      )}
-
-      <section className="grid gap-4 md:grid-cols-3">
-        {STEPS.map((step, i) => (
-          <Card key={step.title}>
-            <CardHeader>
-              <div className="mb-2 flex size-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-                <step.icon className="size-5" />
+      <section aria-labelledby="how-title" className="flex flex-col gap-6">
+        <h2 id="how-title" className="sr-only">
+          How it works
+        </h2>
+        <ol className="grid gap-6 md:grid-cols-3 md:gap-8">
+          {STEPS.map((step, i) => (
+            <li key={step.title} className="flex gap-4">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                {i + 1}
               </div>
-              <CardTitle>
-                {i + 1}. {step.title}
-              </CardTitle>
-              <CardDescription>{step.body}</CardDescription>
-            </CardHeader>
-          </Card>
-        ))}
+              <div className="flex flex-col gap-1">
+                <h3 className="flex items-center gap-2 font-medium">
+                  <step.icon className="size-4 text-muted-foreground" aria-hidden />
+                  {step.title}
+                </h3>
+                <p className="text-sm text-pretty text-muted-foreground">{step.body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
       </section>
 
       <section className="flex flex-col gap-4">
         <div className="flex items-end justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold tracking-tight">Popular in the library</h2>
-            <p className="text-sm text-muted-foreground">Community assets you can save and use right away.</p>
+            <p className="text-sm text-muted-foreground">Rigs and remixes you can save and use right away.</p>
           </div>
           <Button asChild variant="ghost">
             <Link to="/explore">
@@ -153,32 +156,29 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </Link>
           </Button>
         </div>
-        <AssetGrid assets={featured} savedIds={savedIds} />
-        <div className="flex justify-center pt-4">
-          <Button
-            asChild
-            size="lg"
-            variant="outline"
-            className="group h-12 gap-2 rounded-full px-8 text-base font-semibold has-[>svg]:px-8 sm:h-14 sm:px-10 sm:text-lg sm:has-[>svg]:px-10"
-          >
-            <Link to="/explore">
-              Explore more <ArrowRight className="size-5 transition-transform group-hover:translate-x-1" />
-            </Link>
-          </Button>
-        </div>
+        <AssetGrid assets={featured} savedIds={savedIds} compact />
       </section>
 
-      <Card className="items-center bg-primary text-center text-primary-foreground">
-        <CardContent className="flex flex-col items-center gap-4 py-4">
-          <h2 className="text-2xl font-semibold">Every rig in the library is remixable</h2>
-          <p className="max-w-md opacity-80">
-            Turn a knight into a frost knight or a monk into a shadow monk — same skeleton, same animations, new textures.
-          </p>
-          <Button asChild variant="secondary">
-            <Link to="/remix">
-              <Wand2 /> Start remixing
-            </Link>
-          </Button>
+      <Card>
+        <CardContent className="flex flex-col items-center gap-6 py-4 text-center md:flex-row md:justify-between md:text-left">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-2xl font-semibold tracking-tight">Have your own rig?</h2>
+            <p className="max-w-lg text-pretty text-muted-foreground">
+              Upload a Spine export and remix it the same way. Your skeleton and animations never change, only the textures do.
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            <Button asChild variant="outline">
+              <Link to="/upload">
+                <Upload /> Upload a rig
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to="/remix">
+                <Wand2 /> Start remixing
+              </Link>
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

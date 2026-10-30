@@ -225,7 +225,9 @@ export function CompareDivider({ split, onSplitChange, leftLabel, rightLabel }: 
       {/* Each label shows only while its side is on screen. */}
       <span className={cn(label, "left-3", split > 2 ? "opacity-100" : "opacity-0")}>{leftLabel}</span>
       <span className={cn(label, "right-3", split < 98 ? "opacity-100" : "opacity-0")}>{rightLabel}</span>
-      <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_var(--color-border)]" style={{ left: `${split}%` }}>
+      <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_var(--color-border)]" style={{ left: `${split}%` }} />
+      {/* The handle stops short of the edges so it stays whole (and grabbable) when the divider rests there. */}
+      <div className="absolute inset-y-0" style={{ left: `clamp(1.25rem, ${split}%, calc(100% - 1.25rem))` }}>
         <div
           role="slider"
           tabIndex={0}

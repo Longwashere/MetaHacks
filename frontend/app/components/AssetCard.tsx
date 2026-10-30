@@ -16,17 +16,19 @@ interface AssetCardProps {
   saved: boolean;
   /** Show the public/private toggle and Delete (for the user's own remixes). */
   manage?: boolean;
+  /** A tighter card for showcases like the home page: no description or "Made with" badge. */
+  compact?: boolean;
   className?: string;
 }
 
-export function AssetCard({ asset, saved, manage = false, className }: AssetCardProps) {
+export function AssetCard({ asset, saved, manage = false, compact = false, className }: AssetCardProps) {
   return (
     <Card className={cn("group relative gap-0 overflow-hidden py-0 transition-shadow hover:shadow-md", className)}>
       <Link
         to={assetPath(asset)}
         className="block outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
-        <SpinePreview asset={asset} origin={assetOrigin(asset)} className="border-b" />
+        <SpinePreview asset={asset} origin={compact ? undefined : assetOrigin(asset)} className="border-b" />
         <span className="sr-only">View {asset.name}</span>
       </Link>
       <SaveButton
@@ -43,7 +45,7 @@ export function AssetCard({ asset, saved, manage = false, className }: AssetCard
             {asset.category}
           </Badge>
         </div>
-        <p className="line-clamp-2 text-sm text-muted-foreground">{asset.description}</p>
+        {!compact && <p className="line-clamp-2 text-sm text-muted-foreground">{asset.description}</p>}
         <p className="truncate text-xs text-muted-foreground">
           {asset.animations.map((a) => animationLabel(a.name)).join(" · ")}
         </p>
@@ -52,10 +54,12 @@ export function AssetCard({ asset, saved, manage = false, className }: AssetCard
             <Film className="size-3.5" />
             {asset.animations.length} {asset.animations.length === 1 ? "anim" : "anims"}
           </span>
-          <span className="flex items-center gap-1">
-            <Bookmark className="size-3.5" />
-            {formatCount(asset.saves)}
-          </span>
+          {asset.saves > 0 && (
+            <span className="flex items-center gap-1">
+              <Bookmark className="size-3.5" />
+              {formatCount(asset.saves)}
+            </span>
+          )}
           <span className="ml-auto truncate">by {asset.author.name}</span>
         </div>
         {manage && (

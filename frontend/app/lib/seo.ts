@@ -33,7 +33,16 @@ const ANIMATION_LABELS: Record<string, string> = {
 };
 
 export function animationLabel(name: string) {
-  return ANIMATION_LABELS[name] ?? name.charAt(0).toUpperCase() + name.slice(1);
+  const known = ANIMATION_LABELS[name] ?? ANIMATION_LABELS[name.toLowerCase()];
+  if (known) return known;
+  // Raw clip names from imported rigs: "1_LobbyRun" → "Lobby Run", "Skill_1" → "Skill 1", "2_1Walk" → "Walking".
+  const words = name
+    .replace(/^[\d_]+/, "")
+    .replace(/([a-z])([A-Z\d])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!words) return name;
+  return ANIMATION_LABELS[words.toLowerCase()] ?? words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 const CATEGORY_LABELS: Record<AssetCategory, [singular: string, plural: string]> = {

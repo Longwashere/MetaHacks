@@ -146,7 +146,7 @@ export function RemixShowcase({ rigs, className }: RemixShowcaseProps) {
       <div
         role="img"
         aria-label={`${label(current)}, then ${label(next)}`}
-        className={cn("relative flex aspect-[4/3] items-center justify-center overflow-hidden", STAGE_GRID)}
+        className={cn("relative flex aspect-square items-center justify-center overflow-hidden", STAGE_GRID)}
       >
         {layers.map((item, layer) => (
           <div
