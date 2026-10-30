@@ -1,0 +1,85 @@
+20902_sumuqishi.png
+pma: false
+size:1024, 1024
+filter:Linear, Linear
+fuzi
+bounds:4,302,466,718
+shangbanshen
+bounds:310,640,380,324
+rotate: 270
+toukui
+bounds:834,632,186,244
+toukuimianzhao
+bounds:414,232,194,204
+rotate: 90
+toukuimianzhao2
+bounds:672,254,194,204
+rotate: 90
+weijin
+bounds:612,476,278,286
+rotate: 90
+yaoweibu
+bounds:848,334,172,244
+youbibu
+bounds:722,64,176,170
+offsets:0,0,182,170
+rotate: 90
+youdabi
+bounds:158,70,132,138
+rotate: 90
+youdatui
+bounds:642,76,80,90
+youjian
+bounds:638,720,300,278
+rotate: 270
+youjiaojian
+bounds:870,932,140,88
+youshouzhang
+bounds:4,88,110,108
+youshouzhi1
+bounds:822,624,82,74
+rotate: 90
+youshouzhi2
+bounds:200,772,86,72
+youshouzhi3
+bounds:568,68,76,70
+youxi
+bounds:944,258,76,80
+rotate: 180
+youxiaobi
+bounds:140,818,202,184
+rotate: 90
+youyao
+bounds:804,168,192,162
+offsets:0,0,194,162
+yuoxiaotui
+bounds:594,164,142,150
+rotate: 180
+zuodatui
+bounds:354,76,88,108
+rotate: 90
+zuojian
+bounds:474,368,226,240
+offsets:314,112,540,352
+rotate: 90
+zuojianbu
+bounds:4,596,118,224
+zuojiaojian
+bounds:446,566,128,72
+zuoshou
+bounds:458,110,146,164
+offsets:0,0,148,164
+rotate: 270
+zuoshoubi
+bounds:58,184,180,170
+rotate: 180
+zuoxi
+bounds:926,534,102,94
+rotate: 270
+zuoxiaotui
+bounds:268,166,146,142
+offsets:2,0,148,142
+rotate: 90
+zuoyao
+bounds:882,64,106,138
+rotate: 270

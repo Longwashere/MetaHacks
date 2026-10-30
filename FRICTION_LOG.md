@@ -292,6 +292,14 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-30 — v3 cut square holes in parts on an atlas with overlapping boxes
+- **What happened:** On 20902 Sumuqishi (the only rig whose atlas boxes overlap), the v3 remix (job_7700b27e) came out with rectangular bites out of the visors, helmet and shoulder shell, and a vertical seam through the chest. v2 with the same prompt (job_6b97cb70) was clean.
+- **Evidence (verified offline):** the model's square (`round-1/20902_sumuqishi.generated.png`) was whole. Replaying `shrinkPartsToBoxes` on it reproduced the damage exactly; v2's `fitToPage` on the same square didn't.
+- **Cost:** a v3 run and its part fixes on that rig, plus the user's time comparing versions.
+- **Cause:** two bugs in `shrinkPartsToBoxes` (`backend/src/v3/lib/textures.ts`), both harmless when boxes don't overlap. (1) A shrunk part was pasted back as its whole bounding rectangle, key-colour filler included, so it overwrote any neighbour inside that rectangle. (2) `partOwners` split any blob with over 10% of its pixels in two boxes pixel by pixel, first box winning where they overlap, so the chest (wholly in its own box, half in the axe's) was sliced along the axe box's edge and each half moved on its own.
+- **Workaround / status:** fixed. Only a part's own pixels are pasted, all moved parts are lifted out before any is put back, a blob lying (almost) wholly in one box goes to that box whole (the smallest, if several), and overlapping ties go to the nearest box middle. Replay on job_7700b27e's square now matches v2. Not yet run end to end. `backend/test/fit-overlapping-boxes.test.ts` (`npm test`) replays that square through `fitKeyedPage` and fails on the old code.
+- **Lesson:** test fitting code on a rig with overlapping atlas boxes; a box-sized rectangle is never safe to paste.
+
 ### 2026-10-30 — Cloudflare Workers Build failed: wrangler ran in the monorepo root
 - **What happened:** The `rigforge-frontend` Git build ran `npm run build` from the repo root (it built every workspace), and the build never reached a deploy. The pasted dashboard log stopped at "rendering chunks...".
 - **Evidence (verified locally):** the root build succeeds. `npx wrangler deploy --dry-run` from the repo root fails with "The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project"; from `frontend/` it succeeds. The full CI log couldn't be fetched: the wrangler OAuth token gets "Authentication error" on the Workers Builds API. That the CI deploy step hit this same error is inferred.

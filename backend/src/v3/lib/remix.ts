@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type AtlasPage, isSafePageName, parseAtlas } from "./atlas.js";
+import { type AtlasPage, type PageRect, isSafePageName, parseAtlas } from "./atlas.js";
 import { type PartLayout, layoutParts } from "../../lib/layout.js";
 import { boxMeshes, checkMeshes, meshOutlines } from "../../lib/mesh.js";
 import { type CropResult, measureCrops } from "./crop.js";
@@ -31,6 +31,7 @@ import { drawRig, loadRig, renderRestPose } from "./render.js";
 import { type MeasuredPart, type PartTransform, type SkippedTweak, applyTweaks, lostContacts, measureFixes } from "./tweak.js";
 import { objectUrl, putFile } from "../../lib/storage.js";
 import {
+  type ModelInput,
   type PageImage,
   alignGenerated,
   decodePage,
@@ -74,6 +75,27 @@ const FIT_INSET = 0.02;
  * whole; job_909e5229's goblin head came out a little wide and was cut off at its box (0.84 fits it).
  */
 const MIN_PART_SCALE = 0.5;
+/**
+ * Puts a repainted square (drift already undone, see alignGenerated) back on the page with the
+ * model's own silhouettes: parts drawn bigger than their box shrunk to fit, then keyed out within
+ * `rects`. With `outlines`, parts are also fitted inside those mesh outlines. Covered by
+ * test/fit-overlapping-boxes.test.ts.
+ */
+export async function fitKeyedPage(
+  aligned: Buffer,
+  modelInput: ModelInput,
+  page: PageImage,
+  premultipliedAlpha: boolean,
+  rects: PageRect[],
+  outlines?: (number[] | null)[],
+): Promise<{ png: Buffer; scales: number[] }> {
+  const fit = await shrinkPartsToBoxes(
+    aligned,
+    modelInput,
+    outlines ? { inset: FIT_INSET, anchor: "part", outlines, minOutlineScale: MIN_PART_SCALE } : { inset: FIT_INSET, anchor: "part" },
+  );
+  return { png: await fitToPage(fit.image, modelInput, page, premultipliedAlpha, rects, false), scales: fit.scales };
+}
 /** A page whose painted pixels fall less inside the parts' boxes than this was rearranged by the model (see layoutFit). */
 const MIN_LAYOUT_FIT = 0.85;
 /**
@@ -473,8 +495,8 @@ export async function runRemix(
         pagePng = await fitToPage(generated, modelInput, images[i], base.premultipliedAlpha, null);
       } else {
         const aligned = await alignGenerated(generated, modelInput, images[i], page.rects);
-        let fit = await shrinkPartsToBoxes(aligned, modelInput, { inset: FIT_INSET, anchor: "part" });
-        pagePng = await fitToPage(fit.image, modelInput, images[i], base.premultipliedAlpha, page.rects, false);
+        let fit = await fitKeyedPage(aligned, modelInput, images[i], base.premultipliedAlpha, page.rects);
+        pagePng = fit.png;
         // A part the game would cut off at a mesh that can't be boxed is fitted inside its outline too.
         const cut = baseRig
           ? measureCrops(baseRig, new Map([[page.name, await decodePage(pagePng, base.premultipliedAlpha)]]), originalByName)
@@ -489,8 +511,8 @@ export async function runRemix(
             layouts[i],
             images[i],
           );
-          fit = await shrinkPartsToBoxes(aligned, modelInput, { inset: FIT_INSET, anchor: "part", outlines, minOutlineScale: MIN_PART_SCALE });
-          pagePng = await fitToPage(fit.image, modelInput, images[i], base.premultipliedAlpha, page.rects, false);
+          fit = await fitKeyedPage(aligned, modelInput, images[i], base.premultipliedAlpha, page.rects, outlines);
+          pagePng = fit.png;
           log.fittedToOutline = [...(log.fittedToOutline ?? []), ...cut];
         }
         for (const [k, scale] of fit.scales.entries()) {

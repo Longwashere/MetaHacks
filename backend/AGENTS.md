@@ -8,7 +8,8 @@ Node.js API for the app, written in TypeScript (strict mode) with Express 5.
 npm run dev         # tsx watch on src/index.ts (or `npm run dev:backend` from the root)
 npm run build       # tsc → dist/
 npm start           # node dist/index.js
-npm run typecheck   # tsc --noEmit — run before finishing a task
+npm run typecheck   # tsc --noEmit over src/ and test/ — run before finishing a task
+npm test            # node:test via tsx (test/*.test.ts) — run after changing v3 post-processing (textures.ts, fitKeyedPage)
 ```
 
 ## Rules

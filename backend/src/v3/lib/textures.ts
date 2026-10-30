@@ -354,6 +354,7 @@ export async function shrinkPartsToBoxes(
 
   const scales = boxes.map(() => 1);
   const outlineDropped = boxes.map(() => false);
+  const moves: { pixels: number[]; small: Buffer; own: Buffer; nx: number; ny: number; nw: number; nh: number }[] = [];
   for (const [i, b] of boxes.entries()) {
     const pixels: number[] = [];
     let x0 = side, x1 = -1, y0 = side, y1 = -1;
@@ -427,24 +428,38 @@ export async function shrinkPartsToBoxes(
     }
     scales[i] = Math.round(scale * 1000) / 1000;
 
-    // The part on its own: its pixels within the extent, everything else background.
+    // The part on its own: its pixels within the extent, everything else background, and which are its.
     const crop = Buffer.alloc(w * h * 3);
+    const ownCrop = Buffer.alloc(w * h);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const p = (y0 + y) * side + x0 + x;
         const o = (y * w + x) * 3;
-        if (owner[p] === i) source.copy(crop, o, p * 3, p * 3 + 3);
-        else crop.set(key, o);
+        if (owner[p] === i) {
+          source.copy(crop, o, p * 3, p * 3 + 3);
+          ownCrop[y * w + x] = 255;
+        } else crop.set(key, o);
       }
     }
     const nw = Math.max(1, Math.min(inner.width, Math.floor(w * scale)));
     const nh = Math.max(1, Math.min(inner.height, Math.floor(h * scale)));
     const small = await sharp(crop, { raw: { width: w, height: h, channels: 3 } }).resize(nw, nh, { fit: "fill" }).raw().toBuffer();
-
-    for (const p of pixels) rgb.set(key, p * 3);
+    const own = await sharp(ownCrop, { raw: { width: w, height: h, channels: 1 } }).resize(nw, nh, { fit: "fill" }).extractChannel(0).raw().toBuffer();
     const nx = Math.min(Math.max(Math.round(cx - nw / 2), inner.x), inner.x + inner.width - nw);
     const ny = Math.min(Math.max(Math.round(cy - nh / 2), inner.y), inner.y + inner.height - nh);
-    for (let y = 0; y < nh; y++) small.copy(rgb, ((ny + y) * side + nx) * 3, y * nw * 3, (y + 1) * nw * 3);
+    moves.push({ pixels, small, own, nx, ny, nw, nh });
+  }
+
+  // Every moved part is lifted out before any is put back, and only its own pixels are put back:
+  // where boxes overlap, a part's rectangle holds its neighbours, which must stay.
+  for (const m of moves) for (const p of m.pixels) rgb.set(key, p * 3);
+  for (const m of moves) {
+    for (let y = 0; y < m.nh; y++) {
+      for (let x = 0; x < m.nw; x++) {
+        if (m.own[y * m.nw + x] < 128) continue;
+        m.small.copy(rgb, ((m.ny + y) * side + m.nx + x) * 3, (y * m.nw + x) * 3, (y * m.nw + x) * 3 + 3);
+      }
+    }
   }
 
   const image = await sharp(rgb, { raw: { width: side, height: side, channels: 3 } }).png().toBuffer();
@@ -518,12 +533,15 @@ const SHRINK_SPLIT_SHARE = 0.1;
  */
 function partOwners(isBg: Uint8Array, side: number, boxes: PageRect[], nearby = true): Int32Array {
   const nearest = (x: number, y: number) => {
-    let best = -1, bestD = Infinity;
+    let best = -1, bestD = Infinity, bestC = Infinity;
     boxes.forEach((b, i) => {
       const d = Math.max(b.x - x, x - (b.x + b.width - 1), b.y - y, y - (b.y + b.height - 1), 0);
-      if (d < bestD && d <= SHRINK_REACH * Math.max(b.width, b.height)) {
+      // Inside several overlapping boxes, the one whose middle is closest.
+      const c = Math.hypot(x - (b.x + b.width / 2), y - (b.y + b.height / 2));
+      if ((d < bestD || (d === bestD && c < bestC)) && d <= SHRINK_REACH * Math.max(b.width, b.height)) {
         best = i;
         bestD = d;
+        bestC = c;
       }
     });
     return best;
@@ -554,6 +572,18 @@ function partOwners(isBg: Uint8Array, side: number, boxes: PageRect[], nearby = 
       boxes.forEach((b, i) => {
         if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) inside[i]++;
       });
+    }
+    // A blob (almost) wholly inside a box is that box's part, even when other boxes overlap it
+    // (packed atlases overlap boxes): splitting it would slice the part along a neighbour's edge,
+    // as job_7700b27e's chest was cut at its axe's box. The smallest such box is the tightest fit.
+    let whole = -1;
+    for (const [i, n] of inside.entries()) {
+      if (n < blob.length * (1 - SHRINK_SPLIT_SHARE)) continue;
+      if (whole < 0 || boxes[i].width * boxes[i].height < boxes[whole].width * boxes[whole].height) whole = i;
+    }
+    if (whole >= 0) {
+      for (const p of blob) owner[p] = whole;
+      continue;
     }
     const shared = inside.filter((n) => n > blob.length * SHRINK_SPLIT_SHARE).length > 1;
     if (shared) {

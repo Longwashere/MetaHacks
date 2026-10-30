@@ -17,3 +17,4 @@ backend/data/
 
 # Local notes
 metarules.txt
+backend/test/output/

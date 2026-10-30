@@ -16,6 +16,7 @@ npm run dev:frontend   # frontend only
 npm run dev:backend    # backend only
 npm run build          # builds every workspace
 npm run typecheck      # typechecks every workspace — run before finishing a task
+npm test               # runs every workspace's tests (backend: regression fixtures in backend/test/)
 ```
 
 Add dependencies to a specific workspace: `npm install <pkg> -w frontend` or `-w backend`. Don't add app dependencies to the root `package.json`.
