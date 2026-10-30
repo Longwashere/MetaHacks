@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AiTimeoutError } from "../../lib/ai-fetch.js";
 import { REMIX_JOB_TIMEOUT_MS } from "../../lib/config.js";
 import { queuedStage, runInSlot } from "../../lib/job-slots.js";
+import { emptyLive, liveReporter } from "../../lib/remix-live.js";
 import { runRemix } from "./remix.js";
 import type { RemixJob, RemixRequest } from "./types.js";
 
@@ -30,6 +31,7 @@ export function createRemixJob(input: RemixRequest, { id = newRemixJobId(), onSe
     createdAt: new Date().toISOString(),
     editPrompt: null,
     promptStatus: "original",
+    live: emptyLive(),
     result: null,
     error: null,
   };
@@ -63,6 +65,7 @@ async function runJob(job: RemixJob) {
         job.editPrompt = editPrompt;
         job.promptStatus = promptStatus;
       },
+      liveReporter(job.live),
       deadline,
     );
     // The model code might ignore the signal; the deadline still wins.
@@ -71,6 +74,7 @@ async function runJob(job: RemixJob) {
     job.status = "succeeded";
     job.progress = 1;
     job.stage = "Done";
+    job.live.activity = null;
   } catch (error) {
     console.error(`Remix job ${job.id} failed`, error);
     job.status = "failed";

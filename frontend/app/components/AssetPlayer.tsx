@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Toggle } from "~/components/ui/toggle";
 import { assetOrigin } from "~/lib/format";
 import type { SpineTweakBinding } from "~/lib/spine-tweaks";
+import { defaultAnimation } from "~/lib/animation";
 import type { SpineAsset, SpineViewMode } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
@@ -70,7 +71,7 @@ export function AssetPlayer({
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [showBones, setShowBones] = useState(false);
-  const current = asset.animations.find((a) => a.name === animation) ?? asset.animations[0];
+  const current = asset.animations.find((a) => a.name === animation) ?? defaultAnimation(asset.animations);
 
   const hideSkin = viewMode === "skeleton";
   const bonesActive = viewMode === "skeleton" || viewMode === "overlay" || showBones;

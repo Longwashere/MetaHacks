@@ -2,7 +2,7 @@ import sharp from "sharp";
 import { createRemixJob as createV1Job, getRemixJob as getV1Job, newRemixJobId } from "./jobs.js";
 import { createRemixJob as createV2Job, getRemixJob as getV2Job } from "../v2/lib/jobs.js";
 import { createRemixJob as createV3Job, getRemixJob as getV3Job } from "../v3/lib/jobs.js";
-import type { RemixLive } from "../v3/lib/types.js";
+import type { RemixLive } from "./remix-live.js";
 import { getAssetRow } from "./assets.js";
 import { getProfile, remixesUsed } from "./billing.js";
 import { PLAN_LIMITS } from "./config.js";
@@ -32,7 +32,7 @@ export interface RemixJobView {
   promptStatus: RemixJob["promptStatus"];
   /** URL of the user's reference image, or null. */
   referenceUrl: string | null;
-  /** What a running v3 remix is painting and checking, for the live view; null otherwise. */
+  /** What a running v2 or v3 remix is painting (and, in v3, checking), for the live view; null otherwise. */
   live: RemixLive | null;
   asset: SpineAsset | null;
   error: string | null;
@@ -221,7 +221,7 @@ export async function getRemixJobView(userId: string, jobId: string): Promise<Re
     editPrompt: live?.editPrompt ?? row.edit_prompt,
     promptStatus: live?.promptStatus ?? (row.prompt_status === "reworded" ? "reworded" : "original"),
     referenceUrl: input.referenceImage ? objectUrl(input.referenceImage) : null,
-    live: live && row.api_version === "v3" ? (getV3Job(jobId)?.live ?? null) : null,
+    live: !live ? null : row.api_version === "v3" ? (getV3Job(jobId)?.live ?? null) : row.api_version === "v2" ? (getV2Job(jobId)?.live ?? null) : null,
     asset: live ? null : asset && toSpineAsset(asset),
     error: lost ? "The remix service restarted. Try again." : live ? null : row.error,
   };

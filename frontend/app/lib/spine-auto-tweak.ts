@@ -615,7 +615,7 @@ function openRig(spine: Spine, files: SpineAssetFiles, animation: string, tweaks
       success: (p) => {
         clearTimeout(timer);
         const data = p.skeleton?.data;
-        const name = data?.findAnimation(animation) ? animation : data?.animations[0]?.name;
+        const name = data?.findAnimation(animation) ? animation : (data?.animations.find((a) => a.duration > 0) ?? data?.animations[0])?.name;
         if (name) p.setAnimation(name, true);
         // In the setup pose here, like SpineRuntime, so rigSize matches the live preview's.
         controller = new TweakController(spine, p, files.atlasUrl, tweaks);

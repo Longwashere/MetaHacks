@@ -40,7 +40,8 @@ import {
   toDataUrl,
   toModelInput,
 } from "./textures.js";
-import type { PromptStatus, RemixActivity, RemixEventData, RemixIssue, RemixPreview, RemixRequest, RemixResult } from "./types.js";
+import type { RemixIssue, RemixPreview, RemixReporter } from "../../lib/remix-live.js";
+import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
 
 export interface RemixProgress {
   (progress: number, stage: string): void;
@@ -49,13 +50,6 @@ export interface RemixProgress {
 /** Called with the edit prompt Muse Image is given, and whether it's being re-worded for the content policy. */
 export interface RemixPromptUpdate {
   (editPrompt: string, status: PromptStatus): void;
-}
-
-/** Reports what the remix is doing, for the live view (see RemixLive in types.ts). */
-export interface RemixReporter {
-  activity(activity: RemixActivity): void;
-  event(event: RemixEventData): void;
-  preview(preview: RemixPreview): void;
 }
 
 /** Longest side of the images sent to Muse Image (its quality tops out around 1600px). */

@@ -140,7 +140,7 @@ export interface RemixJob {
   promptStatus: PromptStatus;
   /** URL of the user's reference image, or null. */
   referenceUrl: string | null;
-  /** What a running v3 remix is painting and checking, for the live view; null otherwise. */
+  /** What a running v2 or v3 remix is painting (and, in v3, checking), for the live view; null otherwise. */
   live: RemixLive | null;
   asset: SpineAsset | null;
   error: string | null;

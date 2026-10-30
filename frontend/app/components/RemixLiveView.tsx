@@ -8,7 +8,7 @@ import { type AtlasPage, parseAtlas } from "~/lib/atlas";
 import type { RemixActivity, RemixEvent, RemixIssue, RemixJob } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
-// The live view of a running v3 remix (RemixJob.live): the rig redrawn as each page is painted,
+// The live view of a running v2 or v3 remix (RemixJob.live): the rig redrawn as each page is painted,
 // the sprite sheet with what's being worked on and what the checks flagged, and a timeline.
 
 /** Activities that show the scanning band: something is being painted or looked at. */
@@ -60,7 +60,7 @@ export function RemixLivePlayer({ job, className }: { job: RemixJob; className?:
       {painted && <div key={revealKey} className="pointer-events-none absolute inset-0 animate-remix-reveal bg-primary/25" aria-hidden />}
       <div className="pointer-events-none absolute top-3 left-3 flex flex-col items-start gap-1.5">
         <Badge variant="secondary" className="bg-background/85 backdrop-blur-xs">
-          {painted ? `Attempt ${preview.round}` : "Original"}
+          {painted ? versionLabel(preview.round) : "Original"}
         </Badge>
       </div>
       {activity && (
@@ -73,6 +73,11 @@ export function RemixLivePlayer({ job, className }: { job: RemixJob; className?:
       )}
     </div>
   );
+}
+
+/** What the version on screen is: v2 and a first v3 attempt are just "Repainted". */
+function versionLabel(round: number) {
+  return round > 1 ? `Attempt ${round}` : "Repainted";
 }
 
 type RegionState = "working" | "flagged" | "fixed" | "shrunk" | "idle";
@@ -171,7 +176,7 @@ export function RemixLiveSheet({ job, className }: { job: RemixJob; className?: 
       <CardHeader>
         <CardTitle>Sprite sheet</CardTitle>
         <CardDescription>
-          {live?.preview?.pages[page.name] ? `${page.name} as painted in attempt ${live.preview.round}` : `${page.name}, not repainted yet`}
+          {live?.preview?.pages[page.name] ? `${page.name}, ${versionLabel(live.preview.round).toLowerCase()}` : `${page.name}, not repainted yet`}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -232,9 +237,14 @@ export function RemixLiveSheet({ job, className }: { job: RemixJob; className?: 
         </div>
         <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <Legend className="border-2 border-primary bg-primary/20">Being painted</Legend>
-          <Legend className="border-2 border-destructive bg-destructive/20">Flagged by a check</Legend>
-          <Legend className="border-2 border-primary bg-primary/10">Fixed</Legend>
-          <Legend className="border border-dashed border-foreground/70">Shrunk to fit its box</Legend>
+          {/* Only v3 checks, fixes and shrinks parts. */}
+          {job.apiVersion === "v3" && (
+            <>
+              <Legend className="border-2 border-destructive bg-destructive/20">Flagged by a check</Legend>
+              <Legend className="border-2 border-primary bg-primary/10">Fixed</Legend>
+              <Legend className="border border-dashed border-foreground/70">Shrunk to fit its box</Legend>
+            </>
+          )}
         </ul>
         {pageIssues.length > 0 && (
           <ul className="flex flex-col gap-1.5 text-sm">
@@ -281,7 +291,11 @@ export function RemixTimeline({ job, className }: { job: RemixJob; className?: s
     <Card className={className}>
       <CardHeader>
         <CardTitle>What Muse is doing</CardTitle>
-        <CardDescription>Each page is painted by Muse Image, then checked by Muse Spark.</CardDescription>
+        <CardDescription>
+          {job.apiVersion === "v3"
+            ? "Muse Spark plans the look, Muse Image paints each page, then Muse Spark checks it."
+            : "Muse Spark plans the look, then Muse Image paints each page."}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <ol className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">

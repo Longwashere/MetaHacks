@@ -4,6 +4,7 @@ import { SpinePlaceholder } from "~/components/SpinePlaceholder";
 import { SpineRuntime, type SpineRuntimeStatus } from "~/components/SpineRuntime";
 import type { AssetOrigin } from "~/lib/format";
 import type { SpineTweakBinding } from "~/lib/spine-tweaks";
+import { defaultAnimation } from "~/lib/animation";
 import type { AssetAccent, PreviewableAsset } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
@@ -56,7 +57,7 @@ export function SpinePreview({
   className,
 }: SpinePreviewProps) {
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
-  const clip = asset.animations.find((a) => a.name === animation) ?? asset.animations[0];
+  const clip = asset.animations.find((a) => a.name === animation) ?? defaultAnimation(asset.animations);
   const name = clip?.name ?? "idle";
   const live = asset.files !== null && status !== "error";
   const bonesActive = showBones || hideSkin;
@@ -77,7 +78,8 @@ export function SpinePreview({
           <SpineRuntime
             files={asset.files}
             animation={name}
-            loop={clip?.loop ?? true}
+            // Always loop in the viewer, even one-shot clips like attacks and deaths, so the preview never freezes.
+            loop
             playing={playing}
             speed={speed}
             showBones={bonesActive}

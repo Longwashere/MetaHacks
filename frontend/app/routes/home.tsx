@@ -6,7 +6,7 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
-import { getSavedAssetIds, listFeaturedAssets } from "~/lib/api.server";
+import { getAsset, getSavedAssetIds, listFeaturedAssets } from "~/lib/api.server";
 import { getSession } from "~/lib/auth.server";
 import { SITE_NAME, seoMeta } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
@@ -33,11 +33,29 @@ export function meta({ loaderData }: Route.MetaArgs) {
   });
 }
 
+/** Hand-picked assets for "Popular in the library", in display order. Missing or private ones are skipped. */
+const PINNED_ASSET_IDS = [
+  "black-crude-oil-elemental-7c067abb",
+  "tempest-wind-elemental-523d43e4",
+  "desert-troll-bruiser-057725aa",
+  "forest-bark-wizard-d47ec5b4",
+  "dark-pixel-samurai-lord-ece13bc2",
+  "one-eyed-goblin-troll-d16e68b3",
+  "ember-fire-knight-7e215105",
+  "arcane-spellcaster-skeleton-copy-df2c05e9",
+];
+const FEATURED_COUNT = 8;
+
 export async function loader({ request, context }: Route.LoaderArgs) {
-  const [featured, savedIds] = await Promise.all([
-    listFeaturedAssets(4),
+  const [pinned, popular, savedIds] = await Promise.all([
+    Promise.all(PINNED_ASSET_IDS.map((assetId) => getAsset(assetId, null))),
+    listFeaturedAssets(FEATURED_COUNT),
     getSavedAssetIds(getSession(context)),
   ]);
+  // Pinned first, topped up with the most-saved assets so the row is never short.
+  const picked = pinned.filter((asset) => asset !== null);
+  const pickedIds = new Set(picked.map((asset) => asset.id));
+  const featured = [...picked, ...popular.filter((asset) => !pickedIds.has(asset.id))].slice(0, FEATURED_COUNT);
   return { featured, savedIds, siteUrl: getSiteUrl(request) };
 }
 

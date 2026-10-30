@@ -12,7 +12,8 @@ import {
   rewordForContentPolicy,
   styleInstruction,
 } from "./meta.js";
-import { putFile } from "../../lib/storage.js";
+import type { RemixReporter } from "../../lib/remix-live.js";
+import { objectUrl, putFile } from "../../lib/storage.js";
 import { decodePage, fitToPage, layoutFit, pickBackground, toDataUrl, toModelInput } from "./textures.js";
 import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
 
@@ -65,10 +66,12 @@ export async function runRemix(
   input: RemixRequest,
   onProgress: RemixProgress,
   onPrompt: RemixPromptUpdate,
+  report: RemixReporter,
   signal: AbortSignal,
 ): Promise<RemixResult> {
   const { base } = input;
 
+  report.activity({ kind: "reading", round: 0 });
   onProgress(0.05, "Reading rig & atlas regions");
   const atlasText = (await fetchBaseFile(base.atlasUrl, signal)).toString("utf8");
   const pages = parseAtlas(atlasText);
@@ -93,6 +96,7 @@ export async function runRemix(
   // The uploaded reference image is described first, on its own; Muse Image never sees it, since
   // it repaints a reference image instead of the atlas (see FRICTION_LOG.md, part fixes).
   const { referenceUrl } = input;
+  if (referenceUrl) report.activity({ kind: "reference", round: 0 });
   const referenceLook = referenceUrl
     ? await withProgress(onProgress, 0.06, 0.1, "Studying the reference image", REFERENCE_EXPECTED_MS, async () =>
         describeReference(await toDataUrl(await fetchBaseFile(referenceUrl, signal), REFERENCE_MAX_SIDE), pageImages[0], input.prompt, signal),
@@ -101,6 +105,7 @@ export async function runRemix(
   if (referenceUrl && !referenceLook) throw new Error("Muse couldn't read the reference image. Try again or use another image.");
   // An art style the user picked beats the reference image's.
   const referenceStyle = input.style === "auto" ? (referenceLook?.style ?? null) : null;
+  report.activity({ kind: "planning", round: 0 });
   const { plan, describedStyle } = await withProgress(onProgress, 0.1, 0.2, "Planning the new look", PLAN_EXPECTED_MS, async () => {
     const plan = await planRemix(input, { name: base.name, parts, pageImages, background: background.name }, referenceLook, signal);
     // A named reference is described on its own, which Spark does far better than inside the plan.
@@ -114,6 +119,7 @@ export async function runRemix(
   // on its own, else the plan's own description, else the picked preset. Null when the remix keeps
   // the pages' style.
   const styleLook = referenceStyle ?? describedStyle ?? plan.style ?? (input.style === "auto" ? null : STYLE_LOOKS[input.style]);
+  report.event({ type: "planned", name: plan.name, editPrompt: plan.editPrompt, style: styleLook, referenceLook: referenceLook?.look ?? null });
   const soften = !styleLook ? 0 : input.strength < 0.34 ? STYLE_SOFTEN.light : input.strength < 0.67 ? STYLE_SOFTEN.moderate : STYLE_SOFTEN.heavy;
   const kept = keptPartProperties(input);
   const buildImagePrompt = (editPrompt: string) => [
@@ -163,7 +169,10 @@ export async function runRemix(
 
   let reference: string | null = null;
   const pageKeys: string[] = [];
+  // The live view's pages, swapped in as each one is painted. v2 paints once, so it's round 1.
+  const shown: Record<string, string> = {};
   for (const [i, page] of pages.entries()) {
+    report.activity({ kind: "painting", round: 1, page: page.name });
     const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background, layouts[i], soften);
     const generated = await withProgress(
       onProgress,
@@ -201,15 +210,18 @@ export async function runRemix(
         };
         // Muse Image sometimes draws a new layout instead of repainting the parts in place;
         // fitting that back would scramble the sheet, so the page is painted once more.
+        let insideBoxes = 0;
         const check = async (image: Buffer, attempt: number) => {
           const fit = await layoutFit(image, modelInput);
-          layoutChecks.push({ page: page.name, attempt, insideBoxes: Math.round(fit * 100) / 100 });
+          insideBoxes = Math.round(fit * 100) / 100;
+          layoutChecks.push({ page: page.name, attempt, insideBoxes });
           await writePrompts();
           return fit >= MIN_LAYOUT_FIT;
         };
         const first = await paintOnce("");
         if (await check(first, 1)) return first;
-        await putFile(folder, `${path.parse(page.name).name}.rejected.png`, first);
+        const rejected = await putFile(folder, `${path.parse(page.name).name}.rejected.png`, first);
+        report.event({ type: "rejected", round: 1, page: page.name, attempt: 1, insideBoxes, url: objectUrl(rejected) });
         const second = await paintOnce(LAYOUT_RETRY_NOTE);
         if (await check(second, 2)) return second;
         await putFile(folder, `${path.parse(page.name).name}.generated.png`, second);
@@ -227,9 +239,13 @@ export async function runRemix(
       await fitToPage(generated, modelInput, images[i], base.premultipliedAlpha, keyedRects),
     );
     pageKeys.push(pageKey);
+    shown[page.name] = objectUrl(pageKey);
+    report.event({ type: "painted", round: 1, page: page.name, url: shown[page.name], shrunk: [] });
+    report.preview({ round: 1, pages: { ...shown }, skeletonUrl: null });
     reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
   }
 
+  report.activity({ kind: "packing", round: 0 });
   onProgress(0.95, "Packing atlas");
   // Regions are unchanged and page names are kept, so the base atlas works as-is.
   const atlasKey = await putFile(folder, "remix.atlas", atlasText);

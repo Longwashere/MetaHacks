@@ -1,5 +1,7 @@
 // Mirrors the remix shapes in frontend/app/lib/types.ts. Keep the two in sync.
 
+import type { RemixLive } from "../../lib/remix-live.js";
+
 export const ART_STYLES = ["cartoon", "anime", "pixel", "painterly", "flat"] as const;
 export type ArtStyle = (typeof ART_STYLES)[number];
 
@@ -69,6 +71,7 @@ export interface RemixJob {
    * rejected it, "reworded" once the new prompt is in use.
    */
   promptStatus: PromptStatus;
+  live: RemixLive;
   result: RemixResult | null;
   error: string | null;
 }

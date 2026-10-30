@@ -6,6 +6,7 @@ import { AssetPlayer } from "~/components/AssetPlayer";
 import { SaveButton } from "~/components/SaveButton";
 import { DeleteAssetButton } from "~/components/DeleteAssetButton";
 import { VisibilityToggle } from "~/components/VisibilityToggle";
+import { defaultAnimation } from "~/lib/animation";
 import type { SpineViewMode } from "~/lib/types";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -213,7 +214,7 @@ export default function AssetPage({ loaderData, actionData }: Route.ComponentPro
         <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <AssetPlayer
             asset={asset}
-            animation={animation?.name ?? asset.animations[0]?.name ?? "idle"}
+            animation={animation?.name ?? defaultAnimation(asset.animations)?.name ?? "idle"}
             animationHref={buildAnimationUrl}
             viewMode={viewMode}
             onViewModeChange={handleViewModeChange}

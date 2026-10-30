@@ -70,6 +70,7 @@ import {
   listAssets,
   restoreRemixVersion,
 } from "~/lib/api.server";
+import { defaultAnimation } from "~/lib/animation";
 import { type Session, getSession, requireSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, seoMeta } from "~/lib/seo";
 import type { AutoTweakCapture } from "~/lib/spine-auto-tweak";
@@ -335,7 +336,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   // the poll where the fix finishes, the remix can still have the files from before the fix.
   const fixedRemix = fix?.status === "succeeded" && fix.asset?.id === remix?.id ? fix.asset : null;
   const savedRemix = remix && (fixedRemix ?? remix);
-  const previewAnimation = anim ?? (savedRemix ?? base)?.animations[0]?.name ?? "idle";
+  const previewAnimation = anim ?? defaultAnimation((savedRemix ?? base)?.animations ?? [])?.name ?? "idle";
   const tweakPanel = {
     ...tweak.panel,
     save: useSaveTweaks(savedRemix?.id ?? null, tweak),
@@ -510,7 +511,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                 <>
                   <AssetPlayer
                     asset={savedRemix}
-                    animation={anim ?? savedRemix.animations[0]?.name ?? "idle"}
+                    animation={anim ?? defaultAnimation(savedRemix.animations)?.name ?? "idle"}
                     animationHref={(name) => withParams({ anim: name })}
                     tweaks={playerTweaks}
                   />
@@ -541,7 +542,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                 <>
                   <AssetPlayer
                     asset={base}
-                    animation={anim ?? base.animations[0]?.name ?? "idle"}
+                    animation={anim ?? defaultAnimation(base.animations)?.name ?? "idle"}
                     animationHref={(name) => withParams({ anim: name })}
                     tweaks={playerTweaks}
                   />
