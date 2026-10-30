@@ -1,5 +1,5 @@
 import "@esotericsoftware/spine-player/dist/spine-player.css";
-import type { SpinePlayer, SpinePlayerConfig } from "@esotericsoftware/spine-player";
+import type { SpinePlayer, SpinePlayerConfig, TextureAtlas } from "@esotericsoftware/spine-player";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useInView } from "~/hooks/use-in-view";
 import { skelToJson } from "~/lib/spine-skel-json";
@@ -28,6 +28,11 @@ interface SpineRuntimeProps {
   tint: string | null;
   /** Live rig edits from the tweak panel. */
   tweaks?: SpineTweakBinding;
+  /**
+   * Page image URLs by atlas page name, swapped into the running player without reloading it
+   * (the live remix view). Pages not listed show the atlas's own images.
+   */
+  pageUrls?: Record<string, string>;
   onStatusChange?: (status: SpineRuntimeStatus) => void;
   className?: string;
 }
@@ -62,6 +67,7 @@ export function SpineRuntime({
   showLabels = false,
   tint,
   tweaks,
+  pageUrls,
   onStatusChange,
   className,
 }: SpineRuntimeProps) {
@@ -69,6 +75,10 @@ export function SpineRuntime({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<SpinePlayer | null>(null);
   const controllerRef = useRef<TweakController | null>(null);
+  const spineRef = useRef<typeof import("@esotericsoftware/spine-player") | null>(null);
+  /** Page image URL each atlas page shows, and the one it's loading, by page name. Reset with the player. */
+  const shownPages = useRef(new Map<string, string>());
+  const loadingPages = useRef(new Map<string, string>());
   const tempVec = useRef<{ set: (x: number, y: number, z: number) => void; x: number; y: number } | null>(null);
 
   // The player reads config.debug every frame, so mutating this object toggles debug drawing.
@@ -105,6 +115,9 @@ export function SpineRuntime({
     import("@esotericsoftware/spine-player").then((spine) => {
       const { SpinePlayer, Vector3, Physics } = spine;
       if (cancelled) return;
+      spineRef.current = spine;
+      shownPages.current.clear();
+      loadingPages.current.clear();
       tempVec.current = new Vector3();
 
       playerRef.current = new SpinePlayer(container, {
@@ -314,6 +327,43 @@ export function SpineRuntime({
       setStatus("idle");
     };
   }, [inView, files.skeletonUrl, files.atlasUrl, files.skin, files.premultipliedAlpha]);
+
+  // Swap page images in place. Every remix version keeps the atlas's regions, so only the
+  // textures change; re-creating the player would flash and reset the animation.
+  const pageKey = JSON.stringify(pageUrls ?? {});
+  useEffect(() => {
+    const player = playerRef.current;
+    const spine = spineRef.current;
+    if (status !== "ready" || !player?.assetManager || !spine) return;
+    const urls: Record<string, string> = JSON.parse(pageKey);
+    const atlas: TextureAtlas = player.assetManager.require(files.atlasUrl);
+    const atlasDir = files.atlasUrl.slice(0, files.atlasUrl.lastIndexOf("/") + 1);
+    for (const page of atlas.pages) {
+      const url = urls[page.name] ?? atlasDir + page.name;
+      const texture = page.texture;
+      const current = loadingPages.current.get(page.name) ?? shownPages.current.get(page.name) ?? atlasDir + page.name;
+      if (current === url || !(texture instanceof spine.GLTexture)) continue;
+      loadingPages.current.set(page.name, url);
+      const image = new Image();
+      // Same CORS mode as the runtime's own loader, so cached responses are reused.
+      image.crossOrigin = "anonymous";
+      image.onload = () => {
+        // A newer image for this page may have been asked for meanwhile, or the player replaced.
+        if (playerRef.current !== player || loadingPages.current.get(page.name) !== url) return;
+        loadingPages.current.delete(page.name);
+        shownPages.current.set(page.name, url);
+        // Texture keeps the image in a protected field, which update() uploads.
+        (texture as unknown as { _image: HTMLImageElement })._image = image;
+        texture.update(false);
+        // Re-applies the page's filters and wraps, generating mipmaps when they ask for them.
+        page.setTexture(texture);
+      };
+      image.onerror = () => {
+        if (loadingPages.current.get(page.name) === url) loadingPages.current.delete(page.name);
+      };
+      image.src = url;
+    }
+  }, [status, pageKey, files.atlasUrl]);
 
   // Sync playback props into the running player.
   useEffect(() => {

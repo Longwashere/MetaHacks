@@ -31,6 +31,7 @@ export function createRemixJob(input: RemixRequest, { id = newRemixJobId(), onSe
     createdAt: new Date().toISOString(),
     editPrompt: null,
     promptStatus: "original",
+    live: { activity: null, events: [], preview: null },
     result: null,
     error: null,
   };
@@ -65,6 +66,11 @@ async function runJob(job: RemixJob) {
         job.editPrompt = editPrompt;
         job.promptStatus = promptStatus;
       },
+      {
+        activity: (activity) => (job.live.activity = activity),
+        event: (event) => job.live.events.push({ ...event, at: new Date().toISOString() }),
+        preview: (preview) => (job.live.preview = preview),
+      },
       deadline,
     ));
     // The model code might ignore the signal; the deadline still wins.
@@ -73,6 +79,7 @@ async function runJob(job: RemixJob) {
     job.status = "succeeded";
     job.progress = 1;
     job.stage = "Done";
+    job.live.activity = null;
   } catch (error) {
     console.error(`Remix job ${job.id} failed`, error);
     job.status = "failed";

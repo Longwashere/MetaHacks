@@ -40,7 +40,7 @@ import {
   toDataUrl,
   toModelInput,
 } from "./textures.js";
-import type { PromptStatus, RemixRequest, RemixResult } from "./types.js";
+import type { PromptStatus, RemixActivity, RemixEventData, RemixIssue, RemixPreview, RemixRequest, RemixResult } from "./types.js";
 
 export interface RemixProgress {
   (progress: number, stage: string): void;
@@ -49,6 +49,13 @@ export interface RemixProgress {
 /** Called with the edit prompt Muse Image is given, and whether it's being re-worded for the content policy. */
 export interface RemixPromptUpdate {
   (editPrompt: string, status: PromptStatus): void;
+}
+
+/** Reports what the remix is doing, for the live view (see RemixLive in types.ts). */
+export interface RemixReporter {
+  activity(activity: RemixActivity): void;
+  event(event: RemixEventData): void;
+  preview(preview: RemixPreview): void;
 }
 
 /** Longest side of the images sent to Muse Image (its quality tops out around 1600px). */
@@ -130,6 +137,8 @@ interface Candidate {
   rig: Inspection | null;
   /** The last drawing of the assembled character, as a data URL, for revising the plan. */
   render: string | null;
+  /** URL of that drawing as stored, for the live view. */
+  renderUrl: string | null;
   /** Parts drawn bigger than their box and shrunk to fit, with the scale (see shrinkPartsToBoxes). */
   shrunk: { part: string; scale: number }[];
   /** Rigid meshes swapped for a box over their region so a repaint that outgrew them shows whole (see assess). */
@@ -202,12 +211,14 @@ export async function runRemix(
   input: RemixRequest,
   onProgress: RemixProgress,
   onPrompt: RemixPromptUpdate,
+  report: RemixReporter,
   signal: AbortSignal,
 ): Promise<RemixResult> {
   const started = Date.now();
   const hasTime = () => Date.now() - started < LOOP_BUDGET_MS;
   const { base } = input;
 
+  report.activity({ kind: "reading", round: 0 });
   onProgress(0.05, "Reading rig & atlas regions");
   const atlasText = (await fetchBaseFile(base.atlasUrl, signal)).toString("utf8");
   const pages = parseAtlas(atlasText);
@@ -281,6 +292,7 @@ export async function runRemix(
   // it repaints a reference image instead of the atlas (see FRICTION_LOG.md, part fixes).
   const { referenceUrl } = input;
   const referenceImage = referenceUrl ? await toDataUrl(await fetchBaseFile(referenceUrl, signal), REFERENCE_MAX_SIDE) : null;
+  if (referenceImage) report.activity({ kind: "reference", round: 0 });
   const referenceLook = referenceImage
     ? await withProgress(onProgress, 0.06, 0.1, "Studying the reference image", REFERENCE_EXPECTED_MS, () =>
         describeReference(referenceImage, pageImages[0], input.prompt, signal),
@@ -289,6 +301,7 @@ export async function runRemix(
   if (referenceUrl && !referenceLook) throw new Error("Muse couldn't read the reference image. Try again or use another image.");
   // An art style the user picked beats the reference image's.
   const referenceStyle = input.style === "auto" ? (referenceLook?.style ?? null) : null;
+  report.activity({ kind: "planning", round: 0 });
   const { plan, describedStyle } = await withProgress(onProgress, 0.1, 0.2, "Planning the new look", PLAN_EXPECTED_MS, async () => {
     const plan = await planRemix(input, { name: base.name, parts, pageImages, background: background.name }, referenceLook, signal);
     // A named reference is described on its own, which Spark does far better than inside the plan.
@@ -302,6 +315,7 @@ export async function runRemix(
   // on its own, else the plan's own description, else the picked preset. Null when the remix keeps
   // the pages' style.
   const styleLook = referenceStyle ?? describedStyle ?? plan.style ?? (input.style === "auto" ? null : STYLE_LOOKS[input.style]);
+  report.event({ type: "planned", name: plan.name, editPrompt: plan.editPrompt, style: styleLook, referenceLook: referenceLook?.look ?? null });
   const soften = !styleLook ? 0 : input.strength < 0.34 ? STYLE_SOFTEN.light : input.strength < 0.67 ? STYLE_SOFTEN.moderate : STYLE_SOFTEN.heavy;
   const kept = keptPartProperties(input);
   const buildImagePrompt = (editPrompt: string) => [
@@ -363,6 +377,32 @@ export async function runRemix(
   await writePrompts();
   if (before) await putFile(folder, "before.png", before.png);
 
+  // The live view's version: pages swap in as they're painted, then a whole candidate once it's assessed.
+  let preview: RemixPreview = { round: 0, pages: {}, skeletonUrl: null };
+  const show = (next: Partial<RemixPreview>) => {
+    preview = { ...preview, ...next };
+    report.preview(preview);
+  };
+  /** Preview skeletons by their boxed meshes, so the viewer only reloads the rig when those change. */
+  const previewSkeletons = new Map<string, string>();
+  const showCandidate = async (candidate: Candidate) => {
+    let skeletonUrl: string | null = null;
+    if (baseJson && candidate.boxed.length > 0) {
+      const boxedKey = [...candidate.boxed].sort().join("\n");
+      skeletonUrl = previewSkeletons.get(boxedKey) ?? null;
+      if (!skeletonUrl) {
+        skeletonUrl = objectUrl(await putFile(folder, `preview-skeleton-${previewSkeletons.size + 1}.json`, skeletonFor(candidate).toString()));
+        previewSkeletons.set(boxedKey, skeletonUrl);
+      }
+    }
+    show({ round: candidate.round, pages: Object.fromEntries(pages.map((p, i) => [p.name, objectUrl(candidate.textures[i])])), skeletonUrl });
+  };
+  const reportCheck = (candidate: Candidate, check: "style" | "rig", inspection: Inspection | null) => {
+    if (!inspection) return;
+    const { pass, score, summary, issues } = inspection;
+    report.event({ type: "checked", round: candidate.round, check, pass, score, summary, issues: issues satisfies RemixIssue[], renderUrl: candidate.renderUrl });
+  };
+
   /** Paints every page once more, with `feedback` from the last checks. Null when the layout check failed twice on a page. */
   const paintRound = async (log: RoundLog, from: number, to: number): Promise<Candidate | null> => {
     const roundFolder = `${folder}/round-${log.round}`;
@@ -372,6 +412,8 @@ export async function runRemix(
     const fitted: PageImage[] = [];
     const shrunk: Candidate["shrunk"] = [];
     for (const [i, page] of pages.entries()) {
+      report.activity({ kind: "painting", round: log.round, page: page.name });
+      const shrunkBefore = shrunk.length;
       const modelInput = await toModelInput(images[i], IMAGE_MAX_SIDE, background, layouts[i], soften);
       const generated = await withProgress(
         onProgress,
@@ -415,7 +457,8 @@ export async function runRemix(
             log.layoutChecks.push({ page: page.name, attempt, insideBoxes: Math.round(fit * 100) / 100 });
             await writePrompts();
             if (fit >= MIN_LAYOUT_FIT) return image;
-            await putFile(roundFolder, `${path.parse(page.name).name}.rejected-${attempt}.png`, image);
+            const rejected = await putFile(roundFolder, `${path.parse(page.name).name}.rejected-${attempt}.png`, image);
+            report.event({ type: "rejected", round: log.round, page: page.name, attempt, insideBoxes: Math.round(fit * 100) / 100, url: objectUrl(rejected) });
           }
           return null;
         },
@@ -457,17 +500,22 @@ export async function runRemix(
           for (const part of regions) shrunk.push({ part, scale });
         }
       }
-      pageKeys.push(await putFile(roundFolder, page.name, pagePng));
+      const pageKey = await putFile(roundFolder, page.name, pagePng);
+      pageKeys.push(pageKey);
+      const pageUrl = objectUrl(pageKey);
+      report.event({ type: "painted", round: log.round, page: page.name, url: pageUrl, shrunk: shrunk.slice(shrunkBefore) });
+      show({ round: log.round, pages: { ...preview.pages, [page.name]: pageUrl } });
       fitted.push(await decodePage(pagePng, base.premultipliedAlpha));
       reference ??= await toDataUrl(generated, PLAN_MAX_SIDE);
     }
     // Regions are unchanged and page names are kept, so the base atlas works as-is.
     const atlas = await putFile(roundFolder, "remix.atlas", atlasText);
     log.shrunk = shrunk;
-    const candidate: Candidate = { round: log.round, atlas, textures: pageKeys, images: fitted, style: null, rig: null, render: null, shrunk, boxed: [], crops: [] };
+    const candidate: Candidate = { round: log.round, atlas, textures: pageKeys, images: fitted, style: null, rig: null, render: null, renderUrl: null, shrunk, boxed: [], crops: [] };
     assess(candidate);
     log.boxed = candidate.boxed;
     log.crops = candidate.crops;
+    await showCandidate(candidate);
     return candidate;
   };
 
@@ -483,7 +531,8 @@ export async function runRemix(
     const after = before && (await render(candidate.images, candidate));
     if (!before || !after) return null;
     candidate.render = after.dataUrl;
-    await putFile(`${folder}/round-${candidate.round}`, `${name}.png`, after.png);
+    candidate.renderUrl = objectUrl(await putFile(`${folder}/round-${candidate.round}`, `${name}.png`, after.png));
+    report.activity({ kind: kind === "style" ? "checking-style" : "checking-rig", round: candidate.round });
     return withProgress(onProgress, from, to, stage, INSPECT_EXPECTED_MS, () =>
       kind === "style"
         ? inspectStyle(inspection(), before.dataUrl, after.dataUrl, referenceImage, signal)
@@ -501,6 +550,7 @@ export async function runRemix(
     const prompt = issues.filter((i) => i.part).map((i) => `${i.part}: ${i.fix}`).join(" ");
     const entry: RoundLog["partFixes"][number] = { regions, prompt };
     log.partFixes.push(entry);
+    report.activity({ kind: "fixing", round: log.round, regions });
     const fixMeshes = meshes.filter((m) => regions.includes(m.region) && m.hull.length >= 6);
     const runFix = () =>
       runPartFix(
@@ -542,14 +592,17 @@ export async function runRemix(
       );
       // The part fix fitted the parts it repainted; the rest keep their shrink.
       const shrunk = candidate.shrunk.filter((s) => !regions.includes(s.part));
-      const fixed: Candidate = { ...candidate, atlas: result.atlas, textures: result.textures, images: fixedImages, rig: null, render: null, shrunk };
+      const fixed: Candidate = { ...candidate, atlas: result.atlas, textures: result.textures, images: fixedImages, rig: null, render: null, renderUrl: null, shrunk };
       assess(fixed);
+      report.event({ type: "fixed", round: log.round, regions, prompt, error: null });
+      await showCandidate(fixed);
       return fixed;
     } catch (error) {
       signal.throwIfAborted();
       // A failed part fix keeps the candidate as it was.
       console.warn(`Part fix in remix ${jobId} failed`, error);
       entry.error = error instanceof Error ? error.message : String(error);
+      report.event({ type: "fixed", round: log.round, regions, prompt, error: entry.error });
       return null;
     } finally {
       await writePrompts();
@@ -568,6 +621,7 @@ export async function runRemix(
    * something different. Falls back to adding the fixes to the image prompt.
    */
   const revise = async (candidate: Candidate, issues: InspectionIssue[], log: RoundLog, from: number, to: number, stage: string) => {
+    report.activity({ kind: "revising", round: log.round });
     const revised = candidate.render
       ? await withProgress(onProgress, from, to, stage, REVISE_EXPECTED_MS, () =>
           revisePlan({ prompt: input.prompt, editPrompt, parts, issues }, pageImages, candidate.render ?? "", signal),
@@ -581,6 +635,7 @@ export async function runRemix(
     } else {
       feedback = feedbackNote(issues);
     }
+    report.event({ type: "revised", round: log.round, editPrompt: revised || null });
     await writePrompts();
   };
   const summary = (inspection: Inspection) => {
@@ -610,6 +665,7 @@ export async function runRemix(
     // Style first: a wrong look repaints everything, so there's no point fixing joints yet.
     candidate.style = (await check(candidate, "style", "style", at(0.5), at(0.6), `${label}Checking the style`)) ?? null;
     log.style = candidate.style;
+    reportCheck(candidate, "style", candidate.style);
     await writePrompts();
     if (candidate.style && !candidate.style.pass) {
       keep(candidate, log);
@@ -622,6 +678,7 @@ export async function runRemix(
 
     candidate.rig = withPartProblems(candidate, await check(candidate, "rig", "rig", at(0.6), at(0.68), `${label}${candidate.style ? `Style looks right (${summary(candidate.style)}). ` : ""}Checking how the parts fit`));
     log.rig = candidate.rig;
+    reportCheck(candidate, "rig", candidate.rig);
     await writePrompts();
     for (let fix = 0; candidate.rig && !candidate.rig.pass && fix < MAX_PART_FIXES && hasTime(); fix++) {
       if (!isLocal(candidate.rig)) break;
@@ -634,6 +691,7 @@ export async function runRemix(
         await check(fixed, "rig", `rig.fix-${fix + 1}`, at(0.68 + span * (fix + 0.8)), at(0.68 + span * (fix + 1)), `${label}Checking the fixed parts`),
       );
       log.partFixes[log.partFixes.length - 1].rig = fixed.rig;
+      reportCheck(fixed, "rig", fixed.rig);
       await writePrompts();
       candidate = fixed;
     }
@@ -654,10 +712,13 @@ export async function runRemix(
   const chosen = best as { candidate: Candidate; score: number } | null;
   if (!chosen) throw new Error("The image model moved the parts out of place every time. Try a smaller change or a lower strength.");
   await writePrompts();
+  report.event({ type: "chosen", round: chosen.candidate.round, score: Math.round(chosen.score * 100) / 100 });
+  await showCandidate(chosen.candidate);
 
   // Tweak step: parts are moved and scaled back to fit like the original. Only a JSON skeleton can
   // be rewritten; a .skel keeps its parts as painted.
   const tweakLog: TweakLog = { measured: {}, review: null, reverted: {}, skipped: [], tweaks: {}, crops: [] };
+  report.activity({ kind: "tweaking", round: 0 });
   const tweakedSkeleton = binarySkeleton || !before ? null : await tweakParts(chosen.candidate, tweakLog);
   // Boxed meshes have to ship with the remix even when nothing was tweaked.
   const skeleton =
@@ -666,6 +727,12 @@ export async function runRemix(
     rounds.push({ round: 0, feedback: "", layoutChecks: [], partFixes: [], tweak: tweakLog });
     await writePrompts();
   }
+  if (tweakedSkeleton) {
+    const moved = Object.values(tweakLog.tweaks).filter((t) => t.x !== 0 || t.y !== 0 || t.scale !== 1 || t.rotate !== 0);
+    report.event({ type: "tweaked", parts: moved.length });
+    show({ skeletonUrl: objectUrl(tweakedSkeleton) });
+  }
+  report.activity({ kind: "packing", round: 0 });
   onProgress(0.98, "Packing atlas");
   return {
     name: plan.name,

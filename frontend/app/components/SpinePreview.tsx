@@ -30,6 +30,8 @@ export interface SpinePreviewProps {
   showLabels?: boolean;
   /** Live rig edits; only applied when the real runtime renders. */
   tweaks?: SpineTweakBinding;
+  /** Page images to swap in without reloading the rig (see SpineRuntime). */
+  pageUrls?: Record<string, string>;
   /** Shown as a badge in the top-left corner: the model that made a remix, or "Original upload". */
   origin?: AssetOrigin;
   className?: string;
@@ -49,6 +51,7 @@ export function SpinePreview({
   boneColor,
   showLabels = false,
   tweaks,
+  pageUrls,
   origin,
   className,
 }: SpinePreviewProps) {
@@ -83,6 +86,7 @@ export function SpinePreview({
             showLabels={showLabels}
             tint={asset.tint}
             tweaks={tweaks}
+            pageUrls={pageUrls}
             onStatusChange={setStatus}
           />
           {status !== "ready" && <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />}

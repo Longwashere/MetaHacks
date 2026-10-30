@@ -140,8 +140,61 @@ export interface RemixJob {
   promptStatus: PromptStatus;
   /** URL of the user's reference image, or null. */
   referenceUrl: string | null;
+  /** What a running v3 remix is painting and checking, for the live view; null otherwise. */
+  live: RemixLive | null;
   asset: SpineAsset | null;
   error: string | null;
+}
+
+/** What the remix is working on right now. */
+export interface RemixActivity {
+  kind: "reading" | "reference" | "planning" | "painting" | "checking-style" | "checking-rig" | "fixing" | "revising" | "tweaking" | "packing";
+  /** Paint round, from 1; 0 outside the paint loop. */
+  round: number;
+  /** Atlas page being painted. */
+  page?: string;
+  /** Atlas regions being repainted by a part fix. */
+  regions?: string[];
+}
+
+/**
+ * The version the live view draws. Every version keeps the base atlas's regions and page names,
+ * so the base atlas loads it with these page images swapped in.
+ */
+export interface RemixPreview {
+  round: number;
+  /** Page image URL by atlas page name; pages not listed are still the base rig's. */
+  pages: Record<string, string>;
+  /** Skeleton to draw it with (boxed meshes or tweaks), or null for the base rig's. */
+  skeletonUrl: string | null;
+}
+
+export interface RemixIssue {
+  /** Atlas region the problem is in, or null for the whole character. */
+  part: string | null;
+  problem: string;
+  fix: string;
+}
+
+/** Something that happened in a remix, for the live view's timeline. */
+export type RemixEvent = { at: string } & (
+  | { type: "planned"; name: string; editPrompt: string; style: string | null; referenceLook: string | null }
+  | { type: "painted"; round: number; page: string; url: string; shrunk: { part: string; scale: number }[] }
+  /** Muse Image moved the parts on a page; `url` is its raw output. */
+  | { type: "rejected"; round: number; page: string; attempt: number; insideBoxes: number; url: string }
+  | { type: "checked"; round: number; check: "style" | "rig"; pass: boolean; score: number; summary: string; issues: RemixIssue[]; renderUrl: string | null }
+  | { type: "fixed"; round: number; regions: string[]; prompt: string; error: string | null }
+  /** The plan was rewritten for the next round, or (null) the issues were added to its prompt instead. */
+  | { type: "revised"; round: number; editPrompt: string | null }
+  | { type: "chosen"; round: number; score: number }
+  /** The tweak step moved or scaled this many parts back into place. */
+  | { type: "tweaked"; parts: number }
+);
+
+export interface RemixLive {
+  activity: RemixActivity | null;
+  events: RemixEvent[];
+  preview: RemixPreview | null;
 }
 
 /** Where a part fix starts: the original rig's part, or the remix's current one. */

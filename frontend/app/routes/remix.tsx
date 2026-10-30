@@ -16,11 +16,13 @@ import {
 } from "react-router";
 import type { Route } from "./+types/remix";
 import type { action as autoTweakAction } from "./api.auto-tweak";
+import type { loader as remixJobLoader } from "./api.remix-job";
 import type { action as saveSkeletonAction } from "./api.remix-skeleton";
 import { AnimatePanel } from "~/components/AnimatePanel";
 import { AssetGrid } from "~/components/AssetGrid";
 import { AssetPlayer } from "~/components/AssetPlayer";
 import { ReferenceImageField } from "~/components/ReferenceImageField";
+import { RemixLivePlayer, RemixLiveSheet, RemixTimeline } from "~/components/RemixLiveView";
 import { RigPicker } from "~/components/RigPicker";
 import { SaveButton } from "~/components/SaveButton";
 import { DeleteAssetButton } from "~/components/DeleteAssetButton";
@@ -305,12 +307,29 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export default function Remix({ loaderData, actionData }: Route.ComponentProps) {
-  const { base, copyBase, fromOriginal, remix, job, fix, versions, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
+  const { base, copyBase, fromOriginal, remix, job: loadedJob, fix, versions, anim, rq, source, pickerRigs, recent, savedIds, signedIn, usage } = loaderData;
   const [searchParams] = useSearchParams();
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const fixError = actionData && "fixError" in actionData ? actionData.fixError : null;
   const restoreError = actionData && "restoreError" in actionData ? actionData.restoreError : null;
   const { revalidate } = useRevalidator();
+  // A running job is polled through /api/remix-job, which skips the rest of this page's loader.
+  const jobFetcher = useFetcher<typeof remixJobLoader>();
+  const fetchedJob = jobFetcher.data?.job;
+  const job = fetchedJob && fetchedJob.id === loadedJob?.id ? fetchedJob : loadedJob;
+  const jobActive = job?.status === "queued" || job?.status === "running";
+  const jobId = job?.id;
+  useEffect(() => {
+    if (!jobId || !jobActive || jobFetcher.state !== "idle") return;
+    // The next poll starts a second after the last one returned, so slow polls never pile up.
+    const t = setTimeout(() => jobFetcher.load(`/api/remix-job?${new URLSearchParams({ id: jobId })}`), 1000);
+    return () => clearTimeout(t);
+  }, [jobId, jobActive, jobFetcher.state, jobFetcher.data, jobFetcher.load]);
+  // Once it has finished, the page loader shows the result (or redirects to the new remix).
+  const finished = loadedJob && fetchedJob?.id === loadedJob.id && !jobActive && fetchedJob.status !== loadedJob.status;
+  useEffect(() => {
+    if (finished) void revalidate();
+  }, [finished, revalidate]);
   const tweak = useTweakSession(base?.id ?? null);
   // A finished part fix carries the remix as it saved it. The loader reads the remix first, so on
   // the poll where the fix finishes, the remix can still have the files from before the fix.
@@ -335,8 +354,8 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
     selectedPart: tweaking ? tweak.binding.selectedPart : null,
   };
 
-  // Poll the job while it's in progress. BACKEND: could be replaced by SSE/WebSocket push.
-  const active = job?.status === "queued" || job?.status === "running" || fix?.status === "queued" || fix?.status === "running";
+  // Poll a part fix while it's in progress. BACKEND: could be replaced by SSE/WebSocket push.
+  const active = fix?.status === "queued" || fix?.status === "running";
   useEffect(() => {
     if (!active) return;
     const t = setInterval(revalidate, 1000);
@@ -564,28 +583,35 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       </Alert>
                     )}
                     <ExpandedPrompt job={job} />
-                    <SpinePreview
-                      asset={job.base}
-                      className="animate-pulse rounded-lg opacity-50"
-                      showBones
-                    />
+                    {job.live ? (
+                      <RemixLivePlayer job={job} />
+                    ) : (
+                      <SpinePreview asset={job.base} className="animate-pulse rounded-lg opacity-50" showBones />
+                    )}
                   </CardContent>
                 </Card>
               )}
             </section>
           </div>
 
-          <PartFixSection
-            // Remount per rig/result so page, source and part selection start fresh.
-            key={`${base.id}:${savedRemix?.id ?? ""}`}
-            base={base}
-            remix={savedRemix}
-            fix={fix?.assetId === savedRemix?.id ? fix : null}
-            error={fixError}
-            usage={usage}
-            versions={versions}
-            restoreError={restoreError}
-          />
+          {job?.live && jobActive ? (
+            <div className="grid gap-8 lg:grid-cols-3">
+              <RemixTimeline job={job} className="lg:self-start" />
+              <RemixLiveSheet job={job} className="lg:col-span-2" />
+            </div>
+          ) : (
+            <PartFixSection
+              // Remount per rig/result so page, source and part selection start fresh.
+              key={`${base.id}:${savedRemix?.id ?? ""}`}
+              base={base}
+              remix={savedRemix}
+              fix={fix?.assetId === savedRemix?.id ? fix : null}
+              error={fixError}
+              usage={usage}
+              versions={versions}
+              restoreError={restoreError}
+            />
+          )}
         </div>
       )}
 

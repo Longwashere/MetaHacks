@@ -62,7 +62,16 @@ Users don't create rigs from scratch. They pick an existing rig and re-texture i
 
 The backend will need the base rig's atlas regions (slot attachments and their UV rects) so new textures fit the existing mesh and region attachments. `strength`, `keepPalette` and `keepPosition` / `keepSize` / `keepOutline` are hints for the texture model; the keep-part options are off by default and only add the matching instruction to the prompts.
 
-If a remix takes longer than a minute or so, consider server-sent events (SSE) or a WebSocket instead of polling. You can add an SSE resource route and replace the `useEffect` polling in `remix.tsx`.
+   While a job runs, the page polls `/api/remix-job?id=<jobId>` (a resource route calling `getRemixJob`) through `useFetcher`, a second after the last poll returned, rather than re-running the whole page loader. When the polled job has finished, it revalidates once so the loader shows the result.
+
+   **Live view (v3 only).** A running v3 job also carries `live: { activity, events, preview }` (`RemixLive` in `app/lib/types.ts`; `null` for v1/v2 and once the job has finished). `runRemix` reports them through its `RemixReporter`:
+   - `activity`: what it's on now (`painting` a `page`, `checking-style`, `fixing` some `regions`…), with the paint `round`.
+   - `events`: the timeline: `planned`, `painted` (page URL and parts shrunk to fit), `rejected` (Muse Image's raw output when it moved the parts), `checked` (Spark's verdict, its issues by atlas region, and the render it judged), `fixed`, `revised`, `chosen` (the best attempt, which may be an earlier one) and `tweaked`.
+   - `preview`: the version to draw: page image URLs by atlas page name and, when meshes were boxed or parts tweaked, a skeleton URL. Every version keeps the base atlas's regions and page names, so the page loads the **base** atlas and swaps the page textures into the running player (`SpineRuntime`'s `pageUrls`) without re-creating it. Only a new skeleton reloads the player.
+
+   `app/components/RemixLiveView.tsx` draws them: the player with a scan band and a flash when new art lands, a sprite sheet marking the parts being painted, flagged by a check, fixed or shrunk, and the timeline. All URLs are files the job already stores under `remixes/<time>_<jobId>/round-N/`.
+
+If a remix takes longer than a minute or so, consider server-sent events (SSE) or a WebSocket instead of polling: add an SSE resource route and replace the `useFetcher` polling in `remix.tsx`.
 
 5. **Come back to it.** `/remix?asset=<remixId>` is the workspace for a remix the user owns (made by a job or copied): the player, tweaks, sprite sheet and part fixes, with the rig it was made from (`remixOf`) as the base. If that rig is gone or private, the remix stands in as the base. Anyone else is redirected to the asset page. The owner opening `/assets/<remixId>` is redirected here too; `?public=1` and the per-animation pages show them the public page instead.
 

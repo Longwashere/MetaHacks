@@ -16,6 +16,20 @@
   --animate-spine-pulse: spine-pulse var(--spine-dur, 1.6s) ease-in-out infinite;
   --animate-spine-spin: spine-spin var(--spine-dur, 1.6s) linear infinite;
 
+  /* Live remix view (see app/components/RemixLiveView.tsx): a band sweeping down what's being
+     painted or checked, and a flash when new art lands. */
+  --animate-remix-scan: remix-scan 2.4s ease-in-out infinite;
+  --animate-remix-reveal: remix-reveal 1.2s ease-out forwards;
+
+  @keyframes remix-scan {
+    0% { top: -35%; }
+    100% { top: 100%; }
+  }
+  @keyframes remix-reveal {
+    0% { opacity: 0.85; }
+    100% { opacity: 0; }
+  }
+
   @keyframes spine-bob {
     0%, 100% { translate: 0 0; }
     50% { translate: 0 -3px; }
