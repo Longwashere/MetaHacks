@@ -208,7 +208,8 @@ export function RemixLiveSheet({ job, className }: { job: RemixJob; className?: 
                 <div className="absolute inset-x-0 h-1/3 animate-remix-scan bg-linear-to-b from-transparent via-primary/25 to-transparent" />
               </div>
             )}
-            {live?.preview?.pages[page.name] && <div key={url} className="pointer-events-none absolute inset-0 animate-remix-reveal bg-primary/25" aria-hidden />}
+            {/* Keyed apart from the <img>: siblings sharing a key can leave old sheets mounted. */}
+            {live?.preview?.pages[page.name] && <div key={`reveal:${url}`} className="pointer-events-none absolute inset-0 animate-remix-reveal bg-primary/25" aria-hidden />}
             {pageW && pageH && (
               <div className="absolute inset-0">
                 {page.regions.map((r, i) => {

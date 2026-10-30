@@ -304,12 +304,18 @@ const KEEP_PART_OPTIONS = [
   { name: "keepOutline", label: "Outline" },
 ] as const;
 
-const EXAMPLE_PROMPTS = [
-  "Black and crimson ninja outfit, moonlit palette",
-  "Golden ceremonial armor with jade inlays",
-  "Zombie version — torn clothes, pale green skin",
-  "Cyberpunk neon trims and chrome plating",
+/** Prompt chips: a click puts `prompt` in the text box, or the label when there's none. */
+const EXAMPLE_PROMPTS: { label: string; prompt?: string }[] = [
+  { label: "Black and crimson ninja outfit, moonlit palette" },
+  { label: "Golden ceremonial armor with jade inlays" },
+  {
+    label: "Zombie version — torn clothes, pale green skin",
+    prompt:
+      "Comic book illustration of the character converted to a rotting ghoul, pale gangrenous olive-green skin with necrotic yellow undertones, stained purplish torn garments. Rendering features dense black ink crosshatching over sunken cheekbones, fine directional crosshatch shading across decayed anatomy, rough dry-brush line textures along the edges, colored with vivid murky watercolor washes and comic flats, full color, high contrast --no monochrome, black and white, grayscale, smooth 3d render",
+  },
+  { label: "Cyberpunk neon trims and chrome plating" },
 ];
+
 
 /** `next` with the log events its poll skipped taken from `prev`, the same job as seen last. */
 function withEarlierEvents(next: RemixJob, prev: RemixJob | null): RemixJob {
@@ -1329,9 +1335,9 @@ function RemixForm({
         <FieldError id="prompt-error" message={errors.prompt} />
         <div className="flex flex-wrap gap-2">
           {EXAMPLE_PROMPTS.map((example) => (
-            <Badge key={example} variant="outline" asChild>
-              <button type="button" onClick={() => setPrompt(example)} className="cursor-pointer hover:bg-accent">
-                {example}
+            <Badge key={example.label} variant="outline" asChild>
+              <button type="button" onClick={() => setPrompt(example.prompt ?? example.label)} className="cursor-pointer hover:bg-accent">
+                {example.label}
               </button>
             </Badge>
           ))}
