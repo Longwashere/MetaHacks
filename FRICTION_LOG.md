@@ -56,6 +56,15 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-31 — Muse Image moved the off-limits shapes it was told to leave alone
+- **What happened:** On `ember-fire-knight-7e215105`, the part fix "turn this axe into a sword" (`job_2d65de90`, region `fuzi`) succeeded, but 18% of the new sword's paint ended up under neighbouring parts, and the sword came back upside down (pommel where the axe head was).
+- **Evidence (verified):** `/images/edits`, `muse-image-1.0`, 1536×1536. Input: the axe on solid magenta, with the other parts sharing its atlas box drawn as flat solid pure blue shapes. The prompt said "The flat solid pure blue shapes are space other parts use: leave them exactly as they are, solid pure blue, and keep every new part off them". The output kept the shapes blue but narrowed and moved them (the big shape on the right and the ones at the top), and the blade ran into the space where the armour piece really is. Layout checks passed (attached 1, scale 1). R2 folder `remixes/2026-10-31T02-00-20-650Z_job_2d65de90`. The previous run, `job_37f11e88`, kept every shape in place, so it varies between runs.
+- **Cost:** One paid fix with a broken result.
+- **Cause:** Muse Image treats the off-limits shapes as editable layout, not fixed pixels. The orientation is our gap: neither prompt said which end of the weapon is held.
+- **Workaround / status:** Open for the moved shapes. Planned: check that they came back where they were sent (repaint once, then fail). The orientation gap is addressed: Spark rule 5 in `PART_FIX_SYSTEM_PROMPT` now has Spark state each changed part's orientation (which end is held or joins the body, where the other points) and keep the held end in place. Not yet tried with a live run.
+- **Ask for Meta:** A mask or "preserve these pixels" input for `/images/edits`, so areas outside the edit can't move.
+- **Lesson:** An instruction to leave pixels alone isn't enough: verify it.
+
 ### 2026-10-30 — Asked to erase a part, Muse Image invented new parts instead
 - **What happened:** On the slime remix (`rotting-ghoul-slime-6cc9a424`), two part fixes on `shadow` ("let's remove the shadow altogther. make it blank", "remove this piece altogether") both failed with "The image model moved the parts out of place twice."
 - **Evidence (verified):** `/images/edits`, `muse-image-1.0`. Input: one faint shadow on solid magenta. Spark's plan said "Erase the wide central shadow… leaving empty transparent nothing". Muse Image returned an invented ring of armour pieces (helmet, greaves, boots) on one attempt and five purple shards on the other. Layout checks: attached 0.1/0.22 (`job_c7be717b`), 0.2/0.89 with scale 0.235 (`job_0bdac940`). R2 folders `remixes/2026-10-30T13-3*_job_{c7be717b,0bdac940}`.
@@ -300,6 +309,13 @@ Add the entry in the same task, not later.
 - **API keys appeared in plain text in chat sessions.** The Meta key and the Cloudflare API token (which the R2 credentials are derived from) are stored in `backend/.env` (gitignored), but rotate both before the repo goes public. The Baseten key (`BASETEN_API_KEY`) was pasted in chat on 2026-10-30 too. Rolling the Cloudflare token changes `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` too. (2026-10-27)
 
 ### Log
+
+### 2026-10-30 — Part fix drew a sword over neighbours the model couldn't see
+- **What happened:** On `ember-fire-knight-7e215105`, "Give him a great sword instead of an axe" (`job_c61a09e7`, region `fuzi`) succeeded, but the sword lost its grip and pommel, and the game showed bits of other parts floating around it.
+- **Cause:** The axe's atlas box also holds a kneepad, a chip, a cloth scrap and armour corners. The part fixer erased them to the background colour in the image the models see, so the space looked empty, and Muse Image drew the sword's grip over the kneepad. On save the kneepad's pixels won, and the boxed meshes showed the neighbours.
+- **Workaround / status:** The neighbours are now drawn as flat shapes in a second key colour (`pickOffLimits`, the runner-up to the background), and both prompts say to keep new parts off them (`buildPrompt`; Spark rule 8 in `PART_FIX_SYSTEM_PROMPT`). The colour is cleared back to background before the checks (`clearColour`), in `backend/src/{v2,v3}/lib/part-fix.ts`. Checked offline: clearing gives exactly the old input. Not yet tried with a live model run. If Muse Image paints over or restyles the shapes, as it filled the empty canvas in the slime runs, revisit.
+- **Follow-up (job_37f11e88, dragon sword):** With the off-limits shapes, Muse Image drew the whole sword around them, but `shrinkPartsToBoxes` then dropped the axe's outline and re-centred the sword in its box, moving it about 65 px onto the kneepad (16.3% of its paint lost). Part fixes with off-limits neighbours now pass `anchor: "part"` (ported to v2), so a part keeps where the model drew it and only moves as far as it must. The outline-dropped branch honours `anchor` too, which also affects the v3 remix. Refitting the same output offline loses 0.8%.
+- **Lesson:** Don't hide constraints from the image model: what it can't see, it will draw over. And don't move what the model placed on purpose.
 
 ### 2026-10-30 — v3 cut square holes in parts on an atlas with overlapping boxes
 - **What happened:** On 20902 Sumuqishi (the only rig whose atlas boxes overlap), the v3 remix (job_7700b27e) came out with rectangular bites out of the visors, helmet and shoulder shell, and a vertical seam through the chest. v2 with the same prompt (job_6b97cb70) was clean.

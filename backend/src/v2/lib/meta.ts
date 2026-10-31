@@ -332,8 +332,10 @@ Rules:
 2. Say what each part becomes, following the request. Turn vague words into paint: shape, materials, colours, patterns, surface detail. If the request is about one part ("the body"), apply it to that part and keep the others what they are, restyled to match.
 3. Each part is one cut-out piece of the character and becomes the matching piece and nothing more: a torso piece is a torso with no head or face, a limb segment has no hand or foot, armour stays empty, a head is one head. Never ask for a whole body, a second head, or anything inside armour.
 4. Each part stays where it is and no bigger than it is now; it may change shape within that.
-5. Match the rest of the character. Start with one sentence describing its art style in paint terms (line weight, shading, colour, amount of texture, lighting), and use its materials and palette unless the request says otherwise. The description of the rest of the character was written for the whole sprite sheet: ignore any positions or part lists in it.
-6. Paintable language only, imperative voice, one paragraph, at most 900 characters. Nothing about the model, the rig, the atlas or the background.
+5. Keep each part's orientation. Read it from the picture: which end is held or joins the body (a weapon's handle, a limb's joint end) and where the other end points. State it for every part whose shape changes, in picture terms, e.g. "grip and pommel at the bottom left where the handle ends, blade pointing up to the top right". The new part's held or joined end goes where the old one's is; never flip or reverse it.
+6. Match the rest of the character. Start with one sentence describing its art style in paint terms (line weight, shading, colour, amount of texture, lighting), and use its materials and palette unless the request says otherwise. The description of the rest of the character was written for the whole sprite sheet: ignore any positions or part lists in it.
+7. Paintable language only, imperative voice, one paragraph, at most 900 characters. Nothing about the model, the rig, the atlas or the background.
+8. When the user message names an off-limits colour, the flat shapes in that colour are other parts sharing this space, not parts to repaint: never describe or restyle them. Shape each new part to fit the room around them; where the request needs more room (a sword for an axe), bend, angle or shorten the new part rather than cross them, keeping its held end in place (rule 5).
 
 Reply with JSON only, no markdown: {"editPrompt": "..."}`;
 
@@ -341,6 +343,8 @@ export interface PartFixPlanInput {
   /** The packed parts as Muse Image will see them. */
   image: string;
   background: string;
+  /** Colour of the flat shapes standing for other parts that share the space, or null when there are none. */
+  offLimits: string | null;
   /** One line per part, e.g. "body: x 35–65%, y 30–62%". */
   parts: string[];
   source: "original" | "remix";
@@ -364,6 +368,7 @@ export async function planPartFix(input: PartFixPlanInput, signal: AbortSignal):
     input.look ? `How the rest of the character looks: ${input.look}` : "",
     `Art style: ${input.style}`,
     `Background: solid ${input.background}`,
+    input.offLimits ? `Off-limits: flat solid ${input.offLimits} shapes` : "",
     `Request: ${input.request}`,
   ]
     .filter(Boolean)

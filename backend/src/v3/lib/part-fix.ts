@@ -5,7 +5,20 @@ import { type PartLayout, layoutParts } from "../../lib/layout.js";
 import { ContentPolicyError, planPartFix, repaintPage } from "./meta.js";
 import { type RemixProgress, fetchBaseFile, withProgress } from "./remix.js";
 import { putFile } from "../../lib/storage.js";
-import { type PageImage, attachedFit, decodePage, fitToPage, pickBackground, shrinkPartsToBoxes, toDataUrl, toModelInput } from "./textures.js";
+import {
+  type Background,
+  type ModelInput,
+  type PageImage,
+  attachedFit,
+  decodePage,
+  fitToPage,
+  hexToRgb,
+  pickBackground,
+  pickOffLimits,
+  shrinkPartsToBoxes,
+  toDataUrl,
+  toModelInput,
+} from "./textures.js";
 import type { PartFixInput } from "../../lib/types.js";
 
 /** Same limits as a full remix (see remix.ts). */
@@ -113,10 +126,10 @@ export async function runPartFix(
   const look = input.remix.editPrompt ?? input.remix.prompt;
 
   const touched = selected.flatMap((s, i) => (s.length > 0 ? [i] : []));
-  const background = pickBackground(
-    touched.flatMap((i) => [remixImages[i], sources?.[i] ?? remixImages[i]]),
-    [input.prompt, look ?? ""].join(" "),
-  );
+  const colourPages = touched.flatMap((i) => [remixImages[i], sources?.[i] ?? remixImages[i]]);
+  const colourPrompt = [input.prompt, look ?? ""].join(" ");
+  const background = pickBackground(colourPages, colourPrompt);
+  const offLimits = pickOffLimits(colourPages, colourPrompt, background);
 
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${jobId}`;
   const layoutChecks: { page: string; attempt: number; attached: number; scales: number[]; clippedByOutline?: string[] }[] = [];
@@ -138,15 +151,9 @@ export async function runPartFix(
   const out = [...remixFiles];
   for (const [step, i] of touched.entries()) {
     const page = pages[i];
-    const rects = selected[i].map((j) => page.rects[j]);
-    // Other parts sharing the chosen boxes are hidden from the model and kept on the page.
-    // Kept where either page has them: a remix can shrink a neighbour, but its mesh still shows its old area.
-    const startImage = sources?.[i] ?? remixImages[i];
-    const hidden = neighbourPixels(startImage, page.rects, selected[i]);
-    const sourceImage = withoutPixels(startImage, hidden);
-    const keep = union(hidden, sources?.[i] ? neighbourPixels(remixImages[i], page.rects, selected[i]) : null);
-    const modelInput = await toModelInput(sourceImage, IMAGE_MAX_SIDE, background, centreLayout(layoutParts(rects, sourceImage)));
-    const outlines = await placementOutlines(input.outlines, page, selected[i], modelInput.layout, sourceImage);
+    const part = await preparePartPage(page, selected[i], sources?.[i] ?? remixImages[i], sources?.[i] ? remixImages[i] : null, background, offLimits, input.outlines);
+    const { rects, modelInput } = part;
+    const blocked = part.offLimits;
     const from = 0.1 + (0.8 * step) / touched.length;
     const to = 0.1 + (0.8 * (step + 1)) / touched.length;
     const onPage = touched.length > 1 ? ` on page ${step + 1} of ${touched.length}` : "";
@@ -156,6 +163,7 @@ export async function runPartFix(
         {
           image: await toDataUrl(Buffer.from(modelInput.dataUrl.slice(modelInput.dataUrl.indexOf(",") + 1), "base64"), PLAN_MAX_SIDE),
           background: background.name,
+          offLimits: blocked?.name ?? null,
           parts: describeParts(selected[i].map((j) => page.regions[j]), modelInput.layout),
           source,
           look,
@@ -170,7 +178,7 @@ export async function runPartFix(
       expanded.push(plan);
       onPrompt(expanded.join("\n\n"));
     }
-    const prompt = buildPrompt(input, plan, rects.length, background.name, source);
+    const prompt = buildPrompt(input, plan, rects.length, background.name, blocked?.name ?? null, source);
     prompts[page.name] = prompt;
     await writeLog();
 
@@ -190,21 +198,13 @@ export async function runPartFix(
           }
         };
         // Returns the image with every part shrunk into its box, or null to paint again.
-        const check = async (image: Buffer, attempt: number) => {
-          const fit = await attachedFit(image, modelInput);
-          // A part drawn bigger than its box (an axe for a sword) is shrunk to fit, not cut off.
-          // A part too big for its mesh outline keeps its size and is clipped in the game until the
-          // outline is grown, rather than failing a run the user has paid for.
-          const { image: shrunk, scales, outlineDropped } = await shrinkPartsToBoxes(image, modelInput, {
-            inset: FIT_INSET,
-            outlines,
-            minOutlineScale: MIN_PART_SCALE,
-          });
+        const check = async (painted: Buffer, attempt: number) => {
+          const { attached: fit, scales, outlineDropped, fitted: shrunk } = await fitRepaint(painted, part);
           const clipped = selected[i].filter((_, k) => outlineDropped[modelInput.layout.regionPlacement[k]]).map((j) => page.regions[j]);
           layoutChecks.push({ page: page.name, attempt, attached: Math.round(fit * 100) / 100, scales, ...(clipped.length > 0 && { clippedByOutline: clipped }) });
           await writeLog();
           const minScale = fit >= CLEAN_ATTACHED_FIT ? MIN_CLEAN_PART_SCALE : MIN_PART_SCALE;
-          return fit >= MIN_ATTACHED_FIT && Math.min(...scales) >= minScale ? { generated: image, fitted: shrunk } : null;
+          return fit >= MIN_ATTACHED_FIT && Math.min(...scales) >= minScale ? { generated: painted, fitted: shrunk } : null;
         };
         const first = await paint("");
         const firstFit = await check(first, 1);
@@ -220,16 +220,101 @@ export async function runPartFix(
     signal.throwIfAborted();
     await putFile(folder, `${path.parse(page.name).name}.generated.png`, generated);
 
-    // Parts take the model's new silhouettes, keyed out within their own regions.
-    // Already placed by shrinkPartsToBoxes, so no drift correction.
-    const fixed = await fitToPage(fitted, modelInput, sourceImage, input.remix.premultipliedAlpha, rects, false);
-    out[i] = await replaceRegions(remixFiles[i], fixed, rects, keep);
+    out[i] = (await placeRepaint(fitted, part, remixFiles[i], input.remix.premultipliedAlpha)).page;
   }
 
   onProgress(0.95, "Saving the remix");
   const textures = await Promise.all(pages.map((p, i) => putFile(folder, p.name, out[i])));
   const atlas = await putFile(folder, "remix.atlas", atlasText);
   return { folder, atlas, textures, imagePrompts: Object.values(prompts) };
+}
+
+/** One page's chosen parts, ready to paint and to fit a repaint back. */
+export interface PartPage {
+  rects: PageRect[];
+  /** The page the parts start from, with the neighbours sharing their boxes made transparent. */
+  sourceImage: PageImage;
+  /** Neighbours' pixels inside the chosen boxes, kept on the page; null when there are none. */
+  keep: Uint8Array | null;
+  /** The colour the neighbours are drawn in for the models, or null when there are none. */
+  offLimits: Background | null;
+  modelInput: ModelInput;
+  /** The outline each placement must fit inside, or null for its box (see placementOutlines). */
+  outlines: (number[] | null)[];
+}
+
+/**
+ * Packs the `chosen` regions of `startImage` into the square the models see. Other parts sharing
+ * the chosen boxes are kept on the page, and the models see them as flat `offLimits` shapes:
+ * hidden as background, the new parts were drawn straight over them and lost there
+ * (job_c61a09e7's sword lost its grip to a kneepad). `remixImage` is the remix's own page when
+ * starting from the original rig: neighbours are kept where either page has them, since a remix
+ * can shrink a neighbour but its mesh still shows its old area.
+ */
+export async function preparePartPage(
+  page: AtlasPage,
+  chosen: number[],
+  startImage: PageImage,
+  remixImage: PageImage | null,
+  background: Background,
+  offLimits: Background,
+  outlines: Record<string, number[]>,
+): Promise<PartPage> {
+  const rects = chosen.map((j) => page.rects[j]);
+  const hidden = neighbourPixels(startImage, page.rects, chosen);
+  const sourceImage = withoutPixels(startImage, hidden);
+  const keep = union(hidden, remixImage ? neighbourPixels(remixImage, page.rects, chosen) : null);
+  const modelImage = hidden ? withColour(sourceImage, hidden, offLimits) : sourceImage;
+  const modelInput = await toModelInput(modelImage, IMAGE_MAX_SIDE, background, centreLayout(layoutParts(rects, sourceImage)));
+  return {
+    rects,
+    sourceImage,
+    keep,
+    offLimits: hidden ? offLimits : null,
+    modelInput,
+    outlines: await placementOutlines(outlines, page, chosen, modelInput.layout, sourceImage),
+  };
+}
+
+/**
+ * Fits Muse Image's repaint of `part` back into the square: the off-limits shapes cleared to
+ * background, then each part shrunk into its box. Returns the fitted square, how much paint is
+ * attached to the parts (see attachedFit), each part's shrink, and which dropped their outline.
+ */
+export async function fitRepaint(
+  painted: Buffer,
+  part: PartPage,
+): Promise<{ attached: number; scales: number[]; outlineDropped: boolean[]; fitted: Buffer }> {
+  const { modelInput } = part;
+  const image = part.offLimits ? await clearColour(painted, part.offLimits, modelInput.background) : painted;
+  const attached = await attachedFit(image, modelInput);
+  // A part drawn bigger than its box (an axe for a sword) is shrunk to fit, not cut off.
+  // A part too big for its mesh outline keeps its size and is clipped in the game until the
+  // outline is grown, rather than failing a run the user has paid for.
+  const { image: fitted, scales, outlineDropped } = await shrinkPartsToBoxes(image, modelInput, {
+    inset: FIT_INSET,
+    outlines: part.outlines,
+    minOutlineScale: MIN_PART_SCALE,
+    // Drawn around off-limits neighbours, where the model put the part matters: don't centre it.
+    anchor: part.offLimits ? "part" : "box",
+  });
+  return { attached, scales, outlineDropped, fitted };
+}
+
+/**
+ * Copies a fitted repaint onto the stored remix page `remixPage`: the parts take the model's new
+ * silhouettes, keyed out within their own regions, and the kept neighbours stay. Returns the
+ * keyed page (`fixed`) and the new remix page.
+ */
+export async function placeRepaint(
+  fitted: Buffer,
+  part: PartPage,
+  remixPage: Buffer,
+  premultipliedAlpha: boolean,
+): Promise<{ fixed: Buffer; page: Buffer }> {
+  // Already placed by shrinkPartsToBoxes, so no drift correction.
+  const fixed = await fitToPage(fitted, part.modelInput, part.sourceImage, premultipliedAlpha, part.rects, false);
+  return { fixed, page: await replaceRegions(remixPage, fixed, part.rects, part.keep) };
 }
 
 /**
@@ -285,7 +370,14 @@ async function sourcePages(
  * The image prompt: Muse's expanded `plan`, or, when its reply was unusable, the user's request
  * as-is with the remix's own prompt for the look, wrapped in the fixed layout rules.
  */
-function buildPrompt(input: PartFixRequest, plan: string | null, count: number, background: string, source: "original" | "remix"): string {
+function buildPrompt(
+  input: PartFixRequest,
+  plan: string | null,
+  count: number,
+  background: string,
+  offLimits: string | null,
+  source: "original" | "remix",
+): string {
   return [
     `This image shows ${count === 1 ? "one part" : `${count} separate parts`} cut from a 2D game character's sprite atlas, on a solid ${background} background.`,
     ...(plan
@@ -298,6 +390,9 @@ function buildPrompt(input: PartFixRequest, plan: string | null, count: number, 
         ]),
     input.keepOutline ? "Keep each part inside its original outline: the game only shows what's inside it." : "",
     `Repaint every part in place, at the same size. Do not add or merge parts. Keep the background solid ${background}, and leave the empty ${background} areas empty.`,
+    offLimits
+      ? `The flat solid ${offLimits} shapes are space other parts use: leave them exactly as they are, solid ${offLimits}, and keep every new part off them, even where that changes its shape.`
+      : "",
     "Each part is a separate cut-out piece. Don't complete it into a whole object: no heads inside helmets, no legs inside boots or greaves, no hands or feet on limb segments.",
   ]
     .filter(Boolean)
@@ -437,6 +532,56 @@ function neighbourPixels(image: PageImage, rects: PageRect[], chosen: number[]):
 function union(a: Uint8Array | null, b: Uint8Array | null): Uint8Array | null {
   if (!a || !b) return a ?? b;
   return a.map((v, p) => (v || b[p] ? 1 : 0));
+}
+
+/** The image with the `mask` pixels made opaque `colour`, flat. */
+function withColour(image: PageImage, mask: Uint8Array, colour: Background): PageImage {
+  const [r, g, b] = hexToRgb(colour.hex);
+  const rgba = Buffer.from(image.rgba);
+  for (let p = 0; p < mask.length; p++) if (mask[p]) rgba.set([r, g, b, 255], p * 4);
+  return { ...image, rgba };
+}
+
+/**
+ * Colour distance within which a pixel of the model's image counts as `colour` (the off-limits
+ * key) in clearColour. The key is picked to stay far from the art (see pickOffLimits).
+ */
+const OFF_LIMITS_MATCH = 80;
+
+/**
+ * The model's image with the off-limits shapes turned into `background`, so the checks and
+ * keying see only the parts: every pixel near `colour`, and the blended edge between it and the
+ * background next to those pixels. Returned as a PNG.
+ */
+async function clearColour(image: Buffer, colour: Background, background: Background): Promise<Buffer> {
+  const { data, info } = await sharp(image).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const key = hexToRgb(colour.hex), bg = hexToRgb(background.hex);
+  const near = new Uint8Array(width * height);
+  for (let p = 0; p < near.length; p++) {
+    if (Math.hypot(data[p * 3] - key[0], data[p * 3 + 1] - key[1], data[p * 3 + 2] - key[2]) < OFF_LIMITS_MATCH) near[p] = 1;
+  }
+  // A blend of key and background sits on the line between them; only checked next to the key,
+  // since that line can cross art colours (magenta to green passes grey).
+  const [dx, dy, dz] = [bg[0] - key[0], bg[1] - key[1], bg[2] - key[2]];
+  const len2 = dx * dx + dy * dy + dz * dz;
+  const onEdge = (p: number) => {
+    const [r, g, b] = [data[p * 3] - key[0], data[p * 3 + 1] - key[1], data[p * 3 + 2] - key[2]];
+    const t = Math.min(1, Math.max(0, (r * dx + g * dy + b * dz) / len2));
+    return Math.hypot(r - t * dx, g - t * dy, b - t * dz) < OFF_LIMITS_MATCH;
+  };
+  const clear = Uint8Array.from(near);
+  for (let p = 0; p < near.length; p++) {
+    if (near[p]) continue;
+    const x = p % width, y = (p - x) / width;
+    let touches = false;
+    for (let ny = Math.max(0, y - 2); ny <= Math.min(height - 1, y + 2) && !touches; ny++) {
+      for (let nx = Math.max(0, x - 2); nx <= Math.min(width - 1, x + 2) && !touches; nx++) touches = near[ny * width + nx] === 1;
+    }
+    if (touches && onEdge(p)) clear[p] = 1;
+  }
+  for (let p = 0; p < clear.length; p++) if (clear[p]) data.set(bg, p * 3);
+  return sharp(data, { raw: { width, height, channels: 3 } }).png().toBuffer();
 }
 
 /** The image with the `hidden` pixels made transparent, so they're painted as background. */

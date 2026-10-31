@@ -51,6 +51,19 @@ const BIN_SHIFT = 3;
  * for, stay farthest from.
  */
 export function pickBackground(pages: PageImage[], prompt: string): Background {
+  return rankBackgrounds(pages, prompt)[0];
+}
+
+/**
+ * A second solid colour, besides `background`, for areas of the model's image it must leave
+ * alone: the next candidate the colours stay farthest from.
+ */
+export function pickOffLimits(pages: PageImage[], prompt: string, background: Background): Background {
+  return rankBackgrounds(pages, prompt).find((c) => c.hex !== background.hex) ?? BACKGROUNDS[1];
+}
+
+/** The candidates, farthest from the rig's and the prompt's colours first. */
+function rankBackgrounds(pages: PageImage[], prompt: string): Background[] {
   const bins = new Float64Array(1 << (3 * (8 - BIN_SHIFT)));
   const binOf = (r: number, g: number, b: number) =>
     ((r >> BIN_SHIFT) << (2 * (8 - BIN_SHIFT))) | ((g >> BIN_SHIFT) << (8 - BIN_SHIFT)) | (b >> BIN_SHIFT);
@@ -67,16 +80,9 @@ export function pickBackground(pages: PageImage[], prompt: string): Background {
     if (pattern.test(words)) bins[binOf(...hexToRgb(hex))] += Math.max(total, 1) * PROMPT_COLOUR_WEIGHT;
   }
 
-  let best = BACKGROUNDS[0];
-  let bestRoom = -1;
-  for (const candidate of BACKGROUNDS) {
-    const room = clearance(bins, hexToRgb(candidate.hex));
-    if (room > bestRoom) {
-      best = candidate;
-      bestRoom = room;
-    }
-  }
-  return best;
+  // Stable sort: ties keep the order of preference.
+  const room = new Map(BACKGROUNDS.map((c) => [c, clearance(bins, hexToRgb(c.hex))]));
+  return [...BACKGROUNDS].sort((a, b) => (room.get(b) ?? 0) - (room.get(a) ?? 0));
 }
 
 /**
@@ -105,7 +111,7 @@ function clearance(bins: Float64Array, key: [number, number, number]): number {
   return byDistance.length;
 }
 
-function hexToRgb(hex: string): [number, number, number] {
+export function hexToRgb(hex: string): [number, number, number] {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 }
 
@@ -299,6 +305,15 @@ export interface FitTargets {
    * outline is grown (the tweak panel's "Grow outline", or auto-tweak).
    */
   minOutlineScale?: number;
+  /**
+   * Where a shrunk part goes: "box" centres it in its box (part fixes on a lone part, where the
+   * model often paints it in the middle of the square); "part" shrinks it about its own middle and
+   * moves it only as far as it must to fit, so it stays lined up with its neighbours (full-sheet
+   * paints: centring job_909e5229's goblin head moved it off its helmet and neck; part fixes drawn
+   * around off-limits neighbours: centring job_37f11e88's sword moved its grip onto a kneepad).
+   * Boxes only, not outlines.
+   */
+  anchor?: "box" | "part";
 }
 
 /** Smallest scale tried when fitting a part inside an outline; the caller rejects anything this small. */
@@ -371,9 +386,10 @@ export async function shrinkPartsToBoxes(
     if (missed(1, (p) => [p % side, Math.floor(p / side)]) <= allowed) continue;
 
     let scale = Math.min(inner.width / w, inner.height / h, 1);
-    // Centred in the box, or on the middle of the outline's area.
-    cx = inner.x + inner.width / 2;
-    cy = inner.y + inner.height / 2;
+    // Centred in the box (or kept on the part's own middle), or on the middle of the outline's area.
+    const keepPlace = !mask && targets.anchor === "part";
+    cx = keepPlace ? (x0 + x1 + 1) / 2 : inner.x + inner.width / 2;
+    cy = keepPlace ? (y0 + y1 + 1) / 2 : inner.y + inner.height / 2;
     if (mask) {
       let sx = 0, sy = 0, n = 0;
       for (let p = 0; p < mask.length; p++) {
@@ -402,8 +418,8 @@ export async function shrinkPartsToBoxes(
         outlineDropped[i] = true;
         if (missed(1, (p) => [p % side, Math.floor(p / side)]) === 0) continue;
         scale = Math.min(inner.width / w, inner.height / h, 1);
-        cx = inner.x + inner.width / 2;
-        cy = inner.y + inner.height / 2;
+        cx = targets.anchor === "part" ? (x0 + x1 + 1) / 2 : inner.x + inner.width / 2;
+        cy = targets.anchor === "part" ? (y0 + y1 + 1) / 2 : inner.y + inner.height / 2;
       }
     }
     scales[i] = Math.round(scale * 1000) / 1000;
