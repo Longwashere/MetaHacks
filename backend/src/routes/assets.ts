@@ -1,10 +1,11 @@
 import { Router } from "express";
 import {
-  ASSET_CATEGORIES,
   SORT_OPTIONS,
   getAsset,
   getAssetRow,
+  isCategory,
   listPublicAssets,
+  listPublicCategories,
   listPublicRemixesOf,
   type SortOption,
 } from "../lib/assets.js";
@@ -18,9 +19,14 @@ assetsRouter.use(optionalUser);
 /** GET /assets?q=&category=&sort=popular|newest|name&limit= → SpineAsset[] (public only) */
 assetsRouter.get("/", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.slice(0, 200) : undefined;
-  const category = ASSET_CATEGORIES.find((c) => c === req.query.category);
+  const category = isCategory(req.query.category) ? req.query.category : undefined;
   const sort: SortOption = SORT_OPTIONS.find((s) => s === req.query.sort) ?? "popular";
   res.json(await listPublicAssets({ q, category, sort, limit: parseLimit(req.query.limit, 200) }));
+});
+
+/** GET /assets/categories → string[]: the built-in categories, then others public assets use */
+assetsRouter.get("/categories", async (_req, res) => {
+  res.json(await listPublicCategories());
 });
 
 /** GET /assets/:id → SpineAsset, or 404 (also for someone else's private asset, unless the viewer is an admin) */

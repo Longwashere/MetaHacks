@@ -19,20 +19,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { getSavedAssetIds, listAssets } from "~/lib/api.server";
+import { getSavedAssetIds, listAssets, listCategories } from "~/lib/api.server";
 import { getSession } from "~/lib/auth.server";
 import { SITE_NAME, assetPath, breadcrumbJsonLd, categoryLabel, seoMeta } from "~/lib/seo";
 import { getSiteUrl } from "~/lib/site.server";
-import {
-  ASSET_CATEGORIES,
-  SORT_OPTIONS,
-  type AssetCategory,
-  type SortOption,
-} from "~/lib/types";
+import { SORT_OPTIONS, isCategorySlug, type AssetCategory, type SortOption } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
-const isCategory = (v: string | null): v is AssetCategory =>
-  ASSET_CATEGORIES.some((c) => c === v);
 const isSort = (v: string | null): v is SortOption => SORT_OPTIONS.some((s) => s === v);
 
 export async function loader({ request, params, context }: Route.LoaderArgs) {
@@ -40,26 +33,31 @@ export async function loader({ request, params, context }: Route.LoaderArgs) {
   const q = url.searchParams.get("q")?.slice(0, 200) ?? "";
   const sortParam = url.searchParams.get("sort");
   const categoryParam = params.category ?? null;
-  if (categoryParam !== null && !isCategory(categoryParam)) {
+  if (categoryParam !== null && !isCategorySlug(categoryParam)) {
     throw data("Category not found", { status: 404 });
   }
-  const category = isCategory(categoryParam) ? categoryParam : undefined;
+  const category = categoryParam ?? undefined;
   const sort = isSort(sortParam) ? sortParam : "popular";
 
-  const [assets, savedIds] = await Promise.all([
+  const [assets, savedIds, categories] = await Promise.all([
     listAssets({ q, category, sort }),
     getSavedAssetIds(getSession(context)),
+    listCategories(),
   ]);
-  return { assets, savedIds, q, category: category ?? null, sort, siteUrl: getSiteUrl(request) };
+  if (category && !categories.includes(category)) throw data("Category not found", { status: 404 });
+  return { assets, savedIds, q, category: category ?? null, categories, sort, siteUrl: getSiteUrl(request) };
 }
 
-const CATEGORY_INTROS: Record<AssetCategory, string> = {
+const CATEGORY_INTROS: Record<string, string> = {
   character: "Rigged Spine2D characters — heroes, NPCs and enemies with idle, walking, running, attack and death animations.",
   creature: "Spine2D creatures and monsters with squash-and-stretch, locomotion and attack animations.",
   effect: "Spine2D VFX — explosions, auras, magic and particles built with bones and additive blending.",
   prop: "Animated Spine2D props and pickups — chests, coins, doors and interactables.",
   ui: "Animated Spine2D UI — buttons, health bars and HUD elements with hover, press and state animations.",
 };
+
+const categoryIntro = (category: AssetCategory) =>
+  CATEGORY_INTROS[category] ?? `Rigged Spine2D ${categoryLabel(category, true).toLowerCase()} with ready-made animations.`;
 
 export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: `Not found · ${SITE_NAME}` }, { name: "robots", content: "noindex" }];
@@ -71,7 +69,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
       ? `Spine2D ${categoryLabel(category)} Assets & Animations | ${SITE_NAME}`
       : `Spine2D Assets & Animations Library | ${SITE_NAME}`;
   const description = category
-    ? CATEGORY_INTROS[category]
+    ? categoryIntro(category)
     : "Browse rigged Spine2D characters, creatures, props, effects and UI with ready-made animations. Preview in the browser and download for Spine 4.x.";
 
   return seoMeta({
@@ -111,7 +109,7 @@ const SORT_LABELS: Record<SortOption, string> = {
 };
 
 export default function Explore({ loaderData }: Route.ComponentProps) {
-  const { assets, savedIds, q, category, sort } = loaderData;
+  const { assets, savedIds, q, category, categories, sort } = loaderData;
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const isLoading = navigation.state === "loading" && navigation.location.pathname === "/explore";
@@ -131,7 +129,7 @@ export default function Explore({ loaderData }: Route.ComponentProps) {
           {category ? `Spine2D ${categoryLabel(category, true)}` : "Explore Spine2D assets"}
         </h1>
         <p className="text-muted-foreground">
-          {category ? CATEGORY_INTROS[category] : "Browse rigged assets from the community and save the ones you like."}
+          {category ? categoryIntro(category) : "Browse rigged assets from the community and save the ones you like."}
         </p>
       </div>
 
@@ -168,7 +166,7 @@ export default function Explore({ loaderData }: Route.ComponentProps) {
       </div>
 
       <nav aria-label="Categories" className="flex flex-wrap gap-2">
-        {[null, ...ASSET_CATEGORIES].map((c) => {
+        {[null, ...categories].map((c) => {
           const active = c === category;
           return (
             <Button

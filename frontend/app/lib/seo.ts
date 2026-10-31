@@ -45,7 +45,7 @@ export function animationLabel(name: string) {
   return ANIMATION_LABELS[words.toLowerCase()] ?? words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-const CATEGORY_LABELS: Record<AssetCategory, [singular: string, plural: string]> = {
+const CATEGORY_LABELS: Record<string, [singular: string, plural: string]> = {
   character: ["Character", "Characters"],
   creature: ["Creature", "Creatures"],
   effect: ["Effect", "Effects"],
@@ -54,7 +54,12 @@ const CATEGORY_LABELS: Record<AssetCategory, [singular: string, plural: string]>
 };
 
 export function categoryLabel(category: AssetCategory, plural = false) {
-  return CATEGORY_LABELS[category][plural ? 1 : 0];
+  const known = CATEGORY_LABELS[category];
+  if (known) return known[plural ? 1 : 0];
+  // Categories Muse added ("vehicle", "sea-creature"): title-cased, with a plain plural.
+  const label = category.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  if (!plural) return label;
+  return /(s|x|ch|sh)$/.test(label) ? `${label}es` : /[^aeiou]y$/.test(label) ? `${label.slice(0, -1)}ies` : `${label}s`;
 }
 
 export function assetPath(asset: Pick<SpineAsset, "id">, animation?: string) {

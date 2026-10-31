@@ -109,7 +109,7 @@ meRouter.delete("/library/:assetId", async (req, res) => {
 // ---------------------------------------------------------------------------
 
 /**
- * POST /me/uploads  body = { category, style, visibility, rigs: [{ name, skeleton, atlas, pages: [{ name, data }] }] }
+ * POST /me/uploads  body = { category?, visibility, rigs: [{ name, skeleton, atlas, pages: [{ name, data }] }] }
  * → 201 { assets: SpineAsset[], notes }, or 400 { error, rigErrors? } (nothing stored). `data` is base64 PNG.
  * `notes` maps a rig's index to a remark, e.g. that it was kept private because its art was already in the library.
  * A rig that's already in the library is a rigError. Up to 3 rigs per request; admins up to 50, and Muse Spark

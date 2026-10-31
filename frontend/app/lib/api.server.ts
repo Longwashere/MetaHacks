@@ -3,7 +3,8 @@
 // token the backend verifies. See BACKEND.md for the endpoint contract.
 
 import type { Session } from "~/lib/auth.server";
-import type { AnimateInput, AnimateResult, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import { ASSET_CATEGORIES } from "~/lib/types";
+import type { AnimateInput, AnimateResult, AssetCategory, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -67,6 +68,11 @@ export async function listAssets(query: AssetQuery = {}): Promise<SpineAsset[]> 
   if (query.category) params.set("category", query.category);
   if (query.sort) params.set("sort", query.sort);
   return backend<SpineAsset[]>(`/assets?${params}`);
+}
+
+/** GET /assets/categories — the built-in categories, then others public assets use. */
+export async function listCategories(): Promise<AssetCategory[]> {
+  return (await backendOrNull<AssetCategory[]>("/assets/categories")) ?? [...ASSET_CATEGORIES];
 }
 
 /** GET /assets?sort=popular&limit= */

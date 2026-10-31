@@ -86,8 +86,11 @@ export function SpinePlaceholder({
         <Burst />
       ) : category === "prop" ? (
         <Prop animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} showLabels={showLabels} />
-      ) : (
+      ) : category === "ui" ? (
         <UiWidget />
+      ) : (
+        // Categories Muse added get the generic prop shape.
+        <Prop animation={animation} showBones={bonesActive} hideSkin={hideSkin} boneColor={boneColor} showLabels={showLabels} />
       )}
     </svg>
   );

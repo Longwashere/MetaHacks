@@ -1,6 +1,13 @@
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow, type SpineAsset } from "./db.js";
 
+/** Built-in categories, always listed first. Admin uploads can add more (lib/upload-tags.ts). */
 export const ASSET_CATEGORIES = ["character", "creature", "effect", "prop", "ui"] as const;
+/** What any category looks like; the database checks the same pattern (assets_category_check). */
+const CATEGORY_PATTERN = /^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$/;
+
+export function isCategory(value: unknown): value is string {
+  return typeof value === "string" && CATEGORY_PATTERN.test(value);
+}
 export const SORT_OPTIONS = ["popular", "newest", "name"] as const;
 export type SortOption = (typeof SORT_OPTIONS)[number];
 
@@ -28,6 +35,16 @@ export async function listPublicAssets({ q, category, sort = "popular", limit = 
         : query.order("saves", { ascending: false }).order("created_at", { ascending: false });
   const rows = check(await ordered.limit(Math.min(limit, MAX_LIMIT)).overrideTypes<AssetRow[], { merge: false }>());
   return (rows ?? []).map(toSpineAsset);
+}
+
+/** The built-in categories, then any others public assets use, most used first. */
+export async function listPublicCategories(): Promise<string[]> {
+  const rows = check(await db().from("assets").select("category").eq("visibility", "public").overrideTypes<{ category: string }[], { merge: false }>()) ?? [];
+  const counts = new Map<string, number>();
+  for (const { category } of rows) {
+    if (!(ASSET_CATEGORIES as readonly string[]).includes(category)) counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return [...ASSET_CATEGORIES, ...[...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([c]) => c)];
 }
 
 /** An asset row if the viewer may see it: public ones for everyone, private ones for their owner and admins. */

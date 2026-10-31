@@ -44,6 +44,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   return { maxRigs: USER_MAX_RIGS, proOnly: account.plan === "free" };
 }
 
+/** Radix Select items can't have an empty value; this one clears the admin's pick. */
+const MUSE_PICKS = "__muse__";
+
 type RigStatus =
   | { state: "ready" }
   | { state: "uploading" }
@@ -54,7 +57,9 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
   const { maxRigs, proOnly } = loaderData;
   const [folders, setFolders] = useState<RigFolder[]>([]);
   const [status, setStatus] = useState<Record<string, RigStatus>>({});
-  const [category, setCategory] = useState<AssetCategory>("character");
+  // Blank by default. Admins can leave it blank and Muse picks each rig's category; others must pick one.
+  const [category, setCategory] = useState<AssetCategory | "">("");
+  const isAdmin = maxRigs === null;
   const [visibility, setVisibility] = useState<"public" | "private">("private");
   const [notice, setNotice] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -127,7 +132,7 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ category, visibility, rigs: batch.map((i) => i.rig) }),
+          body: JSON.stringify({ category: category || null, visibility, rigs: batch.map((i) => i.rig) }),
         });
         result = res.headers.get("content-type")?.includes("json")
           ? ((await res.json()) as UploadRigsResult)
@@ -143,7 +148,8 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
     setUploading(false);
   };
 
-  const canUpload = pending.length > 0 && !uploading && pending.every((f) => f.name.trim().length > 0);
+  const canUpload =
+    pending.length > 0 && !uploading && (isAdmin || category !== "") && pending.every((f) => f.name.trim().length > 0);
 
   if (proOnly) {
     return (
@@ -306,12 +312,17 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="category">Category</Label>
-            <Select value={category} onValueChange={(v) => setCategory(v as AssetCategory)} disabled={uploading}>
+            <Label htmlFor="category">Category{isAdmin && " (optional)"}</Label>
+            <Select
+              value={category}
+              onValueChange={(v) => setCategory(v === MUSE_PICKS ? "" : v)}
+              disabled={uploading}
+            >
               <SelectTrigger id="category" className="w-full">
-                <SelectValue />
+                <SelectValue placeholder={isAdmin ? "Muse picks for each rig" : "Pick a category"} />
               </SelectTrigger>
               <SelectContent>
+                {isAdmin && <SelectItem value={MUSE_PICKS}>Muse picks for each rig</SelectItem>}
                 {ASSET_CATEGORIES.map((c) => (
                   <SelectItem key={c} value={c}>
                     {categoryLabel(c)}

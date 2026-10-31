@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { aiFetch } from "./ai-fetch.js";
 import { META_API_BASE_URL, MUSE_MODEL } from "./config.js";
+import { ASSET_CATEGORIES, isCategory } from "./assets.js";
 import { check, db } from "./db.js";
 import { apiKey, getPath, logPrompt } from "./meta.js";
 import { ART_STYLES, type ArtStyle } from "./types.js";
@@ -8,9 +9,10 @@ import { nameSlug, storeRenamedFiles, type RenameFiles } from "./upload-rename.j
 
 // Uploads: after the rigs are stored, Muse Spark looks at each rig's atlas pages, picks its art
 // style, and writes search tags for it (#orc, #shield, #undead…), reusing the catalogue's existing
-// tags where they fit. Every upload gets its style this way; only admin uploads keep the tags. Admin
-// uploads are also renamed: Muse names the creature, and its files are stored again under that
-// name (upload-rename.ts). Rig
+// tags where they fit. Every upload gets its style this way; only admin uploads keep the tags. For
+// admin uploads Muse also picks the category (an existing one, or a new one when none fits; the
+// form's category is only a hint) and names the creature, and its files are stored again under
+// that name (upload-rename.ts). Rig
 // features the pictures can't show (ik, mesh, physics…) are read from the skeleton in code. It
 // runs in the background so a big batch isn't held up by model calls; the style and tags appear
 // on the assets a little later. A failed call only leaves that rig with the default style and no
@@ -19,10 +21,11 @@ import { nameSlug, storeRenamedFiles, type RenameFiles } from "./upload-rename.j
 export interface TagRig {
   assetId: string;
   name: string;
-  category: string;
+  /** The uploader's pick; admins may leave it out, and Muse picks one either way. */
+  category: string | null;
   /** Admin uploads only; other rigs just get their style. */
   saveTags: boolean;
-  /** Admin uploads only: Muse names the rig, and these files are stored again under that name. */
+  /** Admin uploads only: Muse picks the category and names the rig, and these files are stored again under that name. */
   rename?: RenameFiles;
   skeleton: Record<string, unknown>;
   animations: string[];
@@ -45,6 +48,8 @@ const MAX_BONE_NAMES = 80;
 const MAX_MUSE_TAGS = 8;
 const MAX_TAG_LENGTH = 24;
 const MAX_NAME_LENGTH = 40;
+/** Same as the database's assets_category_check. */
+const MAX_CATEGORY_LENGTH = 24;
 /** Existing tags shown to Muse, most used first. */
 const MAX_VOCABULARY = 250;
 /** Existing asset names shown to Muse when it names a rig, so it doesn't repeat one. */
@@ -72,17 +77,20 @@ Rules:
 - Only what you can see in the pages or is clear from the names. Don't repeat the category or the art style.
 Reply with JSON only: {"style": "...", "tags": ["...", "..."]}`;
 
-/** Added for admin uploads, which are renamed. */
+/** Added for admin uploads, which get their category and name from Muse. */
 const NAME_PROMPT = `
-Also give the asset a name for the catalogue, replacing its file-name-like current name:
+Also pick its category. The category you're given is only the uploader's guess for a whole batch, or missing:
+- use one of the existing categories when one fits, spelt exactly as listed (character: people, heroes and humanoids; creature: animals and monsters; effect: VFX like explosions, auras and magic; prop: objects and pickups; ui: interface pieces);
+- only when none fits, make a new one that many other assets could share: one broad lower-case singular noun, like "vehicle" or "plant", never something as narrow as a tag.
+Then give the asset a name for the catalogue, replacing its file-name-like current name:
 - for a creature or character, a memorable creature name of 1 to 3 words in Title Case (e.g. "Grimtusk Raider", "Bog Lurker", "Emberwing");
 - for a prop, effect or ui piece, a short descriptive title (e.g. "Rune-Locked Chest");
 - don't reuse any of the existing names, and leave out the art style and words like rig, sprite, spine or asset.
-Reply with JSON only: {"name": "...", "style": "...", "tags": ["...", "..."]}`;
+Reply with JSON only: {"category": "...", "name": "...", "style": "...", "tags": ["...", "..."]}`;
 
 const queue: TagRig[] = [];
 let active = 0;
-let vocabulary: { tags: string[]; names: string[]; loadedAt: number } | null = null;
+let vocabulary: { tags: string[]; names: string[]; categories: string[]; loadedAt: number } | null = null;
 
 /** Queues rigs for tagging. Returns at once; never throws. */
 export function tagUploads(rigs: TagRig[]): void {
@@ -100,16 +108,23 @@ async function drain(): Promise<void> {
       const suggestion = await suggestTagsWithRetry(rig);
       const tags = rig.saveTags ? [...new Set([...suggestion.tags, ...rigFeatureTags(rig.skeleton)])] : [];
       const renamed = await renameRig(rig, suggestion.name);
-      const update = { ...(suggestion.style && { style: suggestion.style }), ...(tags.length > 0 && { tags }), ...renamed };
+      const update = {
+        ...(suggestion.category && { category: suggestion.category }),
+        ...(suggestion.style && { style: suggestion.style }),
+        ...(tags.length > 0 && { tags }),
+        ...renamed,
+      };
       if (Object.keys(update).length === 0) continue;
       check(await db().from("assets").update(update).eq("id", rig.assetId));
       // Later rigs in the same batch reuse what this one added.
       if (vocabulary) {
         vocabulary.tags = [...new Set([...vocabulary.tags, ...tags])];
         if (renamed) vocabulary.names.push(renamed.name);
+        if (suggestion.category && !vocabulary.categories.includes(suggestion.category)) vocabulary.categories.push(suggestion.category);
       }
       const named = renamed ? `"${rig.name}" → "${renamed.name}"; ` : "";
-      console.log(`[upload-tags] ${rig.assetId}: ${named}${suggestion.style ?? "(default style)"}; ${tags.join(", ") || "(no tags)"}`);
+      const category = suggestion.category ? `${suggestion.category}; ` : "";
+      console.log(`[upload-tags] ${rig.assetId}: ${named}${category}${suggestion.style ?? "(default style)"}; ${tags.join(", ") || "(no tags)"}`);
     } catch (error) {
       console.error(`[upload-tags] ${rig.assetId} failed:`, error instanceof Error ? error.message : error);
     }
@@ -128,7 +143,7 @@ async function suggestTagsWithRetry(rig: TagRig): Promise<Suggestion> {
       const message = error instanceof Error ? error.message : String(error);
       if (attempt === 2) {
         console.error(`[upload-tags] ${rig.assetId} Muse failed twice, keeping the default style and skeleton tags only:`, message);
-        return { name: null, style: null, tags: [] };
+        return { category: null, name: null, style: null, tags: [] };
       }
       console.warn(`[upload-tags] ${rig.assetId} Muse failed, retrying:`, message);
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
@@ -148,6 +163,8 @@ async function renameRig(rig: TagRig, name: string | null) {
 }
 
 interface Suggestion {
+  /** Null when the rig isn't an admin upload, or Muse's category isn't usable. */
+  category: string | null;
   /** Null when the rig isn't being renamed, or Muse's name isn't usable. */
   name: string | null;
   /** Null when Muse's answer isn't one of the styles. */
@@ -159,11 +176,13 @@ async function suggestTags(rig: TagRig): Promise<Suggestion> {
   const [pageImages, existing] = await Promise.all([Promise.all(rig.pages.map(toPageDataUrl)), catalogue()]);
   const request = [
     `Name: ${rig.name}`,
-    `Category: ${rig.category}`,
+    `Category: ${rig.category ?? "(not given)"}`,
     `Bones: ${boneNames(rig.skeleton).join(", ") || "(none)"}`,
     `Animations: ${rig.animations.join(", ") || "(none)"}`,
     `Existing tags: ${existing.tags.join(", ") || "(none yet)"}`,
-    ...(rig.rename ? [`Existing names: ${existing.names.slice(-MAX_NAMES).join(", ") || "(none yet)"}`] : []),
+    ...(rig.rename
+      ? [`Existing categories: ${existing.categories.join(", ")}`, `Existing names: ${existing.names.slice(-MAX_NAMES).join(", ") || "(none yet)"}`]
+      : []),
   ].join("\n");
   logPrompt(`chat/completions (${MUSE_MODEL}) upload tags + ${pageImages.length} page image(s)`, request);
 
@@ -187,26 +206,31 @@ async function suggestTags(rig: TagRig): Promise<Suggestion> {
   });
   if (!res.ok) throw new Error(`Muse request failed (${res.status}) with ${MUSE_MODEL}: ${(await res.text()).slice(0, 300)}`);
   const suggestion = parseSuggestion(getPath(await res.json(), ["choices", 0, "message", "content"]), rig.category);
-  return rig.rename ? suggestion : { ...suggestion, name: null };
+  return rig.rename ? suggestion : { ...suggestion, category: null, name: null };
 }
 
-/** The catalogue's tags, most used first, and its asset names; cached for a few minutes. */
-async function catalogue(): Promise<{ tags: string[]; names: string[] }> {
+/** The catalogue's tags, most used first, its asset names and its categories (built-in first); cached for a few minutes. */
+async function catalogue(): Promise<{ tags: string[]; names: string[]; categories: string[] }> {
   if (vocabulary && Date.now() - vocabulary.loadedAt < VOCABULARY_TTL_MS) return vocabulary;
   const rows =
-    check(await db().from("assets").select("tags, name").overrideTypes<{ tags: string[]; name: string }[], { merge: false }>()) ?? [];
+    check(await db().from("assets").select("tags, name, category").overrideTypes<{ tags: string[]; name: string; category: string }[], { merge: false }>()) ?? [];
   const counts = new Map<string, number>();
   for (const tag of rows.flatMap((row) => row.tags)) {
     if (!RESERVED_TAGS.has(tag)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   }
   const tags = [...counts].sort((a, b) => b[1] - a[1]).slice(0, MAX_VOCABULARY).map(([tag]) => tag);
-  vocabulary = { tags, names: [...new Set(rows.map((row) => row.name))], loadedAt: Date.now() };
+  vocabulary = {
+    tags,
+    names: [...new Set(rows.map((row) => row.name))],
+    categories: [...new Set([...ASSET_CATEGORIES, ...rows.map((row) => row.category)])],
+    loadedAt: Date.now(),
+  };
   return vocabulary;
 }
 
-/** Muse's reply is untrusted: keep a plain short name, a known style and only short, plain, distinct tags. */
-function parseSuggestion(content: unknown, category: string): Suggestion {
-  const none: Suggestion = { name: null, style: null, tags: [] };
+/** Muse's reply is untrusted: keep a slug category, a plain short name, a known style and only short, plain, distinct tags. */
+function parseSuggestion(content: unknown, givenCategory: string | null): Suggestion {
+  const none: Suggestion = { category: null, name: null, style: null, tags: [] };
   if (typeof content !== "string") return none;
   const start = content.indexOf("{");
   const end = content.lastIndexOf("}");
@@ -219,7 +243,15 @@ function parseSuggestion(content: unknown, category: string): Suggestion {
   }
   const rawStyle = getPath(reply, ["style"]);
   const style = ART_STYLES.find((s) => typeof rawStyle === "string" && s === rawStyle.trim().toLowerCase()) ?? null;
-  return { name: parseName(getPath(reply, ["name"])), style, tags: parseTags(getPath(reply, ["tags"]), [category, ...(style ? [style] : [])]) };
+  const category = parseCategory(getPath(reply, ["category"]));
+  const exclude = [category ?? givenCategory, style].filter((c): c is string => c !== null);
+  return { category, name: parseName(getPath(reply, ["name"])), style, tags: parseTags(getPath(reply, ["tags"]), exclude) };
+}
+
+function parseCategory(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const category = raw.trim().toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "");
+  return category.length <= MAX_CATEGORY_LENGTH && isCategory(category) ? category : null;
 }
 
 function parseName(raw: unknown): string | null {

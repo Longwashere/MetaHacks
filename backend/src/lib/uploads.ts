@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as spine from "@esotericsoftware/spine-core";
-import { ASSET_CATEGORIES } from "./assets.js";
+import { ASSET_CATEGORIES, isCategory } from "./assets.js";
 import { getProfile } from "./billing.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow, type SpineAsset, type Visibility } from "./db.js";
 import { isSafePageName } from "./atlas.js";
@@ -37,6 +37,8 @@ const LOOPING = /idle|walk|run|loop|fly|hover|breath|swim|float|wave/i;
 const ACCENTS = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
 /** Stored until Muse Spark picks the rig's style (upload-tags.ts), and kept if it can't. */
 const DEFAULT_STYLE: ArtStyle = "cartoon";
+/** Stored for an admin upload sent without a category until Muse picks one, and kept if it can't. */
+const DEFAULT_CATEGORY = "character";
 
 interface UploadRig {
   name: string;
@@ -56,7 +58,8 @@ interface UploadRig {
 }
 
 export interface UploadInput {
-  category: string;
+  /** Admins may leave it out: Muse picks each rig's category (upload-tags.ts). */
+  category: string | null;
   visibility: Visibility;
   rigs: UploadRig[];
 }
@@ -68,10 +71,12 @@ export type ParseUploadResult =
 
 export function parseUploadInput(body: unknown, isAdmin: boolean): ParseUploadResult {
   if (typeof body !== "object" || body === null) return { ok: false, error: "Expected { category, visibility, rigs }." };
-  const { category, visibility, rigs } = body as Record<string, unknown>;
-  if (typeof category !== "string" || !(ASSET_CATEGORIES as readonly string[]).includes(category)) {
-    return { ok: false, error: "Pick a category." };
-  }
+  const { category: rawCategory, visibility, rigs } = body as Record<string, unknown>;
+  // Admins may leave the category blank (Muse picks one per rig); everyone else picks a built-in one.
+  const blank = rawCategory === undefined || rawCategory === null || rawCategory === "";
+  const known = (ASSET_CATEGORIES as readonly unknown[]).includes(rawCategory) || (isAdmin && isCategory(rawCategory));
+  if (blank ? !isAdmin : !known) return { ok: false, error: "Pick a category." };
+  const category = blank ? null : (rawCategory as string);
   if (visibility !== "public" && visibility !== "private") return { ok: false, error: "Choose public or private." };
   if (!Array.isArray(rigs) || rigs.length === 0) return { ok: false, error: "Add at least one rig folder." };
   const max = isAdmin ? MAX_RIGS_PER_REQUEST : MAX_RIGS_PER_UPLOAD;
@@ -198,7 +203,7 @@ export async function createUploads(userId: string, input: UploadInput, isAdmin 
         author_name: profile.name || "Anonymous",
         name: rig.name,
         description: `A Spine ${rig.meta.spineVersion} rig uploaded by ${profile.name || "a RigForge user"}.`,
-        category: input.category,
+        category: input.category ?? DEFAULT_CATEGORY,
         style: DEFAULT_STYLE,
         tags: [],
         visibility: privateOnly ? "private" : input.visibility,

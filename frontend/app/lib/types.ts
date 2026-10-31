@@ -1,6 +1,7 @@
 // Domain types shared by the server data layer and the UI.
 // These are the shapes the real backend should return — see BACKEND.md.
 
+/** Built-in categories, always listed. Admin uploads can add more (GET /assets/categories lists them). */
 export const ASSET_CATEGORIES = [
   "character",
   "creature",
@@ -8,7 +9,12 @@ export const ASSET_CATEGORIES = [
   "prop",
   "ui",
 ] as const;
-export type AssetCategory = (typeof ASSET_CATEGORIES)[number];
+/** A built-in category or one Muse added: a lowercase slug like "vehicle". */
+export type AssetCategory = string;
+
+/** Same pattern as the backend and the database's assets_category_check. */
+export const isCategorySlug = (v: string | null | undefined): v is AssetCategory =>
+  typeof v === "string" && /^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$/.test(v);
 
 export const ART_STYLES = [
   "cartoon",
