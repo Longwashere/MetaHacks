@@ -11,7 +11,9 @@
     "dev:backend": "npm run dev -w backend",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "db:push": "supabase db push --db-url \"$(grep '^SUPABASE_DB_URL=' backend/.env | cut -d= -f2-)\"",
+    "db:migrations": "supabase migration list --db-url \"$(grep '^SUPABASE_DB_URL=' backend/.env | cut -d= -f2-)\""
   },
   "devDependencies": {
     "concurrently": "^10.0.6"

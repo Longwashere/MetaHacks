@@ -310,6 +310,14 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-10-31 — Backend broke on a committed migration nobody had applied
+- **What happened:** The backend failed with `Database error: column remix_jobs.credits does not exist` after the credits work (`3e008ca feat: credits`) was committed.
+- **Cost:** a round-trip with the user, who had to ask for it to be applied.
+- **Cause:** `supabase/migrations/20261031000000_remix_job_credits.sql` was in the repo, and the backend code already used the column, but the migration hadn't been run against the Supabase database. The repo has no linked Supabase CLI (`supabase/config.toml`), so nothing applies migrations automatically.
+- **Workaround / status:** Applied it, along with `20261031010000_open_asset_categories.sql`, in one transaction through `SUPABASE_DB_URL` (from `backend/.env`) with a throwaway `pg` client outside the repo. Checked that the column and constraint exist, and that the service-role API can select `remix_jobs.credits`.
+- **Follow-up:** Installed the Supabase CLI and ran `supabase init`. The database had no `supabase_migrations.schema_migrations`, so a plain `db push` would have re-run `init.sql` against live data. Checked that every migration's tables, columns and constraints exist, then marked all ten as applied with `supabase migration repair`. A dry-run push now reports "up to date". Root scripts `npm run db:push` / `npm run db:migrations` wrap the CLI with `SUPABASE_DB_URL` (see `AGENTS.md`).
+- **Lesson:** When a task adds a migration, run `npm run db:push` in the same task, before shipping code that depends on it.
+
 ### 2026-10-30 — Part fix drew a sword over neighbours the model couldn't see
 - **What happened:** On `ember-fire-knight-7e215105`, "Give him a great sword instead of an axe" (`job_c61a09e7`, region `fuzi`) succeeded, but the sword lost its grip and pommel, and the game showed bits of other parts floating around it.
 - **Cause:** The axe's atlas box also holds a kneepad, a chip, a cloth scrap and armour corners. The part fixer erased them to the background colour in the image the models see, so the space looked empty, and Muse Image drew the sword's grip over the kneepad. On save the kneepad's pixels won, and the boxed meshes showed the neighbours.

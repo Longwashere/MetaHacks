@@ -17,7 +17,11 @@ npm run dev:backend    # backend only
 npm run build          # builds every workspace
 npm run typecheck      # typechecks every workspace — run before finishing a task
 npm test               # runs every workspace's tests (backend: regression fixtures in backend/test/)
+npm run db:migrations  # Supabase CLI: which migrations in supabase/migrations/ the database has applied
+npm run db:push        # Supabase CLI: applies pending migrations, using SUPABASE_DB_URL from backend/.env
 ```
+
+When a task adds a migration to `supabase/migrations/`, apply it with `npm run db:push` in the same task, before code that depends on it ships. Needs the Supabase CLI (`brew install supabase/tap/supabase`).
 
 Add dependencies to a specific workspace: `npm install <pkg> -w frontend` or `-w backend`. Don't add app dependencies to the root `package.json`.
 
