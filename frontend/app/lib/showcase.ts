@@ -683,5 +683,180 @@ export const SHOWCASE_RIGS: ShowcaseRig[] = [
         "tint": null
       }
     ]
+  },
+  {
+    "original": {
+      "id": "warrior06-0d5df05f",
+      "name": "Axe Warrior",
+      "prompt": null,
+      "animations": [
+        {
+          "loop": false,
+          "name": "1",
+          "durationSec": 0.17
+        },
+        {
+          "loop": false,
+          "name": "attack",
+          "durationSec": 1.93
+        },
+        {
+          "loop": false,
+          "name": "die",
+          "durationSec": 2.4
+        },
+        {
+          "loop": true,
+          "name": "idle",
+          "durationSec": 1.67
+        },
+        {
+          "loop": true,
+          "name": "idle02",
+          "durationSec": 1.67
+        },
+        {
+          "loop": false,
+          "name": "move",
+          "durationSec": 1.33
+        },
+        {
+          "loop": false,
+          "name": "show",
+          "durationSec": 3.23
+        },
+        {
+          "loop": false,
+          "name": "skill",
+          "durationSec": 2.17
+        }
+      ],
+      "files": {
+        "skeletonUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-29T16-34-24-367Z_upload_0d5df05f/warrior06.json",
+        "atlasUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-29T16-34-24-367Z_upload_0d5df05f/warrior06.atlas",
+        "textureUrls": [
+          "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-29T16-34-24-367Z_upload_0d5df05f/warrior06.png"
+        ],
+        "premultipliedAlpha": false,
+        "skin": null
+      },
+      "tint": null
+    },
+    "remixes": [
+      {
+        "id": "zombie-axe-warrior-660823d8",
+        "name": "Zombie Axe Warrior",
+        "prompt": "Zombie version — torn clothes, pale green skin. Art style should be solid lines and cross shading",
+        "animations": [
+          {
+            "loop": false,
+            "name": "1",
+            "durationSec": 0.17
+          },
+          {
+            "loop": false,
+            "name": "attack",
+            "durationSec": 1.93
+          },
+          {
+            "loop": false,
+            "name": "die",
+            "durationSec": 2.4
+          },
+          {
+            "loop": true,
+            "name": "idle",
+            "durationSec": 1.67
+          },
+          {
+            "loop": true,
+            "name": "idle02",
+            "durationSec": 1.67
+          },
+          {
+            "loop": false,
+            "name": "move",
+            "durationSec": 1.33
+          },
+          {
+            "loop": false,
+            "name": "show",
+            "durationSec": 3.23
+          },
+          {
+            "loop": false,
+            "name": "skill",
+            "durationSec": 2.17
+          }
+        ],
+        "files": {
+          "skeletonUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-30T10-48-34-012Z_job_660823d8/skeleton.json",
+          "atlasUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T02-29-54-621Z_job_13a65d28/remix.atlas",
+          "textureUrls": [
+            "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T02-29-54-621Z_job_13a65d28/warrior06.png"
+          ],
+          "premultipliedAlpha": false,
+          "skin": null
+        },
+        "tint": null
+      },
+      {
+        "id": "neon-edgerunner-viking-ea34cc1f",
+        "name": "Neon Edgerunner Viking",
+        "prompt": "[Subject] in the visual style of Studio Trigger Cyberpunk: Edgerunners, modern Japanese anime aesthetic, harsh graphic cel shading, bold angular line art, ink contours, high-contrast neon palette with acid yellow, hot magenta, electric cyan, and deep shadows, retro-futuristic Night City cyberware, chrome augments, exposed cabling, glowing optical implants, holographic overlays, dramatic neon rim lighting, cinematic anime keyframe",
+        "animations": [
+          {
+            "loop": false,
+            "name": "1",
+            "durationSec": 0.17
+          },
+          {
+            "loop": false,
+            "name": "attack",
+            "durationSec": 1.93
+          },
+          {
+            "loop": false,
+            "name": "die",
+            "durationSec": 2.4
+          },
+          {
+            "loop": true,
+            "name": "idle",
+            "durationSec": 1.67
+          },
+          {
+            "loop": true,
+            "name": "idle02",
+            "durationSec": 1.67
+          },
+          {
+            "loop": false,
+            "name": "move",
+            "durationSec": 1.33
+          },
+          {
+            "loop": false,
+            "name": "show",
+            "durationSec": 3.23
+          },
+          {
+            "loop": false,
+            "name": "skill",
+            "durationSec": 2.17
+          }
+        ],
+        "files": {
+          "skeletonUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T03-56-44-045Z_job_ea34cc1f/skeleton.json",
+          "atlasUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T04-08-45-993Z_job_8e3e5d3a/remix.atlas",
+          "textureUrls": [
+            "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T04-08-45-993Z_job_8e3e5d3a/warrior06.png"
+          ],
+          "premultipliedAlpha": false,
+          "skin": null
+        },
+        "tint": null
+      }
+    ]
   }
 ];

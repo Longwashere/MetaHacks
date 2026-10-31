@@ -5,7 +5,7 @@ import { CompareDivider, STAGE_GRID } from "~/components/SpinePreview";
 import { type SpineClock, SpineRuntime, type SpineRuntimeStatus } from "~/components/SpineRuntime";
 import { defaultAnimation } from "~/lib/animation";
 import { assetPath } from "~/lib/seo";
-import type { SpineAsset } from "~/lib/types";
+import type { SpineAnimation, SpineAsset } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
 /** How long the divider takes to cross the stage, and how long each look rests before the next wipe. */
@@ -16,7 +16,28 @@ const REDUCED_MOTION_HOLD_MS = 4000;
 /** After the visitor drags the divider, autoplay waits this long before picking up again. */
 const RESUME_MS = 2500;
 
+/** Clips shorter than this are skipped when cycling; they're usually twitches or poses. */
+const MIN_CYCLE_SEC = 1;
+/** Each clip loops 4–6 times before the next: as many as it takes to fill this long. */
+const CLIP_PLAY_SEC = 6;
+/** Death clips play once; looping them would have the character die over and over. */
+const DEATH_CLIP = /dead|death|die/i;
+const loopsOf = (clip: SpineAnimation) =>
+  DEATH_CLIP.test(clip.name) ? 1 : Math.min(6, Math.max(4, Math.ceil(CLIP_PLAY_SEC / clip.durationSec)));
+
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+
+/**
+ * The clips a look cycles through: every clip of 1s or more that the rig's original also has, so
+ * clips added to a remix (a victory dance) are left out. Else the default one.
+ */
+function cycleClips({ asset, rig }: ShowcaseItem): SpineAnimation[] {
+  const stock = new Set(rig.original.animations.map((a) => a.name));
+  const long = asset.animations.filter((a) => a.durationSec >= MIN_CYCLE_SEC && stock.has(a.name));
+  if (long.length) return long;
+  const fallback = defaultAnimation(asset.animations);
+  return fallback ? [fallback] : [];
+}
 
 /** The parts of an asset the showcase plays and captions. */
 export type ShowcaseAsset = Pick<SpineAsset, "id" | "name" | "prompt" | "animations" | "files" | "tint">;
@@ -73,6 +94,14 @@ export function RemixShowcase({ rigs, className }: RemixShowcaseProps) {
   // Where the divider rests while each layer is showing: right edge for the top one, left for the bottom.
   const restAt = (layer: number) => (layer === 0 ? 100 : 0);
   const ready = statuses[current.asset.id] === "ready" && statuses[next.asset.id] === "ready";
+  // Both layers play the same clip number, so remixes of one rig stay in step through the cycle.
+  const [cycle, setCycle] = useState(0);
+  const clipOf = (item: ShowcaseItem) => {
+    const clips = cycleClips(item);
+    return clips.length ? clips[cycle % clips.length] : undefined;
+  };
+  const currentClip = clipOf(current);
+  const cycles = cycleClips(current).length > 1;
 
   useEffect(() => {
     splitRef.current = split;
@@ -123,6 +152,22 @@ export function RemixShowcase({ rigs, className }: RemixShowcaseProps) {
     return () => cancelAnimationFrame(frame);
   }, [ready, dragging, reducedMotion, order]);
 
+  // Move on to the next clip once the look on show has looped this one enough. The clock still
+  // holds the old clip's time until the leader ticks after the switch, so only fresher times count.
+  const clipSec = currentClip?.durationSec ?? 0;
+  const clipLoops = currentClip ? loopsOf(currentClip) : 1;
+  const currentReady = statuses[current.asset.id] === "ready";
+  useEffect(() => {
+    if (!cycles || !currentReady || clipSec <= 0) return;
+    const since = performance.now();
+    let frame = requestAnimationFrame(function tick() {
+      const { trackTime, at } = clock.current;
+      if (at > since && trackTime >= clipSec * clipLoops) return setCycle((c) => c + 1);
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [cycles, currentReady, clipSec, clipLoops, cycle, order.current]);
+
   // Skip a look whose files won't load, as long as something other than the current look is left.
   const nextFailed = statuses[next.asset.id] === "error";
   useEffect(() => {
@@ -160,8 +205,9 @@ export function RemixShowcase({ rigs, className }: RemixShowcaseProps) {
                 <SpineRuntime
                   key={item.asset.id}
                   files={item.asset.files}
-                  animation={defaultAnimation(item.asset.animations)?.name ?? "idle"}
-                  loop
+                  animation={clipOf(item)?.name ?? "idle"}
+                  // A clip played once holds its last frame until the next one, instead of restarting.
+                  loop={cycleClips(item).length <= 1 || loopsOf(clipOf(item)!) > 1}
                   playing
                   speed={1}
                   showBones={false}
