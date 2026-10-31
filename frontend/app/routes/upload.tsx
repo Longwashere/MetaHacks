@@ -10,7 +10,7 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
-import type { UploadRigsResult } from "~/lib/api.server";
+import { getAccount, type UploadRigsResult } from "~/lib/api.server";
 import { requireSession } from "~/lib/auth.server";
 import {
   filesFromDrop,
@@ -38,7 +38,10 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const session = requireSession(context, request);
-  return { maxRigs: session.user.isAdmin ? null : USER_MAX_RIGS };
+  if (session.user.isAdmin) return { maxRigs: null, proOnly: false };
+  // Uploads are Pro-only for the hackathon; the backend enforces it too.
+  const account = await getAccount(session);
+  return { maxRigs: USER_MAX_RIGS, proOnly: account.plan === "free" };
 }
 
 type RigStatus =
@@ -48,7 +51,7 @@ type RigStatus =
   | { state: "error"; error: string };
 
 export default function UploadPage({ loaderData }: Route.ComponentProps) {
-  const { maxRigs } = loaderData;
+  const { maxRigs, proOnly } = loaderData;
   const [folders, setFolders] = useState<RigFolder[]>([]);
   const [status, setStatus] = useState<Record<string, RigStatus>>({});
   const [category, setCategory] = useState<AssetCategory>("character");
@@ -141,6 +144,30 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
   };
 
   const canUpload = pending.length > 0 && !uploading && pending.every((f) => f.name.trim().length > 0);
+
+  if (proOnly) {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <h1 className="text-3xl font-bold tracking-tight">Upload rigs</h1>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Uploads are a Pro feature</CardTitle>
+            <CardDescription>
+              Uploading your own Spine rigs needs a Pro plan. You can still remix any rig in the library on the free plan.
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="flex flex-wrap gap-3">
+            <Button asChild>
+              <Link to="/account">Upgrade to Pro</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/">Browse rigs</Link>
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">

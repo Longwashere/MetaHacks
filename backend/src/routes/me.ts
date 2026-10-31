@@ -8,7 +8,7 @@ import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
 import { getPartFixView, isFixRunning, startPartFix } from "../lib/part-fix-jobs.js";
 import { listVersions, restoreVersion } from "../lib/versions.js";
-import { getAccount, recordDownload, setDisplayName } from "../lib/billing.js";
+import { getAccount, getProfile, recordDownload, setDisplayName } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { rigHashOf } from "../lib/fingerprint.js";
@@ -23,6 +23,8 @@ const MAX_SKELETON_BYTES = "8mb";
 const MAX_UPLOAD_BYTES = "64mb";
 /** Auto-tweak posts a few snapshot images as data URLs. */
 const MAX_AUTO_TWEAK_BYTES = "12mb";
+/** Uploads are closed to free users for the hackathon. */
+const UPLOADS_PRO_ONLY = "Uploading rigs needs a Pro plan.";
 
 // Everything scoped to the signed-in user. Mounted before the global JSON parser so the skeleton
 // route can use its own, larger body limit.
@@ -106,22 +108,34 @@ meRouter.delete("/library/:assetId", async (req, res) => {
  * → 201 { assets: SpineAsset[], notes }, or 400 { error, rigErrors? } (nothing stored). `data` is base64 PNG.
  * `notes` maps a rig's index to a remark, e.g. that it was kept private because its art was already in the library.
  * A rig that's already in the library is a rigError. Up to 3 rigs per request; admins up to 50, and Muse Spark
- * tags admin uploads in the background. See lib/uploads.ts.
+ * tags admin uploads in the background. See lib/uploads.ts. Free users get 403 { error }: uploads are Pro-only
+ * during the hackathon, checked before the body is parsed.
  */
-meRouter.post("/uploads", express.json({ limit: MAX_UPLOAD_BYTES }), async (req, res) => {
-  const isAdmin = isAdminOf(res);
-  const parsed = parseUploadInput(req.body, isAdmin);
-  if (!parsed.ok) {
-    res.status(400).json({ error: parsed.error, rigErrors: parsed.rigErrors });
-    return;
-  }
-  const result = await createUploads(userIdOf(res), parsed.input, isAdmin);
-  if (!result.ok) {
-    res.status(400).json({ error: result.error, rigErrors: result.rigErrors });
-    return;
-  }
-  res.status(201).json({ assets: result.assets, notes: result.notes });
-});
+meRouter.post(
+  "/uploads",
+  async (_req, res, next) => {
+    if (!isAdminOf(res) && (await getProfile(userIdOf(res))).plan === "free") {
+      res.status(403).json({ error: UPLOADS_PRO_ONLY });
+      return;
+    }
+    next();
+  },
+  express.json({ limit: MAX_UPLOAD_BYTES }),
+  async (req, res) => {
+    const isAdmin = isAdminOf(res);
+    const parsed = parseUploadInput(req.body, isAdmin);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error, rigErrors: parsed.rigErrors });
+      return;
+    }
+    const result = await createUploads(userIdOf(res), parsed.input, isAdmin);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error, rigErrors: result.rigErrors });
+      return;
+    }
+    res.status(201).json({ assets: result.assets, notes: result.notes });
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Downloads (monthly allowance)
