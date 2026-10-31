@@ -1,5 +1,5 @@
 import { CheckCircle2, CreditCard, Crown, Sparkles } from "lucide-react";
-import { Form, data, redirect, useFetcher, useNavigation } from "react-router";
+import { Form, Link, data, redirect, useFetcher, useNavigation } from "react-router";
 import type { Route } from "./+types/account";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
@@ -8,9 +8,13 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Progress } from "~/components/ui/progress";
-import { createCheckoutUrl, createPortalUrl, getAccount, updateDisplayName } from "~/lib/api.server";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
+import { createCheckoutUrl, createPortalUrl, getAccount, getCreditHistory, updateDisplayName } from "~/lib/api.server";
 import { requireSession, syncDisplayName } from "~/lib/auth.server";
+import { formatDateTime } from "~/lib/format";
 import { SITE_NAME } from "~/lib/seo";
+import { cn } from "~/lib/utils";
+import type { CreditHistoryEntry } from "~/lib/types";
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: `Account · ${SITE_NAME}` }, { name: "robots", content: "noindex, nofollow" }];
@@ -19,8 +23,10 @@ export function meta({}: Route.MetaArgs) {
 export async function loader({ request, context }: Route.LoaderArgs) {
   const session = requireSession(context, request);
   const checkout = new URL(request.url).searchParams.get("checkout");
+  const [account, history] = await Promise.all([getAccount(session), getCreditHistory(session)]);
   return {
-    account: await getAccount(session),
+    account,
+    history,
     email: session.user.email,
     checkout: checkout === "success" || checkout === "cancelled" ? checkout : null,
   };
@@ -51,7 +57,7 @@ const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 export default function Account({ loaderData, actionData }: Route.ComponentProps) {
-  const { account, email, checkout } = loaderData;
+  const { account, history, email, checkout } = loaderData;
   const { usage, downloads, plan, subscription } = account;
   const navigation = useNavigation();
   const pendingIntent = navigation.state !== "idle" ? navigation.formData?.get("intent") : null;
@@ -137,12 +143,12 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
               ? `Renews ${formatDate(subscription.currentPeriodEnd)}.`
               : pro
                 ? "Thanks for supporting the project."
-                : "Upgrade for more remixes and unlimited downloads every month."}
+                : `Upgrade for ${account.credits.monthly.pro} credits and unlimited downloads every month.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium">Remixes this month</span>
+            <span className="font-medium">Credits this month</span>
             <span className="tabular-nums text-muted-foreground">
               {usage.limit === null ? `${usage.used} · unlimited` : `${usage.used} / ${usage.limit}`}
             </span>
@@ -151,8 +157,11 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
             <p className="text-xs text-muted-foreground">As an admin you have no monthly limit.</p>
           ) : (
             <>
-              <Progress value={usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 100} aria-label="Remixes used this month" />
-              <p className="text-xs text-muted-foreground">Resets {formatDate(usage.resetsAt)}. Failed remixes don't count.</p>
+              <Progress value={usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 100} aria-label="Credits used this month" />
+              <p className="text-xs text-muted-foreground">
+                A remix costs {account.credits.perPage.v2} credit per page with v2 and {account.credits.perPage.v3} with v3; a part fix costs{" "}
+                {account.credits.partFix}. Resets {formatDate(usage.resetsAt)}. Failed jobs are free.
+              </p>
             </>
           )}
           <div className="mt-2 flex items-baseline justify-between text-sm">
@@ -194,6 +203,63 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
           )}
         </CardFooter>
       </Card>
+
+      <CreditHistory jobs={history} />
     </div>
+  );
+}
+
+/** This month's remixes and part fixes with what each cost. */
+function CreditHistory({ jobs }: { jobs: CreditHistoryEntry[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Credit history</CardTitle>
+        <CardDescription>Every remix and part fix this month. Failed jobs are refunded.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {jobs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No remixes yet this month.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Job</TableHead>
+                <TableHead className="text-right">Credits</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {jobs.map((job) => (
+                <TableRow key={job.jobId}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{formatDateTime(job.createdAt)}</TableCell>
+                  <TableCell className="whitespace-normal">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {job.assetId ? (
+                        <Link to={`/remix?asset=${encodeURIComponent(job.assetId)}`} className="font-medium underline-offset-4 hover:underline">
+                          {job.rigName ?? "Deleted rig"}
+                        </Link>
+                      ) : (
+                        <span className="font-medium">{job.rigName ?? "Deleted rig"}</span>
+                      )}
+                      {job.status === "failed" && <Badge variant="outline">Failed</Badge>}
+                      {(job.status === "running" || job.status === "queued") && <Badge variant="secondary">Running</Badge>}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {job.kind === "part-fix"
+                        ? "Part fix"
+                        : `${job.apiVersion} remix · ${job.pages} page${job.pages === 1 ? "" : "s"}`}
+                    </p>
+                  </TableCell>
+                  <TableCell className={cn("text-right tabular-nums", job.status === "failed" && "text-muted-foreground line-through")}>
+                    {job.credits}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -1,8 +1,8 @@
 import Stripe from "stripe";
-import { APP_URL, DOWNLOAD_LIMITS, PLAN_LIMITS, STRIPE } from "./config.js";
-import { PROFILE_COLUMNS, check, db, type Plan, type ProfileRow } from "./db.js";
+import { APP_URL, CREDITS_PER_PAGE, DOWNLOAD_LIMITS, PART_FIX_CREDITS, PLAN_CREDITS, STRIPE } from "./config.js";
+import { PROFILE_COLUMNS, check, db, type Plan, type ProfileRow, type RemixJobRow } from "./db.js";
 
-// Plans, monthly remix allowance and the Stripe subscription. The webhook is the only thing that
+// Plans, monthly credits and the Stripe subscription. The webhook is the only thing that
 // changes a profile's plan; checkout and the portal just send the user to Stripe.
 
 let stripeClient: Stripe | null = null;
@@ -23,8 +23,10 @@ export interface Account {
   /** Admins have no remix limit and can see and moderate any asset. */
   isAdmin: boolean;
   subscription: { status: string; currentPeriodEnd: string | null } | null;
-  /** `limit` is null for unlimited (admins). */
+  /** Credits spent this month; `limit` is null for unlimited (admins). */
   usage: { used: number; limit: number | null; resetsAt: string };
+  /** What things cost, so the UI can price a remix before it starts. */
+  credits: CreditRules;
   /** Distinct assets downloaded this month. `limit` is null for unlimited (Pro and admins). */
   downloads: { used: number; limit: number | null; resetsAt: string };
   billingEnabled: boolean;
@@ -47,16 +49,88 @@ function usagePeriod(now = new Date()): { start: Date; end: Date } {
   };
 }
 
-/** Remixes started this month that haven't failed. */
-export async function remixesUsed(userId: string): Promise<number> {
-  const { count, error } = await db()
-    .from("remix_jobs")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .neq("status", "failed")
-    .gte("created_at", usagePeriod().start.toISOString());
-  if (error) throw new Error(`Database error: ${error.message}`);
-  return count ?? 0;
+export interface CreditRules {
+  /** Credits per atlas page, by remix API version. */
+  perPage: typeof CREDITS_PER_PAGE;
+  partFix: number;
+  /** Each plan's credits per month. */
+  monthly: typeof PLAN_CREDITS;
+}
+
+export const CREDIT_RULES: CreditRules = { perPage: CREDITS_PER_PAGE, partFix: PART_FIX_CREDITS, monthly: PLAN_CREDITS };
+
+/** Credits a remix of a rig with `pages` atlas pages costs. */
+export function remixCredits(apiVersion: keyof typeof CREDITS_PER_PAGE, pages: number): number {
+  return CREDITS_PER_PAGE[apiVersion] * Math.max(pages, 1);
+}
+
+/** One remix or part fix this month and what it cost, for the account page. */
+export interface CreditHistoryEntry {
+  jobId: string;
+  createdAt: string;
+  kind: "remix" | "part-fix";
+  apiVersion: keyof typeof CREDITS_PER_PAGE;
+  status: "queued" | "running" | "succeeded" | "failed";
+  /** The rig remixed, or the remix whose parts were fixed; null once deleted. */
+  rigName: string | null;
+  /** The remix it made or fixed, for a link; null until it's saved, or if it failed or was deleted. */
+  assetId: string | null;
+  /** Atlas pages repainted; null for part fixes. */
+  pages: number | null;
+  /** What it costs; a failed job's cost is refunded (left out of usage). */
+  credits: number;
+}
+
+/** This month's remixes and part fixes, newest first. */
+export async function creditHistory(userId: string): Promise<CreditHistoryEntry[]> {
+  const jobs = check(
+    await db()
+      .from("remix_jobs")
+      .select("id, created_at, api_version, input, status, base_asset_id, asset_id, credits")
+      .eq("user_id", userId)
+      .gte("created_at", usagePeriod().start.toISOString())
+      .order("created_at", { ascending: false })
+      .overrideTypes<
+        Pick<RemixJobRow, "id" | "created_at" | "api_version" | "input" | "status" | "base_asset_id" | "asset_id" | "credits">[],
+        { merge: false }
+      >(),
+  );
+  const ids = [...new Set(jobs.flatMap((j) => (j.base_asset_id ? [j.base_asset_id] : [])))];
+  const names = new Map(
+    ids.length === 0
+      ? []
+      : check(await db().from("assets").select("id, name").in("id", ids).overrideTypes<{ id: string; name: string }[], { merge: false }>()).map(
+          (a) => [a.id, a.name] as const,
+        ),
+  );
+  return jobs.map((j) => {
+    const partFix = j.input.kind === "parts";
+    return {
+      jobId: j.id,
+      createdAt: j.created_at,
+      kind: partFix ? "part-fix" : "remix",
+      apiVersion: j.api_version,
+      status: j.status,
+      rigName: (j.base_asset_id && names.get(j.base_asset_id)) ?? null,
+      assetId: j.status === "failed" ? null : j.asset_id,
+      pages: partFix ? null : Math.max(Math.round(j.credits / CREDITS_PER_PAGE[j.api_version]), 1),
+      credits: j.credits,
+    };
+  });
+}
+
+/** Credits spent this month on jobs that haven't failed. */
+export async function creditsUsed(userId: string): Promise<number> {
+  const rows = check(
+    await db()
+      .from("remix_jobs")
+      .select("credits")
+      .eq("user_id", userId)
+      .neq("status", "failed")
+      .gte("created_at", usagePeriod().start.toISOString())
+      .overrideTypes<{ credits: number }[], { merge: false }>(),
+  );
+  return rows.reduce((sum, row) => sum + row.credits, 0);
 }
 
 /** Distinct assets downloaded this month. */
@@ -88,7 +162,7 @@ export async function recordDownload(userId: string, assetId: string, isAdmin: b
 }
 
 export async function getAccount(userId: string, isAdmin: boolean): Promise<Account> {
-  const [profile, used, downloads] = await Promise.all([getProfile(userId), remixesUsed(userId), downloadsUsed(userId)]);
+  const [profile, used, downloads] = await Promise.all([getProfile(userId), creditsUsed(userId), downloadsUsed(userId)]);
   return {
     user: { id: profile.id, name: profile.name, avatarUrl: profile.avatar_url },
     plan: profile.plan,
@@ -96,7 +170,8 @@ export async function getAccount(userId: string, isAdmin: boolean): Promise<Acco
     subscription: profile.subscription_status
       ? { status: profile.subscription_status, currentPeriodEnd: profile.current_period_end }
       : null,
-    usage: { used, limit: isAdmin ? null : PLAN_LIMITS[profile.plan], resetsAt: usagePeriod().end.toISOString() },
+    usage: { used, limit: isAdmin ? null : PLAN_CREDITS[profile.plan], resetsAt: usagePeriod().end.toISOString() },
+    credits: CREDIT_RULES,
     downloads: { used: downloads, limit: downloadLimit(profile.plan, isAdmin), resetsAt: usagePeriod().end.toISOString() },
     billingEnabled: billingEnabled(),
   };

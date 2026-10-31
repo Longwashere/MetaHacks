@@ -88,7 +88,7 @@ export const PROFILE_COLUMNS =
   "id, name, avatar_url, stripe_customer_id, plan, subscription_id, subscription_status, current_period_end, created_at";
 
 export const REMIX_JOB_COLUMNS =
-  "id, user_id, base_asset_id, api_version, input, status, error, edit_prompt, prompt_status, asset_id, live, created_at";
+  "id, user_id, base_asset_id, api_version, input, status, error, edit_prompt, prompt_status, asset_id, live, credits, created_at";
 
 export interface RemixJobRow {
   id: string;
@@ -103,6 +103,8 @@ export interface RemixJobRow {
   asset_id: string | null;
   /** The live view's log, saved when a v2 or v3 job settles; null before then and for v1. */
   live: RemixLive | null;
+  /** What the job costs from the monthly credits (not charged when it failed). */
+  credits: number;
   created_at: string;
 }
 

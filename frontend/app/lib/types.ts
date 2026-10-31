@@ -100,6 +100,37 @@ export type PromptStatus = "original" | "rewording" | "reworded";
 export const REMIX_API_VERSIONS = ["v2", "v3", "v1"] as const;
 export type RemixApiVersion = (typeof REMIX_API_VERSIONS)[number];
 
+/** What remixes and part fixes cost from the monthly credits (Account.credits). */
+export interface CreditRules {
+  /** Credits per atlas page a remix repaints, by API version. */
+  perPage: Record<RemixApiVersion, number>;
+  partFix: number;
+  /** Each plan's credits per month. */
+  monthly: { free: number; pro: number };
+}
+
+/** One remix or part fix this month and what it cost (GET /me/credits). */
+export interface CreditHistoryEntry {
+  jobId: string;
+  createdAt: string;
+  kind: "remix" | "part-fix";
+  apiVersion: RemixApiVersion;
+  status: "queued" | "running" | "succeeded" | "failed";
+  /** The rig remixed, or the remix whose parts were fixed; null once deleted. */
+  rigName: string | null;
+  /** The remix it made or fixed; null until saved, or if it failed or was deleted. */
+  assetId: string | null;
+  /** Atlas pages repainted; null for part fixes. */
+  pages: number | null;
+  /** What it costs; failed jobs are refunded. */
+  credits: number;
+}
+
+/** Credits a remix of `asset` costs with `apiVersion`: per page, at least one page. */
+export function remixCredits(rules: CreditRules, apiVersion: RemixApiVersion, asset: Pick<SpineAsset, "files">): number {
+  return rules.perPage[apiVersion] * Math.max(asset.files?.textureUrls.length ?? 1, 1);
+}
+
 export interface RemixInput {
   baseAssetId: string;
   /** Describes the new look, e.g. "black and crimson ninja robes". */

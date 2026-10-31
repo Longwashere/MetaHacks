@@ -82,7 +82,9 @@ import {
   PART_FIX_SOURCES,
   REMIX_API_VERSIONS,
   REMIX_STYLES,
+  remixCredits,
   type AssetVersion,
+  type CreditRules,
   type PartFixJob,
   type RemixApiVersion,
   type RemixJob,
@@ -165,7 +167,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     recent: myRemixes.filter((a) => a.id !== remix?.id).slice(0, 4),
     savedIds,
     signedIn: session !== null,
-    usage: account && { ...account.usage, plan: account.plan },
+    usage: account && { ...account.usage, plan: account.plan, credits: account.credits },
     siteUrl: getSiteUrl(request),
   };
 }
@@ -836,7 +838,11 @@ function PartFixSection({
                 {fix && <PartFixStatus fix={fix} />}
 
                 <div className="flex flex-col gap-2">
-                  <Button type="submit" disabled={selected.length === 0 || fixing || submitting} className="w-full">
+                  <Button
+                    type="submit"
+                    disabled={selected.length === 0 || fixing || submitting || (usage !== null && usage.credits.partFix > creditsLeft(usage))}
+                    className="w-full"
+                  >
                     {submitting || fixing ? <Loader2 className="animate-spin" /> : <Paintbrush />}
                     {submitting
                       ? "Starting…"
@@ -846,8 +852,10 @@ function PartFixSection({
                           ? "Repaint parts"
                           : `Repaint ${selected.length} part${selected.length === 1 ? "" : "s"}`}
                   </Button>
-                  <p className="text-center text-xs text-muted-foreground">Uses one remix from your monthly allowance.</p>
-                  {usage && <RemixAllowance usage={usage} />}
+                  <p className="text-center text-xs text-muted-foreground">
+                    Uses {usage ? creditsLabel(usage.credits.partFix) : "credits"} from your monthly allowance.
+                  </p>
+                  {usage && <RemixAllowance usage={usage} needed={usage.credits.partFix} />}
                 </div>
               </Form>
             </CardContent>
@@ -1309,12 +1317,23 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   );
 }
 
+/** This month's credits. */
 interface RemixUsage {
   used: number;
   /** null = unlimited (admins). */
   limit: number | null;
   resetsAt: string;
   plan: "free" | "pro";
+  credits: CreditRules;
+}
+
+/** Credits left this month; Infinity for admins. */
+function creditsLeft(usage: RemixUsage): number {
+  return usage.limit === null ? Infinity : Math.max(usage.limit - usage.used, 0);
+}
+
+function creditsLabel(n: number): string {
+  return `${n} credit${n === 1 ? "" : "s"}`;
 }
 
 function RemixForm({
@@ -1331,8 +1350,12 @@ function RemixForm({
   const location = useLocation();
   const [prompt, setPrompt] = useState("");
   const [strength, setStrength] = useState(60);
+  const [apiVersion, setApiVersion] = useState<RemixApiVersion>("v2");
   const navigation = useNavigation();
   const submitting = navigation.state === "submitting" && navigation.formData?.get("baseAssetId") === base.id;
+  const pages = Math.max(base.files?.textureUrls.length ?? 1, 1);
+  const cost = usage ? remixCredits(usage.credits, apiVersion, base) : null;
+  const short = usage !== null && cost !== null && cost > creditsLeft(usage);
 
   return (
     <Form method="post" className="flex flex-col gap-6">
@@ -1431,14 +1454,15 @@ function RemixForm({
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="apiVersion">Remix API</Label>
-        <Select name="apiVersion" defaultValue="v2">
-          <SelectTrigger id="apiVersion" className="w-full sm:w-48" aria-invalid={Boolean(errors.apiVersion)}>
+        <Select name="apiVersion" value={apiVersion} onValueChange={(v) => setApiVersion(v as RemixApiVersion)}>
+          <SelectTrigger id="apiVersion" className="w-full sm:w-72" aria-invalid={Boolean(errors.apiVersion)}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {REMIX_API_VERSIONS.map((v) => (
               <SelectItem key={v} value={v}>
                 {v === "v2" ? "v2 (default)" : v === "v3" ? "v3 (self-checking, slower)" : v}
+                {usage && ` · ${creditsLabel(usage.credits.perPage[v])}/page`}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1449,7 +1473,7 @@ function RemixForm({
       {errors.limit && (
         <Alert>
           <AlertCircle />
-          <AlertTitle>Monthly remixes used up</AlertTitle>
+          <AlertTitle>Not enough credits</AlertTitle>
           <AlertDescription>
             {errors.limit}
             {usage?.plan !== "pro" && (
@@ -1463,11 +1487,15 @@ function RemixForm({
 
       {signedIn ? (
         <div className="flex flex-col gap-2">
-          <Button type="submit" size="lg" disabled={submitting} className="w-full">
+          <Button type="submit" size="lg" disabled={submitting || short} className="w-full">
             {submitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            {submitting ? "Starting…" : "Remix textures"}
+            {submitting
+              ? "Starting…"
+              : cost === null
+                ? "Remix textures"
+                : `Remix textures · ${creditsLabel(cost)}${pages > 1 ? ` (${pages} pages)` : ""}`}
           </Button>
-          {usage && <RemixAllowance usage={usage} />}
+          {usage && <RemixAllowance usage={usage} needed={cost ?? 0} />}
         </div>
       ) : (
         <Button asChild size="lg" className="w-full">
@@ -1480,15 +1508,17 @@ function RemixForm({
   );
 }
 
-function RemixAllowance({ usage }: { usage: RemixUsage }) {
+/** Credits left this month; `needed` is what the button next to it costs, to say when it's more than that. */
+function RemixAllowance({ usage, needed }: { usage: RemixUsage; needed: number }) {
   if (usage.limit === null) {
-    return <p className="text-center text-xs text-muted-foreground">Unlimited remixes (admin) · {usage.used} this month</p>;
+    return <p className="text-center text-xs text-muted-foreground">Unlimited credits (admin) · {usage.used} used this month</p>;
   }
-  const left = Math.max(usage.limit - usage.used, 0);
+  const left = creditsLeft(usage);
   const resets = new Date(usage.resetsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   return (
     <p className="text-center text-xs text-muted-foreground">
-      {left} of {usage.limit} {usage.plan === "pro" ? "Pro" : "free"} remixes left this month · resets {resets}
+      {needed > left && `Needs ${creditsLabel(needed)}. `}
+      {left} of {usage.limit} {usage.plan === "pro" ? "Pro" : "free"} credits left this month · resets {resets}
       {usage.plan === "free" && (
         <>
           {" · "}

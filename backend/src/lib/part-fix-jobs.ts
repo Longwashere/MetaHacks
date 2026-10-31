@@ -1,6 +1,6 @@
 import { AiTimeoutError } from "./ai-fetch.js";
 import { getAssetRow } from "./assets.js";
-import { REMIX_JOB_TIMEOUT_MS } from "./config.js";
+import { PART_FIX_CREDITS, REMIX_JOB_TIMEOUT_MS } from "./config.js";
 import { ASSET_COLUMNS, REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
 import { fingerprintFiles } from "./fingerprint.js";
 import { newRemixJobId } from "./jobs.js";
@@ -53,7 +53,7 @@ export function isFixRunning(assetId: string): boolean {
 export type StartPartFixResult = { ok: true; job: PartFixJobView } | { ok: false; status: 402 | 404 | 409; error: string };
 
 export async function startPartFix(userId: string, assetId: string, input: PartFixInput, isAdmin: boolean): Promise<StartPartFixResult> {
-  const [limitError, asset] = await Promise.all([allowanceError(userId, isAdmin), getAssetRow(assetId, userId)]);
+  const [limitError, asset] = await Promise.all([allowanceError(userId, isAdmin, PART_FIX_CREDITS), getAssetRow(assetId, userId)]);
   if (!asset?.files || asset.owner_id !== userId) return { ok: false, status: 404, error: "You can only fix parts of your own remixes." };
   if (limitError) return { ok: false, status: 402, error: limitError };
   // Two fixes on one remix would each start from the same pages, and the later save would undo the other.
@@ -72,6 +72,7 @@ export async function startPartFix(userId: string, assetId: string, input: PartF
       input: { kind: "parts", ...input },
       status: "running",
       asset_id: asset.id,
+      credits: PART_FIX_CREDITS,
     }),
   );
 

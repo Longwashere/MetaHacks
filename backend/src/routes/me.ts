@@ -8,7 +8,7 @@ import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
 import { getPartFixView, isFixRunning, startPartFix } from "../lib/part-fix-jobs.js";
 import { listVersions, restoreVersion } from "../lib/versions.js";
-import { getAccount, getProfile, recordDownload, setDisplayName } from "../lib/billing.js";
+import { creditHistory, getAccount, getProfile, recordDownload, setDisplayName } from "../lib/billing.js";
 import { MUSE_TIMEOUT_MS } from "../lib/config.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "../lib/db.js";
 import { rigHashOf } from "../lib/fingerprint.js";
@@ -37,6 +37,11 @@ const MAX_REMIX_BODY_BYTES = Math.ceil(MAX_REFERENCE_BYTES * 1.4) + 64 * 1024;
 /** GET /me → Account: profile, plan, subscription and this month's remix usage */
 meRouter.get("/", async (_req, res) => {
   res.json(await getAccount(userIdOf(res), isAdminOf(res)));
+});
+
+/** GET /me/credits → { jobs: CreditHistoryEntry[] }: this month's remixes and part fixes with what each cost, newest first */
+meRouter.get("/credits", async (_req, res) => {
+  res.json({ jobs: await creditHistory(userIdOf(res)) });
 });
 
 /** PATCH /me  body = { name } → Account, or 400 { error }. Also renames the user on all their assets. */

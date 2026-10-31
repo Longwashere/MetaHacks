@@ -4,15 +4,15 @@ import { createRemixJob as createV2Job, getRemixJob as getV2Job } from "../v2/li
 import { createRemixJob as createV3Job, getRemixJob as getV3Job } from "../v3/lib/jobs.js";
 import type { RemixLive } from "./remix-live.js";
 import { getAssetRow } from "./assets.js";
-import { getProfile, remixesUsed } from "./billing.js";
-import { PLAN_LIMITS } from "./config.js";
+import { creditsUsed, getProfile, remixCredits } from "./billing.js";
+import { PLAN_CREDITS } from "./config.js";
 import { REMIX_JOB_COLUMNS, check, db, toSpineAsset, type AssetRow, type RemixJobRow, type SpineAsset } from "./db.js";
 import { fingerprintFiles } from "./fingerprint.js";
 import { objectUrl, putFile } from "./storage.js";
 import { REMIX_STYLES, type RemixInput, type RemixJob, type RemixStyle } from "./types.js";
 
 // Remix jobs for signed-in users. The v1/v2/v3 runners do the work in memory; this records each job
-// in remix_jobs (which is also the monthly usage count) and saves the finished remix as an asset
+// in remix_jobs (whose credits are also the monthly usage) and saves the finished remix as an asset
 // owned by the user, public or private as they chose when starting it.
 
 export const REMIX_API_VERSIONS = ["v1", "v2", "v3"] as const;
@@ -45,7 +45,7 @@ export type StartRemixResult =
   | { ok: true; job: RemixJobView }
   | { ok: false; status: 400 | 402; error: string; field?: "base" | "referenceImage" };
 
-/** Starts a remix if the user has allowance left. Admins have no monthly limit and can remix any asset. */
+/** Starts a remix if the user has enough credits left. Admins have no monthly limit and can remix any asset. */
 export async function startRemix(
   userId: string,
   input: RemixInput,
@@ -53,10 +53,12 @@ export async function startRemix(
   isAdmin: boolean,
   referenceImage: Buffer | null = null,
 ): Promise<StartRemixResult> {
-  const [limitError, base] = await Promise.all([allowanceError(userId, isAdmin), getAssetRow(input.baseAssetId, userId, isAdmin)]);
-  if (limitError) return { ok: false, status: 402, error: limitError };
+  const base = await getAssetRow(input.baseAssetId, userId, isAdmin);
   if (!base) return { ok: false, status: 400, error: "That rig no longer exists.", field: "base" };
   if (!base.files) return { ok: false, status: 400, error: "This rig has no textures to repaint yet. Choose another one.", field: "base" };
+  const credits = remixCredits(apiVersion, base.files.textures.length);
+  const limitError = await allowanceError(userId, isAdmin, credits);
+  if (limitError) return { ok: false, status: 402, error: limitError };
 
   if (referenceImage && apiVersion === "v1") {
     return { ok: false, status: 400, error: "Reference images need the v2 remix API.", field: "referenceImage" };
@@ -76,6 +78,7 @@ export async function startRemix(
       api_version: apiVersion,
       input,
       status: "running",
+      credits,
     }),
   );
 
@@ -123,15 +126,18 @@ export async function startRemix(
   return { ok: true, job };
 }
 
-/** Why the user can't start another remix or part fix this month, or null if they can. Admins have no limit. */
-export async function allowanceError(userId: string, isAdmin: boolean): Promise<string | null> {
+/** Why the user can't spend `credits` on a remix or part fix this month, or null if they can. Admins have no limit. */
+export async function allowanceError(userId: string, isAdmin: boolean, credits: number): Promise<string | null> {
   if (isAdmin) return null;
-  const [profile, used] = await Promise.all([getProfile(userId), remixesUsed(userId)]);
-  const limit = PLAN_LIMITS[profile.plan];
-  if (used < limit) return null;
-  return profile.plan === "free"
-    ? `You've used your ${limit} free remixes this month. Upgrade to Pro for more.`
-    : `You've used all ${limit} remixes this month. Your allowance resets on the 1st.`;
+  const [profile, used] = await Promise.all([getProfile(userId), creditsUsed(userId)]);
+  const limit = PLAN_CREDITS[profile.plan];
+  const left = Math.max(limit - used, 0);
+  if (credits <= left) return null;
+  const next = profile.plan === "free" ? "Upgrade to Pro for more." : "Your credits reset on the 1st.";
+  if (left === 0) {
+    return profile.plan === "free" ? `You've used your ${limit} free credits this month. ${next}` : `You've used all ${limit} credits this month. ${next}`;
+  }
+  return `This needs ${credits} credits and you have ${left} left this month. ${next}`;
 }
 
 const ACCENTS = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];

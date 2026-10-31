@@ -3,7 +3,7 @@
 // token the backend verifies. See BACKEND.md for the endpoint contract.
 
 import type { Session } from "~/lib/auth.server";
-import type { AnimateInput, AnimateResult, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AnimateInput, AnimateResult, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -380,8 +380,9 @@ export interface Account {
   /** Admins have no remix limit and can see and moderate any asset. */
   isAdmin: boolean;
   subscription: { status: string; currentPeriodEnd: string | null } | null;
-  /** Remixes started this calendar month (UTC) that didn't fail, and the plan's allowance (null = unlimited). */
+  /** Credits spent this calendar month (UTC) on jobs that didn't fail, and the plan's credits (null = unlimited). */
   usage: { used: number; limit: number | null; resetsAt: string };
+  credits: CreditRules;
   /** Distinct assets downloaded this calendar month (UTC), and the allowance (null = unlimited: Pro and admins). */
   downloads: { used: number; limit: number | null; resetsAt: string };
   billingEnabled: boolean;
@@ -409,6 +410,11 @@ export async function recordDownload(session: Session, assetId: string): Promise
 /** GET /me */
 export async function getAccount(session: Session): Promise<Account> {
   return backend<Account>("/me", { session });
+}
+
+/** GET /me/credits — this month's remixes and part fixes with what each cost, newest first. */
+export async function getCreditHistory(session: Session): Promise<CreditHistoryEntry[]> {
+  return (await backend<{ jobs: CreditHistoryEntry[] }>("/me/credits", { session })).jobs;
 }
 
 /** PATCH /me — sets the display name shown on the account page and on all the user's assets. */

@@ -110,11 +110,20 @@ function count(name: string, fallback: number): number {
   return Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
-/** Remixes each plan can start per calendar month (UTC). Failed remixes don't count. */
-export const PLAN_LIMITS = {
-  free: count("FREE_MONTHLY_REMIXES", 3),
-  pro: count("PRO_MONTHLY_REMIXES", 100),
+/** Credits each plan gets per calendar month (UTC). Failed jobs cost nothing. */
+export const PLAN_CREDITS = {
+  free: count("FREE_MONTHLY_CREDITS", 6),
+  pro: count("PRO_MONTHLY_CREDITS", 200),
 } as const;
+
+/**
+ * Credits a remix costs per atlas page it repaints. Muse Image is most of a job's cost and every
+ * page is an image call (in v3, one per round); v3's loop makes about twice v2's Muse spend.
+ */
+export const CREDITS_PER_PAGE = { v1: 1, v2: 1, v3: 2 } as const;
+
+/** Credits a part fix costs, whatever the number of parts. */
+export const PART_FIX_CREDITS = 1;
 
 /** Distinct assets each plan can download per calendar month (UTC); null is unlimited. Admins are unlimited too. */
 export const DOWNLOAD_LIMITS: Record<"free" | "pro", number | null> = {
