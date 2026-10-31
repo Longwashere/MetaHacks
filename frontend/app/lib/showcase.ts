@@ -6,6 +6,7 @@ import type { ShowcaseRig } from "~/components/RemixShowcase";
  */
 export const SHOWCASE_RIGS: ShowcaseRig[] = [
   {
+    "hiddenClips": ["Skill_2"],
     "original": {
       "id": "20902-sumuqishi-493ea9b2",
       "name": "Armored Warrior",
@@ -59,6 +60,58 @@ export const SHOWCASE_RIGS: ShowcaseRig[] = [
       "tint": null
     },
     "remixes": [
+      {
+        "id": "treant-forest-warrior-cc9f0961",
+        "name": "Treant Forest Warrior",
+        "prompt": "Make this guy into a trent warrior. he is made out of living wood and forest themed.",
+        "animations": [
+          {
+            "loop": false,
+            "name": "Atk",
+            "durationSec": 1.7
+          },
+          {
+            "loop": false,
+            "name": "Death",
+            "durationSec": 1.1
+          },
+          {
+            "loop": true,
+            "name": "Run",
+            "durationSec": 1
+          },
+          {
+            "loop": false,
+            "name": "Skill_1",
+            "durationSec": 0
+          },
+          {
+            "loop": false,
+            "name": "Skill_2",
+            "durationSec": 1.87
+          },
+          {
+            "loop": false,
+            "name": "Stand",
+            "durationSec": 1.33
+          },
+          {
+            "loop": false,
+            "name": "Weak",
+            "durationSec": 1.33
+          }
+        ],
+        "files": {
+          "skeletonUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-29T08-37-41-795Z_upload_493ea9b2/20902-sumuqishi.json",
+          "atlasUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T06-03-08-562Z_job_cc9f0961/remix.atlas",
+          "textureUrls": [
+            "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T06-03-08-562Z_job_cc9f0961/20902_sumuqishi.png"
+          ],
+          "premultipliedAlpha": false,
+          "skin": null
+        },
+        "tint": null
+      },
       {
         "id": "ember-fire-knight-7e215105",
         "name": "Ember Fire Knight",

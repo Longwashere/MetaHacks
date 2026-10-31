@@ -29,14 +29,31 @@ const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2
 
 /**
  * The clips a look cycles through: every clip of 1s or more that the rig's original also has, so
- * clips added to a remix (a victory dance) are left out. Else the default one.
+ * clips added to a remix (a victory dance) are left out, minus the rig's hidden ones. Else the
+ * default one.
  */
 function cycleClips({ asset, rig }: ShowcaseItem): SpineAnimation[] {
   const stock = new Set(rig.original.animations.map((a) => a.name));
-  const long = asset.animations.filter((a) => a.durationSec >= MIN_CYCLE_SEC && stock.has(a.name));
+  const long = asset.animations.filter((a) => a.durationSec >= MIN_CYCLE_SEC && stock.has(a.name) && !rig.hiddenClips?.includes(a.name));
   if (long.length) return long;
   const fallback = defaultAnimation(asset.animations);
   return fallback ? [fallback] : [];
+}
+
+/**
+ * What a layer's player loads for a look. A remix on its rig's own skeleton keeps the original's
+ * atlas regions, so the layer keeps the original's player and swaps in the remix's texture pages:
+ * starting a new player stalls the page for a moment, which shows as a hitch in the look on show
+ * just as the divider reaches the edge. Remixes with an edited skeleton get a player of their own.
+ */
+function playerOf({ asset, rig }: ShowcaseItem) {
+  const original = rig.original.files;
+  const files = asset.files;
+  if (!files || !original || asset === rig.original || files.skeletonUrl !== original.skeletonUrl || files.textureUrls.length !== original.textureUrls.length) {
+    return { key: asset.id, files };
+  }
+  const pageUrls = Object.fromEntries(original.textureUrls.map((url, i) => [url.slice(url.lastIndexOf("/") + 1), files.textureUrls[i]]));
+  return { key: rig.original.id, files: original, pageUrls };
 }
 
 /** The parts of an asset the showcase plays and captions. */
@@ -46,6 +63,8 @@ export interface ShowcaseRig {
   original: ShowcaseAsset;
   /** Remixes of `original`, shown one after another. */
   remixes: ShowcaseAsset[];
+  /** Clips left out of the cycle on every look of this rig. */
+  hiddenClips?: string[];
 }
 
 interface ShowcaseItem {
@@ -193,33 +212,39 @@ export function RemixShowcase({ rigs, className }: RemixShowcaseProps) {
         aria-label={`${label(current)}, then ${label(next)}`}
         className={cn("relative flex aspect-square items-center justify-center overflow-hidden", STAGE_GRID)}
       >
-        {layers.map((item, layer) => (
-          <div
-            key={layer}
-            className={cn("absolute inset-0 bg-card", layer === 0 ? "z-10" : "z-0")}
-            style={layer === 0 ? { clipPath: `inset(0 ${100 - split}% 0 0)` } : undefined}
-          >
-            {/* The grid again, so the layer underneath doesn't show through transparent pixels. */}
-            <div className={cn("absolute inset-0", STAGE_GRID)}>
-              {item.asset.files && (
-                <SpineRuntime
-                  key={item.asset.id}
-                  files={item.asset.files}
-                  animation={clipOf(item)?.name ?? "idle"}
-                  // A clip played once holds its last frame until the next one, instead of restarting.
-                  loop={cycleClips(item).length <= 1 || loopsOf(clipOf(item)!) > 1}
-                  playing
-                  speed={1}
-                  showBones={false}
-                  tint={item.asset.tint}
-                  // The look on show keeps time; the queued one joins it in step.
-                  sync={{ clock: clock.current, lead: layer === shown }}
-                  onStatusChange={(status) => setStatuses((s) => (s[item.asset.id] === status ? s : { ...s, [item.asset.id]: status }))}
-                />
-              )}
+        {layers.map((item, layer) => {
+          const player = playerOf(item);
+          return (
+            <div
+              key={layer}
+              className={cn("absolute inset-0 bg-card", layer === 0 ? "z-10" : "z-0")}
+              style={layer === 0 ? { clipPath: `inset(0 ${100 - split}% 0 0)` } : undefined}
+            >
+              {/* The grid again, so the layer underneath doesn't show through transparent pixels. */}
+              <div className={cn("absolute inset-0", STAGE_GRID)}>
+                {player.files && (
+                  <SpineRuntime
+                    key={player.key}
+                    files={player.files}
+                    pageUrls={player.pageUrls}
+                    animation={clipOf(item)?.name ?? "idle"}
+                    // A clip played once holds its last frame until the next one, instead of restarting.
+                    loop={cycleClips(item).length <= 1 || loopsOf(clipOf(item)!) > 1}
+                    playing
+                    speed={1}
+                    showBones={false}
+                    tint={item.asset.tint}
+                    // The look on show keeps time; a queued remix of the same rig joins it in step. A
+                    // queued look from another rig plays on its own, or it would jump each time the
+                    // leader moves to its next clip (the single-clip windmill after the warrior).
+                    sync={layer === shown ? { clock: clock.current, lead: true } : item.rig === current.rig ? { clock: clock.current, lead: false } : undefined}
+                    onStatusChange={(status) => setStatuses((s) => (s[item.asset.id] === status ? s : { ...s, [item.asset.id]: status }))}
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {statuses[current.asset.id] === "ready" ? (
           <CompareDivider split={split} onSplitChange={onSplitChange} leftLabel={label(layers[0])} rightLabel={label(layers[1])} />
         ) : (
