@@ -6,6 +6,7 @@ import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow, type SpineAsset,
 import { isSafePageName } from "./atlas.js";
 import { fingerprintRig, type RigFingerprint } from "./fingerprint.js";
 import { putFile } from "./storage.js";
+import { nameSlug } from "./upload-rename.js";
 import { tagUploads } from "./upload-tags.js";
 import type { ArtStyle } from "./types.js";
 import { parseSkeleton } from "./validate.js";
@@ -167,8 +168,8 @@ export type CreateUploadsResult =
 
 /**
  * Checks every rig against the library, stores their files, then creates their assets in one
- * insert. For admin uploads, Muse Spark then writes each asset's tags in the background
- * (lib/upload-tags.ts).
+ * insert. Muse Spark then picks each asset's style in the background (lib/upload-tags.ts); for
+ * admin uploads it also writes tags and names the rig, whose files are stored again under that name.
  */
 export async function createUploads(userId: string, input: UploadInput, isAdmin = false): Promise<CreateUploadsResult> {
   const matched = await matchExisting(userId, input.rigs, isAdmin);
@@ -183,7 +184,7 @@ export async function createUploads(userId: string, input: UploadInput, isAdmin 
         notes[i] = "Kept private: its art matches a rig already in the library, so it's only in your workspace.";
       }
       const suffix = randomUUID().slice(0, 8);
-      const slug = rig.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "rig";
+      const slug = nameSlug(rig.name) || "rig";
       const folder = `${stamp}_upload_${suffix}`;
       const [skeletonKey, atlasKey, ...textureKeys] = await Promise.all([
         putFile(folder, `${slug}.json`, JSON.stringify(rig.skeleton)),
@@ -230,6 +231,7 @@ export async function createUploads(userId: string, input: UploadInput, isAdmin 
       name: rig.name,
       category: input.category,
       saveTags: isAdmin,
+      ...(isAdmin && { rename: { atlas: rig.atlas, pages: rig.pages, skeleton: rig.skeleton, files: rows[i]!.files } }),
       skeleton: rig.skeleton,
       animations: rig.meta.animations.map((a) => a.name),
       pages: rig.pages.map((p) => p.data),
