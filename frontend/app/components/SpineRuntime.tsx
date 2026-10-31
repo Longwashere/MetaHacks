@@ -9,7 +9,54 @@ import { DEFAULT_TWEAKS, type SpineTweakBinding } from "~/lib/spine-tweaks";
 import type { SpineAssetFiles } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
-export type SpineRuntimeStatus = "idle" | "loading" | "ready" | "error";
+/** "still": the player isn't running, and a frame captured earlier stands in for it. */
+export type SpineRuntimeStatus = "idle" | "loading" | "ready" | "still" | "error";
+
+/**
+ * Browsers keep about 16 WebGL contexts per page and silently kill the oldest past that, leaving
+ * a blank canvas. Players beyond this cap wait for a slot (showing their still, if they have one).
+ * The cap uses the whole budget (4 rows of 4 cards); a player whose context is still killed falls
+ * back to its still.
+ */
+const MAX_LIVE_PLAYERS = 16;
+let livePlayers = 0;
+const waitingPlayers: Array<() => void> = [];
+
+/** True once this component holds one of the live player slots; asks for one while `wanted`. */
+function useLiveSlot(wanted: boolean) {
+  const [granted, setGranted] = useState(false);
+  useEffect(() => {
+    if (!wanted) return;
+    let held = false;
+    const grant = () => {
+      held = true;
+      livePlayers++;
+      setGranted(true);
+    };
+    if (livePlayers < MAX_LIVE_PLAYERS) grant();
+    else waitingPlayers.push(grant);
+    return () => {
+      if (held) {
+        livePlayers--;
+        waitingPlayers.shift()?.();
+      } else {
+        const i = waitingPlayers.indexOf(grant);
+        if (i >= 0) waitingPlayers.splice(i, 1);
+      }
+      setGranted(false);
+    };
+  }, [wanted]);
+  return granted;
+}
+
+/** A captured frame per rig (and tint), shown while its player isn't running. Lives for the session. */
+const stills = new Map<string, string>();
+/** Milliseconds after the player is ready before capturing, so the viewport transition has settled. */
+const STILL_DELAY_MS = 500;
+
+function stillKeyOf(files: SpineAssetFiles, tint: string | null) {
+  return `${files.skeletonUrl}|${files.atlasUrl}|${tint ?? ""}`;
+}
 
 /** Animation time shared between two players so they pose in step (the compare slider). */
 export interface SpineClock {
@@ -109,22 +156,33 @@ export function SpineRuntime({
     hulls: false,
   });
   // Lets the (async) callbacks see the latest props without re-creating the player.
-  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, sync });
+  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, pageUrls, sync });
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
-  const inView = useInView(containerRef);
+  // Visible only, no margin: slots are scarce, and stills cover cards scrolling in.
+  const inView = useInView(containerRef, "0px");
+  // The browser dropped this player's context; stay on the still until it scrolls out and back.
+  const [lost, setLost] = useState(false);
+  const live = useLiveSlot(inView && !lost);
+  const still = stills.get(stillKeyOf(files, tint));
+  const shownStatus = status !== "ready" && status !== "error" && still ? "still" : status;
+  const readyAt = useRef(0);
 
   useEffect(() => {
-    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, sync };
+    if (!inView) setLost(false);
+  }, [inView]);
+
+  useEffect(() => {
+    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, pageUrls, sync };
   });
 
   useEffect(() => {
-    onStatusChange?.(status);
-  }, [status, onStatusChange]);
+    onStatusChange?.(shownStatus);
+  }, [shownStatus, onStatusChange]);
 
   // Create / dispose the player.
   useEffect(() => {
     const container = containerRef.current;
-    if (!inView || !container) return;
+    if (!live || !container) return;
     let cancelled = false;
     setStatus("loading");
 
@@ -184,6 +242,19 @@ export function SpineRuntime({
           }
         },
         draw: (player) => {
+          // The frame was just rendered, so the drawing buffer can be read without preserving it.
+          // Capture only the plain look: no debug drawing, part edits or swapped pages.
+          const { hideSkin, showLabels, tweaks, pageUrls, tint } = latest.current;
+          const plain = !hideSkin && !showLabels && !tweaks && !pageUrls && !debugRef.current.bones;
+          const key = stillKeyOf(files, tint);
+          if (plain && readyAt.current && !stills.has(key) && performance.now() - readyAt.current > STILL_DELAY_MS) {
+            try {
+              stills.set(key, player.canvas!.toDataURL("image/webp", 0.85));
+            } catch {
+              // A tainted canvas can't be read; keep going without a still.
+            }
+          }
+
           const overlay = overlayCanvasRef.current;
           if (!overlay) return;
           const ctx = overlay.getContext("2d");
@@ -348,6 +419,7 @@ export function SpineRuntime({
             },
           });
 
+          readyAt.current = performance.now();
           setStatus("ready");
         },
         error: (_player, message) => {
@@ -356,10 +428,14 @@ export function SpineRuntime({
           setStatus("error");
         },
       });
+      container.querySelector("canvas")?.addEventListener("webglcontextlost", () => {
+        if (!cancelled) setLost(true);
+      });
     });
 
     return () => {
       cancelled = true;
+      readyAt.current = 0;
       // Free the GPU context immediately rather than waiting for GC.
       const canvas = container.querySelector("canvas");
       const gl = canvas?.getContext("webgl2") ?? canvas?.getContext("webgl");
@@ -370,7 +446,7 @@ export function SpineRuntime({
       controllerRef.current = null;
       setStatus("idle");
     };
-  }, [inView, files.skeletonUrl, files.atlasUrl, files.skin, files.premultipliedAlpha]);
+  }, [live, files.skeletonUrl, files.atlasUrl, files.skin, files.premultipliedAlpha]);
 
   // Swap page images in place. Every remix version keeps the atlas's regions, so only the
   // textures change; re-creating the player would flash and reset the animation.
@@ -479,10 +555,11 @@ export function SpineRuntime({
         picking && "cursor-crosshair",
         // The player injects its own DOM here; make it fill the frame and drop its default background.
         "[&_.spine-player]:size-full [&_.spine-player]:bg-transparent!",
-        status === "ready" ? "opacity-100" : "opacity-0",
+        shownStatus === "ready" || shownStatus === "still" ? "opacity-100" : "opacity-0",
         className,
       )}
     >
+      {shownStatus === "still" && <img src={still} alt="" className="absolute inset-0 size-full object-contain" />}
       <canvas
         ref={overlayCanvasRef}
         aria-hidden

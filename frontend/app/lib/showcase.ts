@@ -480,9 +480,9 @@ export const SHOWCASE_RIGS: ShowcaseRig[] = [
         "tint": null
       },
       {
-        "id": "glacial-tide-elemental-de252106",
-        "name": "Glacial Tide Elemental",
-        "prompt": "test this out",
+        "id": "festering-ink-ghoul-c118211e",
+        "name": "Festering Ink Ghoul",
+        "prompt": "Comic book illustration of the character converted to a rotting ghoul, pale gangrenous olive-green skin with necrotic yellow undertones, stained purplish torn garments. Rendering features dense black ink crosshatching over sunken cheekbones, fine directional crosshatch shading across decayed anatomy, rough dry-brush line textures along the edges, colored with vivid murky watercolor washes and comic flats, full color, high contrast --no monochrome, black and white, grayscale, smooth 3d render",
         "animations": [
           {
             "loop": true,
@@ -517,9 +517,9 @@ export const SHOWCASE_RIGS: ShowcaseRig[] = [
         ],
         "files": {
           "skeletonUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/spine/water-elemental/WaterElemental.json",
-          "atlasUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-30T03-18-33-346Z_job_de252106/remix.atlas",
+          "atlasUrl": "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T03-38-58-502Z_job_c118211e/remix.atlas",
           "textureUrls": [
-            "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-30T03-18-33-346Z_job_de252106/WaterElemental.png"
+            "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes/2026-10-31T03-38-58-502Z_job_c118211e/WaterElemental.png"
           ],
           "premultipliedAlpha": false,
           "skin": null

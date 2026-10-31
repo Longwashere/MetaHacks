@@ -701,7 +701,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
               <Link to="/library?tab=remixes">View all</Link>
             </Button>
           </div>
-          <AssetGrid assets={recent} savedIds={savedIds} />
+          <AssetGrid assets={recent} savedIds={savedIds} className="lg:grid-cols-4" />
         </section>
       )}
     </div>

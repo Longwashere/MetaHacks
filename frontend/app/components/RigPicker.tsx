@@ -16,7 +16,7 @@ interface RigPickerProps {
 /** Grid of selectable rigs for the remix flow. */
 export function RigPicker({ rigs, selectHref, className }: RigPickerProps) {
   return (
-    <ul className={cn("grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5", className)}>
+    <ul className={cn("grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4", className)}>
       {rigs.map((rig) => (
         <li key={rig.id}>
           <Link

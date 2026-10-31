@@ -196,7 +196,7 @@ export default function Explore({ loaderData }: Route.ComponentProps) {
       </p>
 
       {assets.length > 0 ? (
-        <AssetGrid assets={assets} savedIds={savedIds} className={cn("transition-opacity", isLoading && "opacity-60")} />
+        <AssetGrid assets={assets} savedIds={savedIds} className={cn("lg:grid-cols-4 transition-opacity", isLoading && "opacity-60")} />
       ) : (
         <Empty className="border">
           <EmptyHeader>

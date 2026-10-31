@@ -124,7 +124,7 @@ export function SpinePreview({
               }
             />
           )}
-          {status !== "ready" && <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />}
+          {status !== "ready" && status !== "still" && <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />}
         </>
       ) : (
         <SpinePlaceholder
