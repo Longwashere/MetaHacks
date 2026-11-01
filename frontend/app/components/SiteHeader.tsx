@@ -14,6 +14,7 @@ import {
 import { cn } from "~/lib/utils";
 
 const NAV = [
+  { to: "/showcase", label: "Showcase" },
   { to: "/explore", label: "Explore" },
   { to: "/remix", label: "Remix" },
   { to: "/library", label: "My Library" },

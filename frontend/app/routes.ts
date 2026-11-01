@@ -8,6 +8,8 @@ import {
 export default [
   layout("routes/app-layout.tsx", [
     index("routes/home.tsx"),
+    route("showcase", "routes/showcase.tsx"),
+    route("about", "routes/about.ts"),
     route("remix", "routes/remix.tsx"),
     // /explore and /explore/character, /explore/effect, … (category landing pages)
     route("explore/:category?", "routes/explore.tsx"),
