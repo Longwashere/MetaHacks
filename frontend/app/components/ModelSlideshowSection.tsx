@@ -12,10 +12,10 @@ import {
   Sparkles,
   Wand2,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router";
 import { CompareDivider, STAGE_GRID } from "~/components/SpinePreview";
-import { SpineRuntime } from "~/components/SpineRuntime";
+import { type SpineClock, SpineRuntime } from "~/components/SpineRuntime";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -35,17 +35,20 @@ interface SingleModelSlideshowProps {
 export function SingleModelSlideshow({ model, className }: SingleModelSlideshowProps) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [selectedAnimation, setSelectedAnimation] = useState(model.defaultAnimation);
-  const [compareSplit, setCompareSplit] = useState(100); // 100 = full remix, 0 = full original
+  const [compareSplit, setCompareSplit] = useState(0); // 0 = full remix, slider starts on the left
   const [isPlaying, setIsPlaying] = useState(true);
+  const clock = useRef<SpineClock>({ trackTime: 0, reverse: false, at: 0 });
 
   const slide = model.slides[currentSlideIndex] ?? model.slides[0];
   const originalSlide = model.slides[0];
 
   const handlePrev = () => {
+    setCompareSplit(0);
     setCurrentSlideIndex((prev) => (prev > 0 ? prev - 1 : model.slides.length - 1));
   };
 
   const handleNext = () => {
+    setCompareSplit(0);
     setCurrentSlideIndex((prev) => (prev < model.slides.length - 1 ? prev + 1 : 0));
   };
 
@@ -61,10 +64,10 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
     <Card className={cn("overflow-hidden border bg-card shadow-md", className)}>
       <div className="grid lg:grid-cols-12">
         {/* Left Side: Spine 2D Canvas Player with Interactive Compare Wipe */}
-        <div className="relative aspect-square bg-muted/30 lg:col-span-7">
-          <div className={cn("relative size-full overflow-hidden", STAGE_GRID)}>
+        <div className="relative aspect-square select-none bg-muted/30 lg:col-span-7">
+          <div className={cn("relative size-full select-none overflow-hidden", STAGE_GRID)}>
             {/* Base Layer: Current Remixed Look */}
-            <div className="size-full">
+            <div className="size-full select-none">
               <SpineRuntime
                 files={originalSlide.files}
                 animation={selectedAnimation}
@@ -74,26 +77,30 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
                 showBones={false}
                 tint={null}
                 pageUrls={pageUrls}
+                sync={!slide.isOriginal ? { clock: clock.current, lead: true } : undefined}
                 className="size-full"
               />
             </div>
 
             {/* Compare Wipe Layer: Shows Original on the left of divider */}
-            {!slide.isOriginal && compareSplit < 100 && (
+            {!slide.isOriginal && (
               <div
-                className="pointer-events-none absolute inset-0 overflow-hidden"
+                className="pointer-events-none absolute inset-0 select-none overflow-hidden bg-card"
                 style={{ clipPath: `inset(0 ${100 - compareSplit}% 0 0)` }}
               >
-                <SpineRuntime
-                  files={originalSlide.files}
-                  animation={selectedAnimation}
-                  loop
-                  playing={isPlaying}
-                  speed={1}
-                  showBones={false}
-                  tint={null}
-                  className="size-full"
-                />
+                <div className={cn("absolute inset-0 select-none", STAGE_GRID)}>
+                  <SpineRuntime
+                    files={originalSlide.files}
+                    animation={selectedAnimation}
+                    loop
+                    playing={isPlaying}
+                    speed={1}
+                    showBones={false}
+                    tint={null}
+                    sync={{ clock: clock.current, lead: false }}
+                    className="size-full"
+                  />
+                </div>
               </div>
             )}
 
@@ -104,6 +111,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
                 onSplitChange={setCompareSplit}
                 leftLabel="Original"
                 rightLabel={slide.name}
+                labelClassName="bottom-14"
               />
             )}
 
@@ -130,11 +138,11 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
             </div>
 
             {/* Bottom Floating Navigation Arrows */}
-            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+            <div className="z-30 absolute bottom-3 left-3 right-3 flex items-center justify-between">
               <Button
                 variant="secondary"
                 size="icon"
-                className="size-8 rounded-full bg-background/90 shadow-md backdrop-blur hover:bg-background"
+                className="size-8 rounded-full bg-background/90 shadow-md backdrop-blur hover:bg-background pointer-events-auto"
                 onClick={handlePrev}
                 aria-label="Previous slide"
               >
@@ -146,7 +154,10 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
                 {model.slides.map((s, idx) => (
                   <button
                     key={s.id}
-                    onClick={() => setCurrentSlideIndex(idx)}
+                    onClick={() => {
+                      setCompareSplit(0);
+                      setCurrentSlideIndex(idx);
+                    }}
                     className={cn(
                       "size-2 rounded-full transition-all",
                       idx === currentSlideIndex
@@ -161,7 +172,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
               <Button
                 variant="secondary"
                 size="icon"
-                className="size-8 rounded-full bg-background/90 shadow-md backdrop-blur hover:bg-background"
+                className="size-8 rounded-full bg-background/90 shadow-md backdrop-blur hover:bg-background pointer-events-auto"
                 onClick={handleNext}
                 aria-label="Next slide"
               >
@@ -253,12 +264,12 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCompareSplit(compareSplit === 100 ? 50 : 100)}
+              onClick={() => setCompareSplit(compareSplit === 0 ? 50 : 0)}
               disabled={slide.isOriginal}
               className="text-xs"
             >
               <Layers className="size-3.5 mr-1" />
-              {compareSplit === 100 ? "Compare with Original" : "Reset Wipe"}
+              {compareSplit === 0 ? "Compare with Original" : "Reset Wipe"}
             </Button>
 
             <Button size="sm" asChild className="gap-1.5 text-xs">

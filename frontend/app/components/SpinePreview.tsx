@@ -200,10 +200,12 @@ interface CompareDividerProps {
   onSplitChange: (split: number) => void;
   leftLabel: string;
   rightLabel: string;
+  /** Optional custom Tailwind positioning for labels (defaults to "bottom-3"). */
+  labelClassName?: string;
 }
 
 /** The draggable divider and side labels of a before/after stage. Fills its positioned parent. */
-export function CompareDivider({ split, onSplitChange, leftLabel, rightLabel }: CompareDividerProps) {
+export function CompareDivider({ split, onSplitChange, leftLabel, rightLabel, labelClassName }: CompareDividerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const setSplit = (next: number) => onSplitChange(Math.min(100, Math.max(0, next)));
 
@@ -218,7 +220,10 @@ export function CompareDivider({ split, onSplitChange, leftLabel, rightLabel }: 
     e.preventDefault();
     setSplit(next);
   };
-  const label = "pointer-events-none select-none absolute bottom-3 max-w-[45%] truncate rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs transition-opacity duration-200";
+  const label = cn(
+    "pointer-events-none select-none absolute max-w-[45%] truncate rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs transition-opacity duration-200",
+    labelClassName ?? "bottom-3",
+  );
 
   return (
     <div ref={rootRef} className="pointer-events-none absolute inset-0 z-20 select-none">
