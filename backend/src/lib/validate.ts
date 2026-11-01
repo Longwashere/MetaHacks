@@ -18,7 +18,7 @@ export function parseRemixInput(body: unknown): { input: RemixInput } | { errors
 
   if (!baseAssetId || baseAssetId.length > 200) errors.base = "Choose a rig to remix.";
   if (prompt.length < 5) errors.prompt = "Describe the new look in at least 5 characters, or add a reference image.";
-  else if (prompt.length > 500) errors.prompt = "Keep it under 500 characters.";
+  else if (prompt.length > 1000) errors.prompt = "Keep it under 1000 characters.";
   if (!isStyle(style)) errors.style = "Choose a style.";
   if (typeof strength !== "number" || !Number.isFinite(strength) || strength < 0 || strength > 1) {
     errors.strength = "Strength must be between 0 and 1.";

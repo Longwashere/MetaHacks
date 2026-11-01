@@ -220,7 +220,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   // With a reference image the prompt is optional; the backend fills in a default.
   if (prompt.length < 5 && !(referenceImage && prompt.length === 0)) {
     errors.prompt = "Describe the new look in at least 5 characters, or add a reference image.";
-  } else if (prompt.length > 500) errors.prompt = "Keep it under 500 characters.";
+  } else if (prompt.length > 1000) errors.prompt = "Keep it under 1000 characters.";
   if (referenceImage && !REFERENCE_DATA_URL.test(referenceImage)) errors.referenceImage = "The reference must be a JPEG, PNG or WebP image.";
   else if (referenceImage && referenceImage.length > MAX_REFERENCE_CHARS) errors.referenceImage = "The reference image is too large.";
   if (referenceImage && apiVersion === "v1") errors.referenceImage = "Reference images need the v2 remix API.";
@@ -330,6 +330,46 @@ const EXAMPLE_PROMPTS: { label: string; prompt?: string }[] = [
     label: "Cyberpunk neon trims and chrome plating",
     prompt:
       "[Subject] in the visual style of Studio Trigger Cyberpunk: Edgerunners, modern Japanese anime aesthetic, harsh graphic cel shading, bold angular line art, ink contours, high-contrast neon palette with acid yellow, hot magenta, electric cyan, and deep shadows, retro-futuristic Night City cyberware, chrome augments, exposed cabling, glowing optical implants, holographic overlays, dramatic neon rim lighting, cinematic anime keyframe",
+  },
+  {
+    label: "Vampire noble — gothic velvet, ashen skin",
+    prompt:
+      "Victorian gothic horror illustration of the character converted to a vampire aristocrat, ashen blue-grey skin with faint violet veins, sunken crimson eyes, elongated fangs, high-collared blood-red velvet coat with tarnished silver filigree and black lace cuffs. Rendering features fine engraved etching lines, stippled mezzotint shadows pooling in the eye sockets, sharp pen-and-ink contours, glazed with rich oxblood, plum and candlelit amber watercolor washes, full color, dramatic chiaroscuro --no monochrome, black and white, grayscale, cute, chibi, smooth 3d render",
+  },
+  {
+    label: "Day of the Dead calavera — painted bones, marigolds",
+    prompt:
+      "Mexican folk art illustration of the character converted to a Día de Muertos calavera, bone-white skeletal face painted with ornate sugar-skull patterns, marigold flowers and papel picado ribbons woven into festive charro garments. Rendering features bold flat shapes, thick confident black outlines, hand-painted alebrije dot and stripe ornamentation across the bones, saturated hot pink, marigold orange, turquoise and cobalt flats, subtle linocut texture, full color, high contrast --no monochrome, black and white, grayscale, gore, smooth 3d render",
+  },
+  {
+    label: "Clockwork automaton — brass gears, steam vents",
+    prompt:
+      "Steampunk technical illustration of the character converted to a clockwork automaton, riveted brass and oxidized copper plating, exposed interlocking gears at the joints, glass pressure gauges, leaking steam vents, glowing amber furnace core in the chest. Rendering features precise Victorian engraving linework, fine hatched shading on curved metal, ink blueprint annotation marks, colored with warm sepia, verdigris green and polished gold watercolor washes on aged parchment, full color, crisp edges --no monochrome, black and white, grayscale, modern sci-fi, smooth 3d render",
+  },
+  {
+    label: "Frost wraith — ice-cracked skin, spectral glow",
+    prompt:
+      "Dark fantasy illustration of the character converted to a frost wraith, translucent pale cyan skin cracked with glowing ice fissures, frozen tattered robes trailing into drifting snow, jagged icicle crown, hollow eyes emitting cold blue light. Rendering features sharp angular ink contours, scratchy drybrush frost textures, fine crosshatching in the shadow folds, colored with glacial teal, indigo and bone-white gouache, luminous rim light, full color, high contrast --no monochrome, black and white, grayscale, warm tones, smooth 3d render",
+  },
+  {
+    label: "Werewolf — pulp horror paperback cover",
+    prompt:
+      "1970s pulp horror paperback cover painting of the character converted to a snarling werewolf, coarse matted grey-brown fur sprouting through shredded clothing, elongated snout, bared yellowed fangs, glowing amber eyes, clawed hands. Rendering features loose expressive gouache brushwork, visible bristle strokes in the fur, bold black ink shadow shapes, lurid blood-orange moonlight against deep violet night, slight print grain and halftone wear, full color, high contrast --no monochrome, black and white, grayscale, cute, smooth 3d render",
+  },
+  {
+    label: "Infernal demon — lava cracks, obsidian horns",
+    prompt:
+      "Dark fantasy comic illustration of the character converted to an infernal demon, charred obsidian skin split by glowing molten lava cracks, curled obsidian horns, smoldering ember eyes, scorched spiked armor plates and tattered burning cloth. Rendering features heavy black ink spotting, aggressive directional crosshatching, ragged dry-brush edges, colored with searing magma orange, sulfur yellow and ash-black flats with glowing airbrushed highlights, full color, high contrast --no monochrome, black and white, grayscale, cartoon, smooth 3d render",
+  },
+  {
+    label: "Pumpkin-head scarecrow — burlap, candlelit grin",
+    prompt:
+      "Halloween storybook illustration of the character converted to a haunted scarecrow, carved jack-o'-lantern head with a flickering candlelit grin, stitched burlap skin, straw bursting from patched seams, ragged plaid shirt and crooked witch hat, crows perched on the shoulders. Rendering features scratchy pen-and-ink linework, cross-hatched shading in the folds, rough woodcut-like textures, colored with autumn pumpkin orange, mossy green, rust and midnight purple watercolor washes, full color, high contrast --no monochrome, black and white, grayscale, gore, smooth 3d render",
+  },
+  {
+    label: "Celestial seraph — Art Nouveau gold leaf",
+    prompt:
+      "Art Nouveau illustration of the character converted to a celestial seraph, luminous pearl skin, flowing ivory robes with sweeping organic folds, layered feathered wings, ornate halo of radiating gold rings and stars. Rendering features elegant whiplash contour lines of varying weight, decorative flat color fields, intricate gilded ornament and mosaic patterning, colored with soft gold leaf, sky blue, rose and cream, gentle radiant glow, full color, crisp outlines --no monochrome, black and white, grayscale, dark, gore, smooth 3d render",
   },
 ];
 
@@ -1366,7 +1406,7 @@ function RemixForm({
           id="prompt"
           name="prompt"
           rows={4}
-          maxLength={500}
+          maxLength={1000}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={`What should ${base.name} look like?`}
