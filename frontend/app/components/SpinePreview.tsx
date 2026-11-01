@@ -77,7 +77,7 @@ export function SpinePreview({
       role="img"
       aria-label={`${asset.category} preview playing ${name}`}
       className={cn(
-        "relative flex aspect-square items-center justify-center overflow-hidden",
+        "relative flex aspect-square select-none items-center justify-center overflow-hidden",
         STAGE_GRID,
         ACCENT_TEXT[asset.accent],
         className,
@@ -184,10 +184,10 @@ export const STAGE_GRID =
 function CompareLayer({ original, ready }: { original: ReactNode; ready: boolean }) {
   const [split, setSplit] = useState(50);
   return (
-    <div className={cn("pointer-events-none absolute inset-0 transition-opacity duration-300", ready ? "opacity-100" : "opacity-0")}>
+    <div className={cn("pointer-events-none absolute inset-0 select-none transition-opacity duration-300", ready ? "opacity-100" : "opacity-0")}>
       {/* The stage's grid, so the remix doesn't show through where the original is transparent. */}
-      <div className="absolute inset-0 bg-card" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
-        <div className={cn("absolute inset-0", STAGE_GRID)}>{original}</div>
+      <div className="absolute inset-0 select-none bg-card" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
+        <div className={cn("absolute inset-0 select-none", STAGE_GRID)}>{original}</div>
       </div>
       <CompareDivider split={split} onSplitChange={setSplit} leftLabel="Original" rightLabel="Remix" />
     </div>
@@ -218,14 +218,39 @@ export function CompareDivider({ split, onSplitChange, leftLabel, rightLabel }: 
     e.preventDefault();
     setSplit(next);
   };
-  const label = "absolute bottom-3 max-w-[45%] truncate rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs transition-opacity duration-200";
+  const label = "pointer-events-none select-none absolute bottom-3 max-w-[45%] truncate rounded-full border bg-background/85 px-2.5 py-0.5 text-[11px] font-medium text-foreground shadow-xs backdrop-blur-xs transition-opacity duration-200";
 
   return (
-    <div ref={rootRef} className="pointer-events-none absolute inset-0 z-20">
+    <div ref={rootRef} className="pointer-events-none absolute inset-0 z-20 select-none">
       {/* Each label shows only while its side is on screen. */}
       <span className={cn(label, "left-3", split > 2 ? "opacity-100" : "opacity-0")}>{leftLabel}</span>
       <span className={cn(label, "right-3", split < 98 ? "opacity-100" : "opacity-0")}>{rightLabel}</span>
-      <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_var(--color-border)]" style={{ left: `${split}%` }} />
+
+      {/* Draggable vertical divider strip with a generous 24px invisible hit target */}
+      <div
+        className="pointer-events-auto absolute inset-y-0 w-6 -translate-x-1/2 cursor-ew-resize touch-none select-none"
+        style={{ left: `${split}%` }}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          window.getSelection()?.removeAllRanges();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          moveTo(e);
+        }}
+        onPointerMove={(e) => {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.preventDefault();
+            moveTo(e);
+          }
+        }}
+        onPointerUp={(e) => {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        }}
+      >
+        <div className="mx-auto h-full w-0.5 bg-background shadow-[0_0_0_1px_var(--color-border)]" />
+      </div>
+
       {/* The handle stops short of the edges so it stays whole (and grabbable) when the divider rests there. */}
       <div className="absolute inset-y-0" style={{ left: `clamp(1.25rem, ${split}%, calc(100% - 1.25rem))` }}>
         <div
@@ -237,14 +262,25 @@ export function CompareDivider({ split, onSplitChange, leftLabel, rightLabel }: 
           aria-valuenow={Math.round(split)}
           aria-valuetext={`${Math.round(split)}% ${leftLabel}`}
           onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.getSelection()?.removeAllRanges();
             e.currentTarget.setPointerCapture(e.pointerId);
             moveTo(e);
           }}
           onPointerMove={(e) => {
-            if (e.currentTarget.hasPointerCapture(e.pointerId)) moveTo(e);
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+              e.preventDefault();
+              moveTo(e);
+            }
+          }}
+          onPointerUp={(e) => {
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            }
           }}
           onKeyDown={onKeyDown}
-          className="pointer-events-auto absolute top-1/2 left-1/2 flex size-8 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center rounded-full border bg-background text-foreground shadow-md focus-visible:outline-2 focus-visible:outline-ring"
+          className="pointer-events-auto absolute top-1/2 left-1/2 flex size-8 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none select-none items-center justify-center rounded-full border bg-background text-foreground shadow-md focus-visible:outline-2 focus-visible:outline-ring"
         >
           <ChevronsLeftRight className="size-4" />
         </div>

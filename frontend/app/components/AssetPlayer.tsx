@@ -84,7 +84,7 @@ export function AssetPlayer({
   const originalHasClip = compareWith?.animations.some((a) => a.name === current?.name) ?? false;
 
   return (
-    <div className={cn("flex flex-col overflow-hidden rounded-xl border bg-card", className)}>
+    <div className={cn("flex flex-col select-none overflow-hidden rounded-xl border bg-card", className)}>
       {/* View mode switcher tab bar & bone color controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-2.5">
         <Tabs

@@ -56,6 +56,7 @@ export function ZombieArenaPlayer() {
   const [activeClip, setActiveClip] = useState<"walk" | "attack" | "idle">("walk");
   const [enableClash, setEnableClash] = useState(true);
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
+  const [isAutoSweep, setIsAutoSweep] = useState(false);
 
   // Positions and velocities of each character
   const simStatesRef = useRef<Record<string, CharacterSimState>>({});
@@ -213,16 +214,23 @@ export function ZombieArenaPlayer() {
             nextFacing = states[s.targetCharId].x >= s.x ? 1 : -1;
           }
 
+          // Determine current slider divider position (smooth sine sweep when isAutoSweep is active)
+          let effectiveSliderVal = sliderVal;
+          if (isAutoSweep && isPlaying) {
+            effectiveSliderVal = Math.round(50 + 42 * Math.sin(currentTimeSec * 0.85));
+            setSliderVal(effectiveSliderVal);
+          }
+
           // Determine zombie state based on mode
           let nextZombie = s.isZombie;
           if (mode === "scanner") {
             // Characters right of the divider become zombie
-            nextZombie = nextX >= sliderVal;
+            nextZombie = nextX >= effectiveSliderVal;
           } else {
             // Global slider threshold
             const index = ZOMBIE_ARENA_CHARACTERS.findIndex((item) => item.id === c.id);
             const threshold = (index / (ZOMBIE_ARENA_CHARACTERS.length - 1)) * 100;
-            nextZombie = sliderVal > threshold;
+            nextZombie = effectiveSliderVal > threshold;
           }
 
           states[c.id] = {
@@ -245,9 +253,10 @@ export function ZombieArenaPlayer() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, speed, activeClip, mode, sliderVal, squad, enableClash]);
+  }, [isPlaying, speed, activeClip, mode, sliderVal, squad, enableClash, isAutoSweep]);
 
   const handleSliderChange = (vals: number[]) => {
+    setIsAutoSweep(false);
     const val = vals[0] ?? 50;
     setSliderVal(val);
 
@@ -277,6 +286,13 @@ export function ZombieArenaPlayer() {
   const selectedChar = ZOMBIE_ARENA_CHARACTERS.find((c) => c.id === selectedCharId);
   const selectedState = selectedChar ? simStatesRef.current[selectedChar.id] : null;
 
+  // Calculate real-time visual cohesion metrics for judges and demos
+  const zombieCount = filteredCharacters.filter(
+    (c) => simStatesRef.current[c.id]?.isZombie
+  ).length;
+  const totalCount = filteredCharacters.length || 1;
+  const cohesionPct = Math.round(14 + (zombieCount / totalCount) * 86);
+
   return (
     <div className="flex flex-col gap-6">
       {/* Top Banner / Explanation */}
@@ -293,7 +309,7 @@ export function ZombieArenaPlayer() {
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground">
-              14 distinct rigs walking & flying across the battlefield. When two characters crash into each other, they stop and duel! Drag the slider to transform their textures into one unified art direction!
+              14 distinct rigs walking & flying across the battlefield. When two characters crash into each other, they stop and duel! Drag the slider or use Auto-Sweep to transform their textures into one unified art direction!
             </p>
           </div>
         </div>
@@ -302,27 +318,51 @@ export function ZombieArenaPlayer() {
         <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0">
           <Button
             size="sm"
-            variant={sliderVal === 0 ? "default" : "outline"}
-            onClick={() => handleSliderChange([0])}
+            variant={sliderVal === 0 && !isAutoSweep ? "default" : "outline"}
+            onClick={() => {
+              setIsAutoSweep(false);
+              handleSliderChange([0]);
+            }}
             className="text-xs"
           >
             🎨 100% Diverse Base
           </Button>
           <Button
             size="sm"
-            variant={sliderVal === 50 && mode === "scanner" ? "default" : "outline"}
+            variant={isAutoSweep ? "default" : "outline"}
             onClick={() => {
+              setMode("scanner");
+              setIsAutoSweep(!isAutoSweep);
+            }}
+            className={cn(
+              "text-xs gap-1.5 transition-all",
+              isAutoSweep
+                ? "border-emerald-500 bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] hover:bg-emerald-500"
+                : "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+            )}
+          >
+            <Zap className={cn("size-3.5", isAutoSweep && "animate-pulse")} />
+            <span>{isAutoSweep ? "⚡ Auto-Sweep Active" : "⚡ Auto-Sweep Rift"}</span>
+          </Button>
+          <Button
+            size="sm"
+            variant={sliderVal === 50 && mode === "scanner" && !isAutoSweep ? "default" : "outline"}
+            onClick={() => {
+              setIsAutoSweep(false);
               setMode("scanner");
               handleSliderChange([50]);
             }}
             className="text-xs"
           >
-            ⚡ Split Scanner (50%)
+            Split Scanner (50%)
           </Button>
           <Button
             size="sm"
-            variant={sliderVal === 100 ? "default" : "outline"}
-            onClick={() => handleSliderChange([100])}
+            variant={sliderVal === 100 && !isAutoSweep ? "default" : "outline"}
+            onClick={() => {
+              setIsAutoSweep(false);
+              handleSliderChange([100]);
+            }}
             className="text-xs text-emerald-600 dark:text-emerald-400"
           >
             🧟 100% Rotting Ghoul Horde
@@ -446,6 +486,73 @@ export function ZombieArenaPlayer() {
           </div>
         </div>
 
+        {/* Style Cohesion HUD for Judges & Live Demos */}
+        <div className="border-b border-stone-800/80 bg-stone-950/95 px-4 py-2 backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-stone-400">
+                Visual Art Direction Cohesion:
+              </span>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "gap-1 font-mono text-xs font-semibold transition-all duration-300",
+                  cohesionPct >= 85
+                    ? "border-emerald-500/50 bg-emerald-950/40 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                    : cohesionPct <= 30
+                    ? "border-amber-500/40 bg-amber-950/30 text-amber-300"
+                    : "border-sky-500/40 bg-sky-950/30 text-sky-300"
+                )}
+              >
+                {cohesionPct >= 85 ? (
+                  <>
+                    <Sparkles className="size-3 text-emerald-400" />
+                    <span>100% UNIFIED GAME WORLD</span>
+                  </>
+                ) : cohesionPct <= 30 ? (
+                  <>
+                    <AlertTriangle className="size-3 text-amber-400" />
+                    <span>{cohesionPct}% INCOHERENT ASSET PACKS</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="size-3 text-sky-400" />
+                    <span>{cohesionPct}% ACTIVE STYLE RIFT</span>
+                  </>
+                )}
+              </Badge>
+            </div>
+
+            {/* Micro Breakdown of units */}
+            <div className="flex items-center gap-3 text-[11px] font-mono text-stone-400">
+              <span className="flex items-center gap-1.5">
+                <span className="size-1.5 rounded-full bg-sky-400" />
+                <span>Base Packs: {totalCount - zombieCount}</span>
+              </span>
+              <span className="text-stone-600">/</span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-1.5 rounded-full bg-emerald-400" />
+                <span className="font-medium text-emerald-400">Unified Ghouls: {zombieCount}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Micro Progress Bar */}
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-stone-900">
+            <div
+              className={cn(
+                "h-full transition-all duration-300",
+                cohesionPct >= 85
+                  ? "bg-gradient-to-r from-emerald-500 to-emerald-300 shadow-[0_0_8px_#10b981]"
+                  : cohesionPct <= 30
+                  ? "bg-gradient-to-r from-amber-600 to-amber-400"
+                  : "bg-gradient-to-r from-sky-500 via-emerald-500 to-emerald-400"
+              )}
+              style={{ width: `${cohesionPct}%` }}
+            />
+          </div>
+        </div>
+
         {/* Interactive Walking Battlefield Stage */}
         <div
           className="relative h-[620px] w-full select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-stone-900 via-stone-950 to-black sm:h-[720px]"
@@ -496,16 +603,35 @@ export function ZombieArenaPlayer() {
               style={{ left: `${sliderVal}%` }}
             >
               {/* Glowing vertical line */}
-              <div className="h-full w-[2px] bg-gradient-to-b from-sky-400 via-emerald-400 to-emerald-500 shadow-[0_0_15px_rgba(52,211,153,0.8)]" />
+              <div
+                className={cn(
+                  "h-full bg-gradient-to-b from-sky-400 via-emerald-400 to-emerald-500 transition-all duration-300",
+                  isAutoSweep
+                    ? "w-[3px] shadow-[0_0_24px_rgba(52,211,153,1)]"
+                    : "w-[2px] shadow-[0_0_15px_rgba(52,211,153,0.8)]"
+                )}
+              />
 
               {/* Top Handle Pill */}
-              <div className="absolute top-2 flex items-center gap-1 rounded-full border border-emerald-500/50 bg-stone-950 px-2.5 py-0.5 text-[10px] font-mono font-medium text-emerald-300 shadow-lg">
-                <ChevronsLeftRight className="size-3 text-emerald-400" />
-                <span>STYLE RIFT {sliderVal}%</span>
+              <div
+                className={cn(
+                  "absolute top-2 flex items-center gap-1.5 rounded-full border bg-stone-950 px-2.5 py-0.5 text-[10px] font-mono font-medium shadow-lg transition-colors",
+                  isAutoSweep
+                    ? "border-emerald-400 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                    : "border-emerald-500/50 text-emerald-300"
+                )}
+              >
+                <ChevronsLeftRight className={cn("size-3 text-emerald-400", isAutoSweep && "animate-pulse")} />
+                <span>STYLE RIFT {sliderVal}%{isAutoSweep ? " (AUTO-SWEEP)" : ""}</span>
               </div>
 
               {/* Bottom Particle Emitter Dot */}
-              <div className="absolute bottom-2 size-3 rounded-full border-2 border-emerald-400 bg-stone-950 shadow-[0_0_10px_#10b981]" />
+              <div
+                className={cn(
+                  "absolute bottom-2 size-3 rounded-full border-2 border-emerald-400 bg-stone-950 shadow-[0_0_10px_#10b981]",
+                  isAutoSweep && "animate-ping"
+                )}
+              />
             </div>
           )}
 
@@ -549,23 +675,31 @@ export function ZombieArenaPlayer() {
                   transform: "translate(-50%, -70%)",
                 }}
               >
-                {/* Minimal, Translucent Character Name Tag */}
-                <div className="pointer-events-none mb-1 flex items-center justify-center opacity-70 transition-opacity">
+                {/* Minimal, Translucent Character Name Tag with Style Indicator */}
+                <div className="pointer-events-none mb-1 flex items-center justify-center opacity-85 transition-opacity">
                   <div
                     className={cn(
-                      "flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-medium tracking-tight backdrop-blur-[2px] border transition-colors",
+                      "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-medium tracking-tight backdrop-blur-[2px] border transition-colors",
                       st.isZombie
-                        ? "border-emerald-500/20 bg-stone-950/30 text-emerald-300/85"
-                        : "border-sky-500/20 bg-stone-950/30 text-sky-200/85",
+                        ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-200"
+                        : "border-sky-500/25 bg-stone-950/40 text-stone-300",
                     )}
                   >
                     <span
                       className={cn(
                         "size-1 rounded-full",
-                        st.isZombie ? "bg-emerald-400/80" : "bg-sky-400/80",
+                        st.isZombie ? "bg-emerald-400" : "bg-sky-400/80",
                       )}
                     />
                     <span>{st.isZombie ? char.zombieName : char.baseName}</span>
+                    <span
+                      className={cn(
+                        "text-[8px] font-mono",
+                        st.isZombie ? "text-emerald-400 font-semibold" : "text-stone-400 opacity-60"
+                      )}
+                    >
+                      • {st.isZombie ? "Comic Ghoul" : char.baseStyle.split(" ")[0]}
+                    </span>
                   </div>
                 </div>
 
@@ -647,16 +781,18 @@ export function ZombieArenaPlayer() {
 
           <p className="text-center text-xs text-stone-400">
             {sliderVal === 0 ? (
-              <span className="text-sky-300">
-                Notice: 14 disparate rigs from different creators clashing in color, lighting, and style.
+              <span className="text-amber-300">
+                ⚠️ Mismatched Asset Packs: 14 distinct rigs from different creators clashing in lighting, color palettes, and art styles.
               </span>
             ) : sliderVal === 100 ? (
               <span className="text-emerald-400">
-                ✨ Transformed: All 14 characters share the exact same comic book cross-hatched rotting ghoul watercolor art direction!
+                ✨ Unified Game World: All 14 characters share the exact same comic book cross-hatched rotting ghoul watercolor art direction!
               </span>
             ) : (
               <span>
-                Move the slider left or right. As each character crosses the rift line, its texture atlas repaints on the GPU while keeping its walk cycle intact!
+                {isAutoSweep
+                  ? "⚡ Auto-Sweep active: Watch the rift line sweep across the battlefield and dynamically repaint rigs on the GPU in real time!"
+                  : "Move the slider or enable Auto-Sweep. As each character crosses the rift line, its texture atlas repaints on the GPU while keeping its walk cycle intact!"}
               </span>
             )}
           </p>

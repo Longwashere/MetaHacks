@@ -561,7 +561,7 @@ export function SpineRuntime({
       ref={containerRef}
       onClick={picking ? pickAt : undefined}
       className={cn(
-        "absolute inset-0 transition-opacity duration-300",
+        "absolute inset-0 select-none transition-opacity duration-300",
         picking && "cursor-crosshair",
         // The player injects its own DOM here; make it fill the frame and drop its default background.
         "[&_.spine-player]:size-full [&_.spine-player]:bg-transparent!",
