@@ -597,6 +597,7 @@ export function ZombieArenaPlayer() {
                       tint={null}
                       pageUrls={pageUrls}
                       className="size-full"
+                      lockViewport
                     />
                   </div>
                 </div>

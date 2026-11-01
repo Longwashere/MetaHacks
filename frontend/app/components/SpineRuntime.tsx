@@ -97,6 +97,8 @@ interface SpineRuntimeProps {
   sync?: SpineClockSync;
   onStatusChange?: (status: SpineRuntimeStatus) => void;
   className?: string;
+  /** When true, preserves the initial viewport bounds instead of recalculating camera fit when animation changes */
+  lockViewport?: boolean;
 }
 
 type DebugFlags = NonNullable<SpinePlayerConfig["debug"]>;
@@ -133,6 +135,7 @@ export function SpineRuntime({
   sync,
   onStatusChange,
   className,
+  lockViewport = false,
 }: SpineRuntimeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -156,7 +159,7 @@ export function SpineRuntime({
     hulls: false,
   });
   // Lets the (async) callbacks see the latest props without re-creating the player.
-  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, pageUrls, sync });
+  const latest = useRef({ animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, pageUrls, sync, lockViewport });
   const [status, setStatus] = useState<SpineRuntimeStatus>("idle");
   // Visible only, no margin: slots are scarce, and stills cover cards scrolling in.
   const inView = useInView(containerRef, "0px");
@@ -172,7 +175,7 @@ export function SpineRuntime({
   }, [inView]);
 
   useEffect(() => {
-    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, pageUrls, sync };
+    latest.current = { animation, loop, playing, speed, tint, hideSkin, boneColor, showLabels, tweaks, pageUrls, sync, lockViewport };
   });
 
   useEffect(() => {
@@ -489,9 +492,16 @@ export function SpineRuntime({
   useEffect(() => {
     const player = playerRef.current;
     if (status !== "ready" || !player?.skeleton?.data.findAnimation(animation)) return;
-    player.setAnimation(animation, loop);
+    if (lockViewport) {
+      const anim = player.skeleton.data.findAnimation(animation);
+      if (anim && player.animationState) {
+        player.animationState.setAnimationWith(0, anim, loop);
+      }
+    } else {
+      player.setAnimation(animation, loop);
+    }
     controllerRef.current?.onAnimationChanged();
-  }, [status, animation, loop]);
+  }, [status, animation, loop, lockViewport]);
 
   const holding = tweaks?.tweaks.scrub != null;
   useEffect(() => {
