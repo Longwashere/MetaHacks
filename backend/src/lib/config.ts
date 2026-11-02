@@ -125,6 +125,31 @@ export const CREDITS_PER_PAGE = { v1: 1, v2: 1, v3: 2 } as const;
 /** Credits a part fix costs, whatever the number of parts. */
 export const PART_FIX_CREDITS = 1;
 
+/**
+ * USD of Muse spend one credit stands for, for metered jobs (generated animations and edits). A
+ * v3 remix spends about $0.026 (Spark plus two images) for 2 credits, so a credit is about $0.013;
+ * Pro sells 200 credits for $20 ($0.10 each).
+ */
+export const CREDIT_USD = (() => {
+  const value = Number(process.env.CREDIT_USD || NaN);
+  return Number.isFinite(value) && value > 0 ? value : 0.0125;
+})();
+
+/** The fewest credits a metered job costs; also what it reserves while it runs. */
+export const MIN_METERED_CREDITS = 1;
+
+/**
+ * Meta Model API prices in USD: per million tokens for chat models, per image for Muse Image.
+ * From third-party listings (Meta's rate sheet wasn't reachable); the contributor rate is the
+ * least confirmed. Unknown models are priced as standard Spark, so they never come out free.
+ */
+export const MUSE_RATES: Record<string, { inPerM: number; outPerM: number; perCall?: number }> = {
+  "muse-spark-1.3": { inPerM: 1.25, outPerM: 4.25 },
+  "muse-spark-1.3-contributor": { inPerM: 0.1, outPerM: 0.2 },
+  "muse-image-1.0": { inPerM: 0, outPerM: 0, perCall: 0.01 },
+};
+export const DEFAULT_MUSE_RATE = MUSE_RATES["muse-spark-1.3"];
+
 /** Distinct assets each plan can download per calendar month (UTC); null is unlimited. Admins are unlimited too. */
 export const DOWNLOAD_LIMITS: Record<"free" | "pro", number | null> = {
   free: count("FREE_MONTHLY_DOWNLOADS", 3),

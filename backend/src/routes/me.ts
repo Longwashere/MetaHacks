@@ -3,6 +3,7 @@ import express, { Router } from "express";
 import { deleteAsset, getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
+import { runAnimationJob } from "../lib/animation-jobs.js";
 import { AnimateError, deleteAnimation, editAnimation, renameAnimation, generateAnimation, parseAnimateInput } from "../lib/animate.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
@@ -292,9 +293,10 @@ meRouter.post("/remixes/:assetId/auto-tweak", express.json({ limit: MAX_AUTO_TWE
 });
 
 /**
- * POST /me/remixes/:assetId/animations  body = { prompt, durationSec, loop, skeleton? } → 201 AnimateResult
- * One Muse Spark call writes a new animation's keyframes; it's saved into the remix's skeleton.
- * `skeleton` is only needed when the stored skeleton is a binary .skel. Doesn't use the allowance.
+ * POST /me/remixes/:assetId/animations  body = { prompt, durationSec, loop, skeleton? } → 201 AnimateResult & { credits }
+ * Two Muse Spark calls write a new animation's keyframes; it's saved into the remix's skeleton.
+ * `skeleton` is only needed when the stored skeleton is a binary .skel. Metered: charged credits
+ * by token use (see animation-jobs.ts); 402 when the user has less than the minimum left.
  */
 meRouter.post("/remixes/:assetId/animations", express.json({ limit: MAX_SKELETON_BYTES }), async (req, res) => {
   const input = parseAnimateInput(req.body);
@@ -308,7 +310,8 @@ meRouter.post("/remixes/:assetId/animations", express.json({ limit: MAX_SKELETON
     return;
   }
   try {
-    res.status(201).json(await generateAnimation(asset, input, AbortSignal.timeout(MUSE_TIMEOUT_MS * 2)));
+    const signal = AbortSignal.timeout(MUSE_TIMEOUT_MS * 2);
+    res.status(201).json(await runAnimationJob(userIdOf(res), isAdminOf(res), asset.id, "new", null, () => generateAnimation(asset, input, signal)));
   } catch (error) {
     if (error instanceof AnimateError) {
       res.status(error.status).json({ error: error.message });
@@ -320,9 +323,9 @@ meRouter.post("/remixes/:assetId/animations", express.json({ limit: MAX_SKELETON
 });
 
 /**
- * POST /me/remixes/:assetId/animations/:name/edit  body = { prompt, durationSec, loop, images?, keepOriginal? } → 201 AnimateResult
+ * POST /me/remixes/:assetId/animations/:name/edit  body = { prompt, durationSec, loop, images?, keepOriginal? } → 201 AnimateResult & { credits }
  * Muse reworks one of the remix's generated animations from the edit request. It replaces the
- * original under its name unless `keepOriginal`, which adds it beside it. Doesn't use the allowance.
+ * original under its name unless `keepOriginal`, which adds it beside it. Metered like a new one.
  */
 meRouter.post("/remixes/:assetId/animations/:name/edit", express.json({ limit: MAX_SKELETON_BYTES }), async (req, res) => {
   const input = parseAnimateInput(req.body);
@@ -338,7 +341,8 @@ meRouter.post("/remixes/:assetId/animations/:name/edit", express.json({ limit: M
     return;
   }
   try {
-    res.status(201).json(await editAnimation(asset, name, input, keepOriginal, AbortSignal.timeout(MUSE_TIMEOUT_MS * 2)));
+    const signal = AbortSignal.timeout(MUSE_TIMEOUT_MS * 2);
+    res.status(201).json(await runAnimationJob(userIdOf(res), isAdminOf(res), asset.id, "edit", name, () => editAnimation(asset, name, input, keepOriginal, signal)));
   } catch (error) {
     if (error instanceof AnimateError) {
       res.status(error.status).json({ error: error.message });

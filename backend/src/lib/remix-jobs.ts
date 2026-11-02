@@ -126,7 +126,7 @@ export async function startRemix(
   return { ok: true, job };
 }
 
-/** Why the user can't spend `credits` on a remix or part fix this month, or null if they can. Admins have no limit. */
+/** Why the user can't spend `credits` on a remix, part fix or animation this month, or null if they can. Admins have no limit. */
 export async function allowanceError(userId: string, isAdmin: boolean, credits: number): Promise<string | null> {
   if (isAdmin) return null;
   const [profile, used] = await Promise.all([getProfile(userId), creditsUsed(userId)]);

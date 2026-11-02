@@ -160,7 +160,8 @@ export default function Account({ loaderData, actionData }: Route.ComponentProps
               <Progress value={usage.limit > 0 ? Math.min((usage.used / usage.limit) * 100, 100) : 100} aria-label="Credits used this month" />
               <p className="text-xs text-muted-foreground">
                 A remix costs {account.credits.perPage.v2} credit per page with v2 and {account.credits.perPage.v3} with v3; a part fix costs{" "}
-                {account.credits.partFix}. Resets {formatDate(usage.resetsAt)}. Failed jobs are free.
+                {account.credits.partFix}; an animation or edit costs what Muse uses, usually {account.credits.animation.min}. Resets{" "}
+                {formatDate(usage.resetsAt)}. Failed jobs are free.
               </p>
             </>
           )}
@@ -215,7 +216,7 @@ function CreditHistory({ jobs }: { jobs: CreditHistoryEntry[] }) {
     <Card>
       <CardHeader>
         <CardTitle>Credit history</CardTitle>
-        <CardDescription>Every remix and part fix this month. Failed jobs are refunded.</CardDescription>
+        <CardDescription>Every remix, part fix and animation this month. Failed jobs are refunded.</CardDescription>
       </CardHeader>
       <CardContent>
         {jobs.length === 0 ? (
@@ -248,7 +249,9 @@ function CreditHistory({ jobs }: { jobs: CreditHistoryEntry[] }) {
                     <p className="text-xs text-muted-foreground">
                       {job.kind === "part-fix"
                         ? "Part fix"
-                        : `${job.apiVersion} remix · ${job.pages} page${job.pages === 1 ? "" : "s"}`}
+                        : job.kind === "animation" || job.kind === "animation-edit"
+                          ? `${job.kind === "animation" ? "New animation" : "Animation edit"}${job.animation ? ` · ${job.animation}` : ""}`
+                          : `${job.apiVersion} remix · ${job.pages} page${job.pages === 1 ? "" : "s"}`}
                     </p>
                   </TableCell>
                   <TableCell className={cn("text-right tabular-nums", job.status === "failed" && "text-muted-foreground line-through")}>

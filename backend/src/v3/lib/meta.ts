@@ -833,6 +833,12 @@ export function totalUsage(calls: ModelCall[]) {
 /** Reads a Meta API response body and records its token use for the current job. */
 async function readJson(res: { json(): Promise<unknown> }, call: string, model: string): Promise<unknown> {
   const body: unknown = await res.json();
+  recordUsage(body, call, model);
+  return body;
+}
+
+/** Records a parsed Meta API response's token use for the current job (see recordModelCalls). */
+export function recordUsage(body: unknown, call: string, model: string): void {
   const num = (path: string[]) => {
     const v = getPath(body, ["usage", ...path]);
     return typeof v === "number" && Number.isFinite(v) ? v : 0;
@@ -850,7 +856,6 @@ async function readJson(res: { json(): Promise<unknown> }, call: string, model: 
   };
   currentModelCalls()?.push(entry);
   console.log(`[meta] ${call} (${model}) tokens: ${entry.reported ? `${entry.promptTokens} in, ${entry.completionTokens} out (${entry.reasoningTokens} reasoning)` : "not reported"}`);
-  return body;
 }
 
 /** A part the tweak reviewer may change, as numbered on the images. */

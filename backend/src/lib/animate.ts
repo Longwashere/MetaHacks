@@ -9,6 +9,7 @@ import { rigHashOf } from "./fingerprint.js";
 import * as spine from "@esotericsoftware/spine-core";
 import { FX_PREFIX, applyFx, coreBones, describeSlots, readFx, readSlots, stubLoader, type Fx } from "./animate-fx.js";
 import { apiKey, getPath, logPrompt } from "./meta.js";
+import { recordUsage } from "../v3/lib/meta.js";
 import { objectUrl, putFile } from "./storage.js";
 import { parseSkeleton } from "./validate.js";
 
@@ -576,6 +577,8 @@ async function callMuse(step: "plan" | "keys", system: string, request: string, 
   }
   const body: unknown = await res.json();
   run.attempts.push({ step, status: res.status, responseBody: body });
+  // Animation jobs are metered from this (see animation-jobs.ts).
+  recordUsage(body, `animate ${step}`, MUSE_MODEL);
   const content = getPath(body, ["choices", 0, "message", "content"]);
   logPrompt(`chat/completions (${MUSE_MODEL}) animate ${step} reply`, typeof content === "string" ? content : "(no content)");
   return typeof content === "string" ? content : null;

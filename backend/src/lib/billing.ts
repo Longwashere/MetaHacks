@@ -1,5 +1,6 @@
 import Stripe from "stripe";
-import { APP_URL, CREDITS_PER_PAGE, DOWNLOAD_LIMITS, PART_FIX_CREDITS, PLAN_CREDITS, STRIPE } from "./config.js";
+import { APP_URL, CREDIT_USD, CREDITS_PER_PAGE, DEFAULT_MUSE_RATE, DOWNLOAD_LIMITS, MIN_METERED_CREDITS, MUSE_RATES, PART_FIX_CREDITS, PLAN_CREDITS, STRIPE } from "./config.js";
+import type { ModelCall } from "../v3/lib/meta.js";
 import { PROFILE_COLUMNS, check, db, type Plan, type ProfileRow, type RemixJobRow } from "./db.js";
 
 // Plans, monthly credits and the Stripe subscription. The webhook is the only thing that
@@ -53,36 +54,107 @@ export interface CreditRules {
   /** Credits per atlas page, by remix API version. */
   perPage: typeof CREDITS_PER_PAGE;
   partFix: number;
+  /** Generated animations and edits are metered: their Muse cost over `creditUsd`, rounded up, at least `min`. */
+  animation: { creditUsd: number; min: number };
   /** Each plan's credits per month. */
   monthly: typeof PLAN_CREDITS;
 }
 
-export const CREDIT_RULES: CreditRules = { perPage: CREDITS_PER_PAGE, partFix: PART_FIX_CREDITS, monthly: PLAN_CREDITS };
+export const CREDIT_RULES: CreditRules = {
+  perPage: CREDITS_PER_PAGE,
+  partFix: PART_FIX_CREDITS,
+  animation: { creditUsd: CREDIT_USD, min: MIN_METERED_CREDITS },
+  monthly: PLAN_CREDITS,
+};
+
+/** What `calls` cost in USD at MUSE_RATES. */
+export function museCostUsd(calls: Pick<ModelCall, "model" | "promptTokens" | "completionTokens">[]): number {
+  return calls.reduce((sum, c) => {
+    const rate = MUSE_RATES[c.model] ?? DEFAULT_MUSE_RATE;
+    return sum + (c.promptTokens * rate.inPerM + c.completionTokens * rate.outPerM) / 1e6 + (rate.perCall ?? 0);
+  }, 0);
+}
+
+/** Credits a metered job costs: its Muse cost in credits, rounded up, at least MIN_METERED_CREDITS. */
+export function meteredCredits(costUsd: number): number {
+  // The epsilon keeps float noise (0.0250000001 / 0.0125) from rounding up a whole extra credit.
+  return Math.max(MIN_METERED_CREDITS, Math.ceil(costUsd / CREDIT_USD - 1e-9));
+}
 
 /** Credits a remix of a rig with `pages` atlas pages costs. */
 export function remixCredits(apiVersion: keyof typeof CREDITS_PER_PAGE, pages: number): number {
   return CREDITS_PER_PAGE[apiVersion] * Math.max(pages, 1);
 }
 
-/** One remix or part fix this month and what it cost, for the account page. */
+/** One remix, part fix or animation job this month and what it cost, for the account page. */
 export interface CreditHistoryEntry {
   jobId: string;
   createdAt: string;
-  kind: "remix" | "part-fix";
-  apiVersion: keyof typeof CREDITS_PER_PAGE;
+  kind: "remix" | "part-fix" | "animation" | "animation-edit";
+  /** Null for animation jobs. */
+  apiVersion: keyof typeof CREDITS_PER_PAGE | null;
   status: "queued" | "running" | "succeeded" | "failed";
   /** The rig remixed, or the remix whose parts were fixed; null once deleted. */
   rigName: string | null;
   /** The remix it made or fixed, for a link; null until it's saved, or if it failed or was deleted. */
   assetId: string | null;
-  /** Atlas pages repainted; null for part fixes. */
+  /** Atlas pages repainted; null for part fixes and animation jobs. */
   pages: number | null;
+  /** The animation an animation job made or edited; null for remixes and part fixes. */
+  animation: string | null;
   /** What it costs; a failed job's cost is refunded (left out of usage). */
   credits: number;
 }
 
-/** This month's remixes and part fixes, newest first. */
+/** An animation_jobs row; see supabase/migrations/20261102000000_animation_jobs.sql. */
+interface AnimationJobRow {
+  id: string;
+  created_at: string;
+  kind: "new" | "edit";
+  status: "running" | "succeeded" | "failed";
+  asset_id: string | null;
+  animation: string | null;
+  credits: number;
+}
+
+/** This month's remixes, part fixes and animation jobs, newest first. */
 export async function creditHistory(userId: string): Promise<CreditHistoryEntry[]> {
+  const [remixes, animations] = await Promise.all([remixHistory(userId), animationHistory(userId)]);
+  return [...remixes, ...animations].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+async function animationHistory(userId: string): Promise<CreditHistoryEntry[]> {
+  const jobs = check(
+    await db()
+      .from("animation_jobs")
+      .select("id, created_at, kind, status, asset_id, animation, credits")
+      .eq("user_id", userId)
+      .gte("created_at", usagePeriod().start.toISOString())
+      .overrideTypes<AnimationJobRow[], { merge: false }>(),
+  );
+  const ids = [...new Set(jobs.flatMap((j) => (j.asset_id ? [j.asset_id] : [])))];
+  const names = await assetNames(ids);
+  return jobs.map((j) => ({
+    jobId: j.id,
+    createdAt: j.created_at,
+    kind: j.kind === "edit" ? "animation-edit" : "animation",
+    apiVersion: null,
+    status: j.status,
+    rigName: (j.asset_id && names.get(j.asset_id)) ?? null,
+    assetId: j.asset_id,
+    pages: null,
+    animation: j.animation,
+    credits: j.credits,
+  }));
+}
+
+async function assetNames(ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = check(await db().from("assets").select("id, name").in("id", ids).overrideTypes<{ id: string; name: string }[], { merge: false }>());
+  return new Map(rows.map((a) => [a.id, a.name] as const));
+}
+
+async function remixHistory(userId: string): Promise<CreditHistoryEntry[]> {
   const jobs = check(
     await db()
       .from("remix_jobs")
@@ -95,15 +167,8 @@ export async function creditHistory(userId: string): Promise<CreditHistoryEntry[
         { merge: false }
       >(),
   );
-  const ids = [...new Set(jobs.flatMap((j) => (j.base_asset_id ? [j.base_asset_id] : [])))];
-  const names = new Map(
-    ids.length === 0
-      ? []
-      : check(await db().from("assets").select("id, name").in("id", ids).overrideTypes<{ id: string; name: string }[], { merge: false }>()).map(
-          (a) => [a.id, a.name] as const,
-        ),
-  );
-  return jobs.map((j) => {
+  const names = await assetNames([...new Set(jobs.flatMap((j) => (j.base_asset_id ? [j.base_asset_id] : [])))]);
+  return jobs.map((j): CreditHistoryEntry => {
     const partFix = j.input.kind === "parts";
     return {
       jobId: j.id,
@@ -114,23 +179,26 @@ export async function creditHistory(userId: string): Promise<CreditHistoryEntry[
       rigName: (j.base_asset_id && names.get(j.base_asset_id)) ?? null,
       assetId: j.status === "failed" ? null : j.asset_id,
       pages: partFix ? null : Math.max(Math.round(j.credits / CREDITS_PER_PAGE[j.api_version]), 1),
+      animation: null,
       credits: j.credits,
     };
   });
 }
 
-/** Credits spent this month on jobs that haven't failed. */
+/** Credits spent this month on remix and animation jobs that haven't failed. */
 export async function creditsUsed(userId: string): Promise<number> {
-  const rows = check(
-    await db()
-      .from("remix_jobs")
-      .select("credits")
-      .eq("user_id", userId)
-      .neq("status", "failed")
-      .gte("created_at", usagePeriod().start.toISOString())
-      .overrideTypes<{ credits: number }[], { merge: false }>(),
-  );
-  return rows.reduce((sum, row) => sum + row.credits, 0);
+  const spent = async (table: "remix_jobs" | "animation_jobs") =>
+    check(
+      await db()
+        .from(table)
+        .select("credits")
+        .eq("user_id", userId)
+        .neq("status", "failed")
+        .gte("created_at", usagePeriod().start.toISOString())
+        .overrideTypes<{ credits: number }[], { merge: false }>(),
+    ).reduce((sum, row) => sum + row.credits, 0);
+  const [remixes, animations] = await Promise.all([spent("remix_jobs"), spent("animation_jobs")]);
+  return remixes + animations;
 }
 
 /** Distinct assets downloaded this month. */

@@ -111,23 +111,28 @@ export interface CreditRules {
   /** Credits per atlas page a remix repaints, by API version. */
   perPage: Record<RemixApiVersion, number>;
   partFix: number;
+  /** Generated animations and edits are metered: their Muse cost over `creditUsd`, rounded up, at least `min`. */
+  animation: { creditUsd: number; min: number };
   /** Each plan's credits per month. */
   monthly: { free: number; pro: number };
 }
 
-/** One remix or part fix this month and what it cost (GET /me/credits). */
+/** One remix, part fix or animation job this month and what it cost (GET /me/credits). */
 export interface CreditHistoryEntry {
   jobId: string;
   createdAt: string;
-  kind: "remix" | "part-fix";
-  apiVersion: RemixApiVersion;
+  kind: "remix" | "part-fix" | "animation" | "animation-edit";
+  /** Null for animation jobs. */
+  apiVersion: RemixApiVersion | null;
   status: "queued" | "running" | "succeeded" | "failed";
   /** The rig remixed, or the remix whose parts were fixed; null once deleted. */
   rigName: string | null;
   /** The remix it made or fixed; null until saved, or if it failed or was deleted. */
   assetId: string | null;
-  /** Atlas pages repainted; null for part fixes. */
+  /** Atlas pages repainted; null for part fixes and animation jobs. */
   pages: number | null;
+  /** The animation an animation job made or edited; null for remixes and part fixes. */
+  animation: string | null;
   /** What it costs; failed jobs are refunded. */
   credits: number;
 }
@@ -373,4 +378,6 @@ export interface AnimateResult {
   dropped: string[];
   /** For an edit that replaced the original: its name, which the edited animation keeps. */
   replaced?: string;
+  /** Credits the job was charged, from Muse's token use. */
+  credits: number;
 }

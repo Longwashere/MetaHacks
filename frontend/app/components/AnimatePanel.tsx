@@ -31,6 +31,10 @@ interface AnimatePanelProps {
   onDeleted: (name: string) => void;
   /** Called with a renamed animation's old and new name. */
   onRenamed: (from: string, to: string) => void;
+  /** Credits the user has left this month (Infinity for admins); null when unknown. */
+  creditsLeft: number | null;
+  /** The fewest credits a job costs; it needs at least this many left to start. */
+  minCredits: number;
 }
 
 const EDIT_IDEAS = [
@@ -44,7 +48,7 @@ const EDIT_IDEAS = [
  * backend saves it into the remix's skeleton next to the rig's own animations. Generated
  * animations can be edited with a prompt (Muse reworks the current motion) or deleted.
  */
-export function AnimatePanel({ remix, baseAnimations, onAnimated, onDeleted, onRenamed }: AnimatePanelProps) {
+export function AnimatePanel({ remix, baseAnimations, onAnimated, onDeleted, onRenamed, creditsLeft, minCredits }: AnimatePanelProps) {
   const fetcher = useFetcher<typeof animateAction>();
   const [prompt, setPrompt] = useState("");
   const [durationSec, setDurationSec] = useState(2);
@@ -55,6 +59,7 @@ export function AnimatePanel({ remix, baseAnimations, onAnimated, onDeleted, onR
   const [editing, setEditing] = useState<SpineAnimation | null>(null);
   const [keepOriginal, setKeepOriginal] = useState(false);
   const pending = reading || fetcher.state !== "idle";
+  const outOfCredits = creditsLeft !== null && creditsLeft < minCredits;
   const renameFetcher = useFetcher<RenameAnimationResult>({ key: renameFetcherKey(remix?.id ?? "") });
 
   useEffect(() => {
@@ -65,7 +70,8 @@ export function AnimatePanel({ remix, baseAnimations, onAnimated, onDeleted, onR
       setEditing(null);
       setPrompt("");
       onAnimated(done.animation.name);
-      toast.success(done.replaced ? `Updated "${done.replaced}".` : `Added "${done.animation.name}" to the remix.`);
+      const charged = `${done.credits} credit${done.credits === 1 ? "" : "s"}`;
+      toast.success(done.replaced ? `Updated "${done.replaced}" (${charged}).` : `Added "${done.animation.name}" to the remix (${charged}).`);
     } else {
       toast.error(fetcher.data.error);
     }
@@ -212,14 +218,16 @@ export function AnimatePanel({ remix, baseAnimations, onAnimated, onDeleted, onR
         )}
 
         <div className="flex flex-col gap-2">
-          <Button type="submit" disabled={!prompt.trim() || pending} className="w-full">
+          <Button type="submit" disabled={!prompt.trim() || pending || outOfCredits} className="w-full">
             {pending ? <Loader2 className="animate-spin" /> : <Film />}
             {pending ? "Muse is keyframing…" : editing ? "Edit animation" : "Animate"}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
             {pending
               ? "Muse plans the beats, then keys them. This takes a minute or two."
-              : "Two Muse Spark calls. Doesn't use your monthly remixes."}
+              : outOfCredits
+                ? "You're out of credits this month."
+                : `Charged by what Muse uses, usually ${minCredits} credit${minCredits === 1 ? "" : "s"}${creditsLeft !== null && Number.isFinite(creditsLeft) ? ` · ${creditsLeft} left this month` : ""}. Failed runs are free.`}
           </p>
         </div>
 

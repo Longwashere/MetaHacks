@@ -631,6 +631,8 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                             onAnimated={(name) => navigate(withParams({ anim: name }), { replace: true, preventScrollReset: true })}
                             onDeleted={(name) => anim === name && navigate(withParams({ anim: null }), { replace: true, preventScrollReset: true })}
                             onRenamed={(from, to) => anim === from && navigate(withParams({ anim: to }), { replace: true, preventScrollReset: true })}
+                            creditsLeft={usage ? creditsLeft(usage) : null}
+                            minCredits={usage?.credits.animation.min ?? 1}
                           />
                         </CardContent>
                       </TabsContent>

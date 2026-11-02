@@ -46,6 +46,7 @@ Add the entry in the same task, not later.
 
 ### Open
 
+- **Muse calls can't be priced from the API:** responses have tokens but no cost, Muse Image reports 0 tokens, and the rates in `MUSE_RATES` are unconfirmed third-party figures. (2026-11-02)
 - **Muse Image can't return transparency**, so every page has to be put on a key colour and keyed back out. That's the source of most of the friction below. (2026-10-27)
 - **The key colour bleeds into the repainted art** (e.g. a teal axe on cyan runs), and Muse Image has no setting to stop it. (2026-10-27)
 - **Edit strength can only be set through prompt text.** We haven't found a strength or fidelity parameter for `/images/edits`; check the API reference before building more on prompt wording. (2026-10-27)
@@ -55,6 +56,15 @@ Add the entry in the same task, not later.
 - **Muse Code isn't on the Model API.** `GET /v1/models` lists no Muse Code model, so the backend can't call it; planned "generate an animation with Muse Code" has to use Muse Spark instead. (2026-10-28)
 
 ### Log
+
+### 2026-11-02 — No way to price a call: no cost in responses, Muse Image reports 0 tokens, no reachable rate sheet
+- **What happened:** to charge users credits for generated animations by what they really cost, we needed the price of each Muse call. Nothing in the API gives it, and Meta's pricing page couldn't be read, so the rates came from third-party listings that disagree.
+- **Evidence (verified):** `POST https://api.meta.ai/v1/chat/completions` with `muse-spark-1.3-contributor` returns `usage` (`prompt_tokens`, `completion_tokens`, `completion_tokens_details.reasoning_tokens`, `prompt_tokens_details.cached_tokens`) but no cost or billing tier. `POST /v1/images/edits` with `muse-image-1.0` returns a `usage` object whose token counts are all 0 (8 v3 remix logs, 18 image calls, in `backend/data/remixes/*/prompts.json`). Meta's rate sheet (dev.meta.ai/docs/pricing-rate-limits) couldn't be opened; third-party sites list Spark 1.3 at $1.25/$4.25 per million tokens, the contributor tier at $0.10/$0.20 (one source only), and Muse Image at $0.01 per image (one source only) (from third-party listings, not verified against Meta).
+- **Cost:** about an hour of searching and cross-checking, and the credit prices rest on rates we can't confirm.
+- **Cause:** the API reports tokens but not price, image calls report no usable usage, and the official pricing page wasn't reachable.
+- **Workaround / status:** prices live in one table, `MUSE_RATES` in `backend/src/lib/config.ts`, with unknown models priced as standard Spark so nothing comes out free. Animation jobs store `cost_usd` and per-model token counts (`animation_jobs`), so they can be re-priced if the rates change. Open until Meta's rates are confirmed.
+- **Ask for Meta:** return the cost (or the billed units and tier) of each call in the response, report image usage as images or pixels rather than zero tokens, and keep a public, linkable rate sheet that covers the contributor tiers.
+- **Lesson:** keep raw usage for every job from the start, so pricing can be fixed later without guessing.
 
 ### 2026-10-31 — Muse Image moved the off-limits shapes it was told to leave alone
 - **What happened:** On `ember-fire-knight-7e215105`, the part fix "turn this axe into a sword" (`job_2d65de90`, region `fuzi`) succeeded, but 18% of the new sword's paint ended up under neighbouring parts, and the sword came back upside down (pommel where the axe head was).
