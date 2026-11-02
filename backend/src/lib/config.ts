@@ -45,6 +45,14 @@ export const IMAGE_MODEL = modelId("IMAGE_MODEL", "muse-image-1.0");
  * none, minimal, low, medium, high, xhigh and max; other Muse calls send nothing and get its default.
  */
 export const ANIMATE_REASONING_EFFORT = process.env.ANIMATE_REASONING_EFFORT || "medium";
+/**
+ * Whether generated animations get a third Muse call that looks at frames rendered from the
+ * first pass and rewrites the keys (see reviewAnimation in animate.ts). Set to "off" to skip it.
+ */
+export const ANIMATE_REVIEW = process.env.ANIMATE_REVIEW !== "off";
+/** Cap on the review call. It's skipped when the plan and keys already used more than ANIMATE_REVIEW_AFTER_MS. */
+export const ANIMATE_REVIEW_TIMEOUT_MS = ms("ANIMATE_REVIEW_TIMEOUT_MS", 3 * MINUTE);
+export const ANIMATE_REVIEW_AFTER_MS = ms("ANIMATE_REVIEW_AFTER_MS", 5 * MINUTE);
 
 /**
  * Baseten's OpenAI-compatible API, serving Muse Spark Open (hackathon credits). The key only works

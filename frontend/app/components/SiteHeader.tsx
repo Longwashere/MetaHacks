@@ -19,6 +19,7 @@ const NAV = [
   { to: "/remix", label: "Remix" },
   { to: "/library", label: "My Library" },
   { to: "/upload", label: "Upload" },
+  { to: "/autoRig", label: "Auto-rig" },
 ] as const;
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>

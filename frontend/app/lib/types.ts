@@ -381,3 +381,46 @@ export interface AnimateResult {
   /** Credits the job was charged, from Muse's token use. */
   credits: number;
 }
+
+// ---------------------------------------------------------------------------
+// Auto-rig (/autoRig; backend/src/lib/autorig, AUTO_RIG_PLAN.md)
+// ---------------------------------------------------------------------------
+
+/** "front" faces the viewer; "right" is turned toward the right of the image. */
+export type AutoRigView = "front" | "right";
+
+/** Joints in cutout pixels. `_l` / `_r` are the character's own sides, so `_r` is on the image's left. */
+export const AUTO_RIG_JOINTS = [
+  "head",
+  "neck",
+  "pelvis",
+  "shoulder_l",
+  "elbow_l",
+  "wrist_l",
+  "hand_l",
+  "shoulder_r",
+  "elbow_r",
+  "wrist_r",
+  "hand_r",
+  "hip_l",
+  "knee_l",
+  "ankle_l",
+  "toe_l",
+  "hip_r",
+  "knee_r",
+  "ankle_r",
+  "toe_r",
+] as const;
+export type AutoRigJointName = (typeof AUTO_RIG_JOINTS)[number];
+export type AutoRigJoints = Record<AutoRigJointName, { x: number; y: number }>;
+
+/** POST /me/autorig/prepare: the character keyed out of Muse's redraw, with joints guessed from its silhouette. */
+export interface PreparedAutoRig {
+  /** PNG data URL. */
+  cutout: string;
+  width: number;
+  height: number;
+  joints: AutoRigJoints;
+  /** False when the upload was rigged as-is. */
+  posed: boolean;
+}

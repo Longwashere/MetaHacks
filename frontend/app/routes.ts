@@ -17,6 +17,7 @@ export default [
     route("assets/:assetId/:animation?", "routes/asset.tsx"),
     route("library", "routes/library.tsx"),
     route("upload", "routes/upload.tsx"),
+    route("autoRig", "routes/auto-rig.tsx"),
     route("account", "routes/account.tsx"),
     route("login", "routes/login.tsx"),
   ]),

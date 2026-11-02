@@ -3,6 +3,7 @@ import express, { Router } from "express";
 import { deleteAsset, getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
+import { createAutoRig, parseCreateInput, parsePrepareInput, prepareAutoRig } from "../lib/autorig/create.js";
 import { runAnimationJob } from "../lib/animation-jobs.js";
 import { AnimateError, deleteAnimation, editAnimation, renameAnimation, generateAnimation, parseAnimateInput } from "../lib/animate.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
@@ -26,6 +27,10 @@ const MAX_UPLOAD_BYTES = "64mb";
 const MAX_AUTO_TWEAK_BYTES = "12mb";
 /** Uploads are closed to free users for the hackathon. */
 const UPLOADS_PRO_ONLY = "Uploading rigs needs a Pro plan.";
+/** Auto-rigging is Pro and admin only until it has a price (AUTO_RIG_PLAN.md). */
+const AUTORIG_PRO_ONLY = "Auto-rigging needs a Pro plan.";
+/** An auto-rig request carries one image (up to 8 MB) as a base64 data URL. */
+const MAX_AUTORIG_BYTES = "12mb";
 
 // Everything scoped to the signed-in user. Mounted before the global JSON parser so the skeleton
 // route can use its own, larger body limit.
@@ -142,6 +147,65 @@ meRouter.post(
     res.status(201).json({ assets: result.assets, notes: result.notes });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Auto-rig (AUTO_RIG_PLAN.md, lib/autorig/)
+// ---------------------------------------------------------------------------
+
+const autoRigAllowed: express.RequestHandler = async (_req, res, next) => {
+  if (!isAdminOf(res) && (await getProfile(userIdOf(res))).plan === "free") {
+    res.status(403).json({ error: AUTORIG_PRO_ONLY });
+    return;
+  }
+  next();
+};
+
+/**
+ * POST /me/autorig/prepare  body = { image (data URL), view: "front" | "right", skipPose? }
+ * → { cutout (PNG data URL), width, height, joints, posed }. Muse Image redraws the character in
+ * the rig pose (about 15–35 s) unless skipPose; nothing is stored. 400 { error } for bad input,
+ * 502 { error } when the model fails. Not charged yet.
+ */
+meRouter.post("/autorig/prepare", autoRigAllowed, express.json({ limit: MAX_AUTORIG_BYTES }), async (req, res) => {
+  const parsed = parsePrepareInput(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+  try {
+    const result = await prepareAutoRig(parsed.input, controller.signal);
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    console.error("[autorig] prepare failed", error);
+    res.status(502).json({ error: error instanceof AiTimeoutError ? "The image model took too long. Try again." : error instanceof Error ? error.message : "Couldn't pose the character." });
+  }
+});
+
+/**
+ * POST /me/autorig  body = { name, view, visibility, cutout (PNG data URL from prepare), joints }
+ * → 201 SpineAsset: the rig is built from the joints, stored under remixes/<time>_autorig_<id>/ and
+ * saved as the user's asset. 400 { error } for bad input or a duplicate.
+ */
+meRouter.post("/autorig", autoRigAllowed, express.json({ limit: MAX_AUTORIG_BYTES }), async (req, res) => {
+  const parsed = parseCreateInput(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const result = await createAutoRig(userIdOf(res), parsed.input);
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+  res.status(201).json(result.asset);
+});
 
 // ---------------------------------------------------------------------------
 // Downloads (monthly allowance)
@@ -294,7 +358,7 @@ meRouter.post("/remixes/:assetId/auto-tweak", express.json({ limit: MAX_AUTO_TWE
 
 /**
  * POST /me/remixes/:assetId/animations  body = { prompt, durationSec, loop, skeleton? } → 201 AnimateResult & { credits }
- * Two Muse Spark calls write a new animation's keyframes; it's saved into the remix's skeleton.
+ * Three Muse Spark calls (plan, keys, review) write a new animation's keyframes; it's saved into the remix's skeleton.
  * `skeleton` is only needed when the stored skeleton is a binary .skel. Metered: charged credits
  * by token use (see animation-jobs.ts); 402 when the user has less than the minimum left.
  */

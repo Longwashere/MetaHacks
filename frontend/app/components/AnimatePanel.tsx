@@ -224,7 +224,7 @@ export function AnimatePanel({ remix, baseAnimations, onAnimated, onDeleted, onR
           </Button>
           <p className="text-center text-xs text-muted-foreground">
             {pending
-              ? "Muse plans the beats, then keys them. This takes a minute or two."
+              ? "Muse plans the beats, keys them, then checks its work. This takes a few minutes."
               : outOfCredits
                 ? "You're out of credits this month."
                 : `Charged by what Muse uses, usually ${minCredits} credit${minCredits === 1 ? "" : "s"}${creditsLeft !== null && Number.isFinite(creditsLeft) ? ` · ${creditsLeft} left this month` : ""}. Failed runs are free.`}

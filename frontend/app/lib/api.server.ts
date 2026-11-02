@@ -4,7 +4,7 @@
 
 import type { Session } from "~/lib/auth.server";
 import { ASSET_CATEGORIES } from "~/lib/types";
-import type { AnimateEdit, AnimateInput, AnimateResult, AssetCategory, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AnimateEdit, AnimateInput, AnimateResult, AssetCategory, AssetQuery, AssetVersion, AutoRigJoints, AutoRigView, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, PreparedAutoRig, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -476,4 +476,34 @@ export async function createCheckoutUrl(session: Session): Promise<string> {
 export async function createPortalUrl(session: Session): Promise<string | null> {
   const res = await backendOrNull<{ url: string }>("/billing/portal", { session, method: "POST" });
   return res?.url ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-rig
+// ---------------------------------------------------------------------------
+
+/** POST /me/autorig/prepare — Muse Image poses the character (about 15–35 s) and joints are placed. Nothing is stored. */
+export async function prepareAutoRig(
+  session: Session,
+  input: { image: string; view: AutoRigView; skipPose: boolean },
+): Promise<{ ok: true; rig: PreparedAutoRig } | { ok: false; error: string }> {
+  try {
+    return { ok: true, rig: await backend<PreparedAutoRig>("/me/autorig/prepare", { session, method: "POST", body: input }) };
+  } catch (error) {
+    if (!(error instanceof BackendError) || ![400, 403, 413, 502].includes(error.status)) throw error;
+    return { ok: false, error: error.status === 413 ? "That image is too big. Use one under 8 MB." : errorMessage(error.body, "Couldn't pose the character.") };
+  }
+}
+
+/** POST /me/autorig — builds the rig from the cutout and joints and saves it as the user's asset. */
+export async function createAutoRig(
+  session: Session,
+  input: { name: string; view: AutoRigView; visibility: "public" | "private"; cutout: string; joints: AutoRigJoints },
+): Promise<{ ok: true; asset: SpineAsset } | { ok: false; error: string }> {
+  try {
+    return { ok: true, asset: await backend<SpineAsset>("/me/autorig", { session, method: "POST", body: input }) };
+  } catch (error) {
+    if (!(error instanceof BackendError) || ![400, 403, 413].includes(error.status)) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't build the rig.") };
+  }
 }

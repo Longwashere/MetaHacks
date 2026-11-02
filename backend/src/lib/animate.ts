@@ -3,7 +3,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { aiFetch } from "./ai-fetch.js";
 import { getAssetRow } from "./assets.js";
-import { ANIMATE_REASONING_EFFORT, ANIMATION_LOG_DIR, META_API_BASE_URL, MUSE_MODEL, MUSE_TIMEOUT_MS } from "./config.js";
+import {
+  ANIMATE_REASONING_EFFORT,
+  ANIMATE_REVIEW,
+  ANIMATE_REVIEW_AFTER_MS,
+  ANIMATE_REVIEW_TIMEOUT_MS,
+  ANIMATION_LOG_DIR,
+  META_API_BASE_URL,
+  MUSE_MODEL,
+  MUSE_TIMEOUT_MS,
+} from "./config.js";
+import { renderStrip } from "./animate-render.js";
 import { ASSET_COLUMNS, check, db, toSpineAsset, type AssetRow } from "./db.js";
 import { rigHashOf } from "./fingerprint.js";
 import * as spine from "@esotericsoftware/spine-core";
@@ -18,7 +28,8 @@ import { parseSkeleton } from "./validate.js";
 // animation from the user's prompt. Spine animations are sparse keyframes per bone that the
 // runtime interpolates, so one call writes the whole thing. The keys are checked, converted from
 // screen space into each bone's local space, given smooth curves, and saved as a new animation in
-// the remix's skeleton JSON. Shapes match frontend/app/lib/types.ts.
+// the remix's skeleton JSON. A review call then looks at frames rendered from that first pass and
+// rewrites the keys. Shapes match frontend/app/lib/types.ts.
 
 export interface AnimateInput {
   prompt: string;
@@ -331,7 +342,8 @@ export function describeMotion(skeleton: Record<string, unknown>, animName: stri
 
 // Two calls. Asked to key an animation in one go, Spark wrote small, evenly timed, softly eased
 // motion (every bone keyed on the same beats, punches with no snap). Planning the beats first, on
-// their own, and then keying them with per-key eases gives it room to be bold.
+// their own, and then keying them with per-key eases gives it room to be bold. A third call
+// (reviewAnimation) shows Spark frames of what it keyed and lets it fix them.
 
 const PLAN_SYSTEM_PROMPT = `You are the animation director on a stylish 2D action game. Turn the user's request into a punchy beat sheet for this exact rig; a keyframer will follow it to the letter. Be bold: weak, floaty, evenly timed motion is the failure to avoid.
 
@@ -416,10 +428,42 @@ Reply with JSON only, no markdown:
 {"name": "<short animation name, 1–3 words>", "notes": "<one or two sentences for the user on what you animated>", "bones": [{"bone": "<bone name>", "rotate": [{"t": 0, "aim": 60}, {"t": 0.4, "aim": 150, "ease": "settle"}, {"t": 0.52, "aim": -20, "ease": "snap"}], "move": [{"t": 0, "x": 0, "y": 0}], "scale": [{"t": 0, "x": 1, "y": 1, "ease": "smooth"}], "shear": [{"t": 0.5, "x": 0, "y": 25}]}], "flash": [{"t": 0.52, "color": "ffffff", "slots": "all", "hold": 0.03, "fade": 0.15}], "slots": [{"slot": "<slot name>", "color": [{"t": 0, "color": "ffffffff"}], "attachment": [{"t": 0.3, "name": "<attachment>"}]}], "drawOrder": [{"t": 0.3, "front": ["<slot>"], "back": []}, {"t": 0.8, "front": [], "back": []}], "trails": [{"bone": "<weapon bone>", "color": "ffcc66", "count": 3}]}
 Each bone entry needs at least one of rotate, move, scale or shear; leave out the ones it doesn't use, and leave out effects you don't use. "t" is seconds from 0 to the duration. "ease" is optional and defaults to "smooth"; the first key's ease is ignored.`;
 
+/** Added to the keyframer's prompt for the review call (see reviewAnimation). */
+const REVIEW_NOTE = `
+
+This is a review pass. You already keyed this animation once; your keys are below, and the last picture shows what they produce, posed in the Spine runtime: 8 frames, left to right then top to bottom, each with its time. The art is drawn as flat shapes coloured by limb (the legend names the bone each colour hangs from; grey is the body), the faint outline is the rest pose, and the dark line is the ground at rest.
+
+Review it like a lead animator against the request and the beat sheet, then fix it:
+- Direction: does the action go the way the character faces and land in front of it?
+- Size: are the hero poses big, clear silhouettes, or do the frames look close to the rest outline? Weak, small motion is the most common failure; push those poses further.
+- The right parts: is the limb or weapon that should lead the action the one moving most?
+- Contact: do feet stay on the ground line when standing, and do legs keep a bend (not snapped straight or stretched)? Nothing should float, come apart or sink into the ground unless asked.
+- Balance: is the body readable and roughly upright, not tipped over or tumbling (unless asked)?
+- Timing: slow wind-up, fast action, a held impact, a follow-through. Look at the times on the frames.
+Automatic fixes already applied to your first pass are listed; don't reintroduce those problems.
+
+Reply with the same JSON as before, with a "review" field first: 2–6 short lines on what was wrong and what you changed. Send the whole animation again, not only the changes.`;
+
 /** Added to both system prompts when an existing animation is being edited. */
 const EDIT_NOTE = `
 
 This is an edit of an existing animation. You get how it moves now, sampled from the runtime in the same screen terms (aims, offsets from rest), and its effects. Change what the edit request asks for and keep everything else: the same beats, timing, poses, numbers and effects, as close to the current motion as you can. Don't redesign parts the request doesn't mention.`;
+
+/** At most this many lines of the reference animation's motion in the request. */
+const MAX_REFERENCE_LINES = 30;
+
+/**
+ * The rig's own hand-keyed attack (or another action), sampled like an edit's motion. A sense of
+ * real timing and amplitude: given only its per-bone ranges, Spark wrote small, evenly timed keys.
+ */
+function referenceMotion(skeleton: Record<string, unknown>, skip: string | null): string[] {
+  const names = Object.keys(record(skeleton.animations)).filter((n) => n !== skip);
+  const ref = names.find((n) => /attack|atk|slash|swing|strike|hit/i.test(n)) ?? names.find((n) => !/idle|stand|wait/i.test(n));
+  if (!ref) return [];
+  const motion = describeMotion(skeleton, ref).slice(0, MAX_REFERENCE_LINES);
+  if (motion.length <= 1) return [];
+  return ["", `How the rig's own "${ref}" moves, keyed by the rig's animator (screen space, +y up). Match its sense of timing and contrast; your hero poses can be bigger:`, ...motion];
+}
 
 function userMessage(input: AnimateInput, rig: Rig, skeleton: Record<string, unknown>, plan: string | null, edit: EditTarget | null): string {
   return [
@@ -437,6 +481,7 @@ function userMessage(input: AnimateInput, rig: Rig, skeleton: Record<string, unk
     "",
     "The rig's own animations (largest motion per bone; moves here are in each bone's local space, so use them for scale only):",
     ...describeAnimations(skeleton),
+    ...referenceMotion(skeleton, edit?.name ?? null),
   ].join("\n");
 }
 
@@ -502,8 +547,16 @@ export async function animateSkeleton<T>(
       finished = content === null ? null : finishAnimation(skeleton, input, plan, content);
     }
     if (!finished) throw new AnimateError("Muse's animation came back unreadable. Try again or reword the request.", 502);
+    run.fixes = finished.fixes;
+
+    if (ANIMATE_REVIEW && Date.now() - started < ANIMATE_REVIEW_AFTER_MS) {
+      finished = (await reviewAnimation(skeleton, input, plan, request, finished, signal, run)) ?? finished;
+    }
     const { built, next } = finished;
     run.result = { name: built.name, notes: built.notes, dropped: built.dropped, animation: record(record(next.animations)[built.name]) };
+    // For the run log only: the finished animation, to compare with the first pass.
+    const strip = await renderStrip(next, built.name).catch(() => null);
+    if (strip) run.strips = { ...run.strips, final: strip };
 
     return await keep(built, next);
   } catch (error) {
@@ -520,18 +573,92 @@ export async function animateSkeleton<T>(
  * resolved, torso tilt limited, effects and trails added. Null when the reply is unusable.
  * Exported so test scripts can replay saved replies through changed code without new calls.
  */
-export function finishAnimation(skeleton: Record<string, unknown>, input: AnimateInput, plan: string, content: string) {
+export function finishAnimation(skeleton: Record<string, unknown>, input: AnimateInput, plan: string, content: string, name?: string) {
   const rig = readRig(skeleton);
   const built = buildAnimation(content, rig, skeleton, input, new Set(Object.keys(record(skeleton.animations))), plan);
   if (!built) return null;
+  if (name) built.name = name;
   // The whole skeleton with the animation in it: trails add bones and slots to the setup pose.
   const next: Record<string, unknown> = structuredClone(skeleton);
   next.animations = { ...record(next.animations), [built.name]: built.animation };
   resolveAims(next, built.name, built.aims, input);
   const core = tameTilt(next, built.name, input);
   if (core) resolveAims(next, built.name, new Map([...built.aims].filter(([bone]) => !core.has(bone))), input);
+  const fixes = clampReach(next, built.name);
+  if (core) fixes.unshift(`body tilt scaled down to stay within ${MAX_TILT}° of upright`);
   built.dropped.push(...applyFx(next, built.name, built.fx, input.durationSec, input.loop));
-  return { built, next };
+  return { built, next, fixes };
+}
+
+/** How far a two-bone IK chain (a leg or arm) may reach, as a share of its length. */
+const MAX_REACH = 0.92;
+
+/**
+ * Pulls IK targets back within reach of their chain. The prompt asks for it, but Spark spread the
+ * ghoul's feet to 153% of its legs' length, which snaps the legs straight and slides the feet off.
+ * Checked at each of the target's keys with the animation posed (the hips may have dropped or
+ * squashed); a key out of reach moves along the line from the chain's root to the target. Returns
+ * a line per target it changed.
+ */
+function clampReach(skeleton: Record<string, unknown>, animName: string): string[] {
+  const bones = record(record(record(skeleton.animations)[animName]).bones);
+  const data = new spine.SkeletonJson(stubLoader).readSkeletonData(JSON.stringify(skeleton));
+  const anim = data.findAnimation(animName);
+  if (!anim) return [];
+  const sk = new spine.Skeleton(data);
+  const pose = (t: number | null) => {
+    sk.setToSetupPose();
+    if (t !== null) anim.apply(sk, 0, t, false, [], 1, spine.MixBlend.setup, spine.MixDirection.mixIn);
+    sk.updateWorldTransform(spine.Physics.pose);
+  };
+  const fixes: string[] = [];
+  for (const ik of data.ikConstraints) {
+    if (ik.bones.length !== 2 || ik.mix === 0 || ik.stretch) continue;
+    const keys = list(record(bones[ik.target.name]).translate).map(record);
+    const target = sk.findBone(ik.target.name);
+    const [upper, lower] = ik.bones.map((b) => sk.findBone(b.name));
+    if (!keys.length || !target?.parent || !upper || !lower) continue;
+    /** The chain's length as posed, and the distance from its root to the target. */
+    const measure = () => ({
+      reach: Math.hypot(lower.worldX - upper.worldX, lower.worldY - upper.worldY) + lower.data.length * Math.hypot(lower.a, lower.c),
+      distance: Math.hypot(target.worldX - upper.worldX, target.worldY - upper.worldY),
+    });
+    pose(null);
+    // A rig whose target sits out of reach at rest is left as its animator set it up.
+    const restDistance = measure().distance;
+
+    const before = keys.map((k) => [num(k.x, 0), num(k.y, 0)]);
+    const after = before.map((v) => [...v]);
+    const moved: string[] = [];
+    keys.forEach((k, i) => {
+      const t = num(k.time, 0);
+      pose(t);
+      const { reach, distance } = measure();
+      const limit = Math.max(reach * MAX_REACH, restDistance);
+      if (distance <= limit || distance === 0) return;
+      const f = limit / distance;
+      const world = new spine.Vector2(upper.worldX + (target.worldX - upper.worldX) * f, upper.worldY + (target.worldY - upper.worldY) * f);
+      target.parent!.worldToLocal(world);
+      after[i] = [world.x - target.data.x, world.y - target.data.y];
+      moved.push(`${t.toFixed(2)} s (${Math.round((distance / reach) * 100)}%)`);
+    });
+    if (moved.length === 0) continue;
+
+    keys.forEach((k, i) => {
+      k.x = round(after[i][0]);
+      k.y = round(after[i][1]);
+      // Bézier handles hold absolute values (x channel then y): map them onto the new segment ends.
+      if (!Array.isArray(k.curve) || i === keys.length - 1) return;
+      k.curve = k.curve.map((v: unknown, j: number) => {
+        if (j % 2 === 0 || typeof v !== "number") return v;
+        const c = j < 4 ? 0 : 1;
+        const [v0, v1, n0, n1] = [before[i][c], before[i + 1][c], after[i][c], after[i + 1][c]];
+        return round(Math.abs(v1 - v0) < 1e-6 ? v + n0 - v0 : n0 + ((v - v0) * (n1 - n0)) / (v1 - v0));
+      });
+    });
+    fixes.push(`${ik.target.name} pulled back within reach of ${ik.bones[0].name}–${ik.bones[1].name} at ${moved.join(", ")} of the chain's length`);
+  }
+  return fixes;
 }
 
 /** The stored skeleton JSON. A binary .skel can't be read here, so the page converts it and sends it. */
@@ -547,7 +674,63 @@ async function loadSkeleton(key: string, sent: Record<string, unknown> | null, s
   return skeleton;
 }
 
-async function callMuse(step: "plan" | "keys", system: string, request: string, images: string[], signal: AbortSignal, run: RunLog): Promise<string | null> {
+/**
+ * The review call: frames of the first pass rendered by renderStrip, sent back to Spark with its
+ * own keys and the automatic fixes, for a corrected animation. Writing keys blind, Spark stretched
+ * legs to 150% of their length and kept poses close to rest without noticing. Returns null (keep
+ * the first pass) when there's nothing to show, the call fails or times out, or the reply is unusable.
+ */
+async function reviewAnimation(
+  skeleton: Record<string, unknown>,
+  input: AnimateInput,
+  plan: string,
+  request: string,
+  first: NonNullable<ReturnType<typeof finishAnimation>>,
+  signal: AbortSignal,
+  run: RunLog,
+): Promise<ReturnType<typeof finishAnimation>> {
+  const strip = await renderStrip(first.next, first.built.name).catch((error: unknown) => {
+    console.error("Couldn't render the animation for review", error);
+    return null;
+  });
+  if (!strip) return null;
+  run.strips = { first: strip };
+  const keys = run.attempts.filter((a) => a.step === "keys").at(-1);
+  const firstReply = getPath(keys?.responseBody, ["choices", 0, "message", "content"]);
+  if (typeof firstReply !== "string") return null;
+
+  const reviewRequest = [
+    request,
+    "",
+    `Automatic fixes applied to your first pass: ${first.fixes.length ? first.fixes.join("; ") : "none"}.`,
+    "",
+    "Your first pass:",
+    firstReply,
+  ].join("\n");
+  try {
+    const content = await callMuse("review", SYSTEM_PROMPT + REVIEW_NOTE, reviewRequest, [...input.images, strip], signal, run, ANIMATE_REVIEW_TIMEOUT_MS);
+    if (content === null) return null;
+    const notes = getPath(parseLooseJson(content), ["review"]);
+    run.review = Array.isArray(notes) ? notes.map(String) : typeof notes === "string" ? [notes] : [];
+    // Keep the first pass's name, which the review sometimes changes.
+    return finishAnimation(skeleton, input, plan, content, first.built.name);
+  } catch (error) {
+    // The job's own deadline ends the whole run; anything else just skips the review.
+    if (signal.aborted) throw error;
+    console.error("Muse animation review failed; keeping the first pass", error);
+    return null;
+  }
+}
+
+async function callMuse(
+  step: "plan" | "keys" | "review",
+  system: string,
+  request: string,
+  images: string[],
+  signal: AbortSignal,
+  run: RunLog,
+  timeoutMs = MUSE_TIMEOUT_MS,
+): Promise<string | null> {
   logPrompt(`chat/completions (${MUSE_MODEL}) animate ${step} system`, system);
   logPrompt(`chat/completions (${MUSE_MODEL}) animate ${step} user`, request);
   const res = await aiFetch(`${META_API_BASE_URL}/chat/completions`, {
@@ -557,7 +740,7 @@ async function callMuse(step: "plan" | "keys", system: string, request: string, 
       model: MUSE_MODEL,
       reasoning_effort: ANIMATE_REASONING_EFFORT,
       // Long keyframe replies sometimes had stray words in the middle of the JSON.
-      ...(step === "keys" ? { response_format: { type: "json_object" } } : {}),
+      ...(step !== "plan" ? { response_format: { type: "json_object" } } : {}),
       messages: [
         { role: "system", content: system },
         {
@@ -566,7 +749,7 @@ async function callMuse(step: "plan" | "keys", system: string, request: string, 
         },
       ],
     }),
-    timeoutMs: MUSE_TIMEOUT_MS,
+    timeoutMs,
     signal,
   });
   if (!res.ok) {
@@ -1024,7 +1207,13 @@ interface RunLog {
   request?: string;
   plan?: string;
   /** HTTP status and full body (parsed JSON, or text on errors) of each Muse response. */
-  attempts: { step: "plan" | "keys"; status: number; responseBody: unknown }[];
+  attempts: { step: "plan" | "keys" | "review"; status: number; responseBody: unknown }[];
+  /** What finishAnimation changed in the first pass (reach, tilt), as told to the review. */
+  fixes?: string[];
+  /** The review's own notes on what it changed. */
+  review?: string[];
+  /** Rendered frames (JPEG data URLs) of the first pass and the finished animation; saved as strip-*.jpg, not in run.json. */
+  strips?: { first?: string; final?: string };
   result?: Pick<BuiltAnimation, "name" | "notes" | "dropped"> & { animation: unknown };
   error?: string;
   durationMs?: number;
@@ -1039,9 +1228,11 @@ async function saveRun(run: RunLog) {
   try {
     const folder = path.join(ANIMATION_LOG_DIR, `${run.startedAt.replace(/[:.]/g, "-")}_${run.assetId.replace(/[^\w-]/g, "_").slice(0, 80)}`);
     await mkdir(folder, { recursive: true });
+    const { strips, ...log } = run;
     await Promise.all([
-      writeFile(path.join(folder, "system-prompts.txt"), `PLAN\n\n${PLAN_SYSTEM_PROMPT}\n\nKEYS\n\n${SYSTEM_PROMPT}`),
-      writeFile(path.join(folder, "run.json"), JSON.stringify(run, null, 2)),
+      writeFile(path.join(folder, "system-prompts.txt"), `PLAN\n\n${PLAN_SYSTEM_PROMPT}\n\nKEYS\n\n${SYSTEM_PROMPT}\n\nREVIEW (added to KEYS)\n\n${REVIEW_NOTE}`),
+      writeFile(path.join(folder, "run.json"), JSON.stringify(log, null, 2)),
+      ...Object.entries(strips ?? {}).map(([which, url]) => writeFile(path.join(folder, `strip-${which}.jpg`), Buffer.from(url.split(",")[1] ?? "", "base64"))),
     ]);
     console.log(`[animate] saved run to ${folder}`);
   } catch (error) {
