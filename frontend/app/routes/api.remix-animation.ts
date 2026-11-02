@@ -2,11 +2,12 @@ import { data } from "react-router";
 import type { Route } from "./+types/api.remix-animation";
 import { animateRemix } from "~/lib/api.server";
 import { getSession } from "~/lib/auth.server";
-import type { AnimateInput } from "~/lib/types";
+import type { AnimateEdit, AnimateInput } from "~/lib/types";
 
 // Generated animations for the remix page. The page posts { assetId, prompt, durationSec, loop,
-// skeleton?, images? } as a JSON string (text/plain) via useFetcher; `skeleton` only for binary
-// .skel rigs, `images` the rig sheet from lib/spine-rig-sheet.
+// skeleton?, images?, edit? } as a JSON string (text/plain) via useFetcher; `skeleton` only for binary
+// .skel rigs, `images` the rig sheet from lib/spine-rig-sheet, `edit` ({ name, keepOriginal }) to
+// rework an existing generated animation instead of adding one.
 // The backend validates the fields; this checks only what it needs to route the call.
 export async function action({ request, context }: Route.ActionArgs) {
   const session = getSession(context);
@@ -17,7 +18,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   } catch {
     // Falls through to the field checks below.
   }
-  const { assetId, prompt, durationSec, loop, skeleton, images } = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const { assetId, prompt, durationSec, loop, skeleton, images, edit } = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
 
   if (typeof assetId !== "string" || !assetId) {
     return data({ ok: false as const, error: "Missing assetId." }, { status: 400 });
@@ -32,7 +33,12 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (images !== undefined && (!Array.isArray(images) || !images.every((i) => typeof i === "string"))) {
     return data({ ok: false as const, error: "Invalid rig pictures." }, { status: 400 });
   }
+  const { name, keepOriginal } = typeof edit === "object" && edit !== null ? (edit as Record<string, unknown>) : {};
+  if (edit !== undefined && (typeof name !== "string" || !name || typeof keepOriginal !== "boolean")) {
+    return data({ ok: false as const, error: "Invalid animation to edit." }, { status: 400 });
+  }
+  const animateEdit: AnimateEdit | null = typeof name === "string" && typeof keepOriginal === "boolean" ? { name, keepOriginal } : null;
   const input: AnimateInput = { prompt, durationSec, loop, ...(skeleton ? { skeleton } : {}), ...(images ? { images: images as string[] } : {}) };
-  const result = await animateRemix(session, assetId, input);
+  const result = await animateRemix(session, assetId, input, animateEdit);
   return result.ok ? result : data(result, { status: 400 });
 }

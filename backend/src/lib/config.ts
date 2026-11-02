@@ -44,7 +44,7 @@ export const IMAGE_MODEL = modelId("IMAGE_MODEL", "muse-image-1.0");
  * `reasoning_effort` for both generated-animation calls (plan and keyframes). The API accepts
  * none, minimal, low, medium, high, xhigh and max; other Muse calls send nothing and get its default.
  */
-export const ANIMATE_REASONING_EFFORT = process.env.ANIMATE_REASONING_EFFORT || "high";
+export const ANIMATE_REASONING_EFFORT = process.env.ANIMATE_REASONING_EFFORT || "medium";
 
 /**
  * Baseten's OpenAI-compatible API, serving Muse Spark Open (hackathon credits). The key only works

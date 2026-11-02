@@ -3,12 +3,9 @@ import {
   ArrowRight,
   Bone,
   ChevronsLeftRight,
-  ExternalLink,
   Layers,
   LayoutGrid,
   Maximize2,
-  Play,
-  RotateCcw,
   Sparkles,
   Wand2,
 } from "lucide-react";
@@ -20,11 +17,7 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import {
-  type ShowcaseModel,
-  type ShowcaseSlide,
-  SHOWCASE_SLIDESHOW_MODELS,
-} from "~/lib/showcase-models";
+import { type ShowcaseModel, SHOWCASE_SLIDESHOW_MODELS } from "~/lib/showcase-models";
 import { cn } from "~/lib/utils";
 
 interface SingleModelSlideshowProps {
@@ -33,24 +26,22 @@ interface SingleModelSlideshowProps {
 }
 
 export function SingleModelSlideshow({ model, className }: SingleModelSlideshowProps) {
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  // Open on the first remix with the wipe half way, so the before/after is visible without a click.
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(model.slides.length > 1 ? 1 : 0);
   const [selectedAnimation, setSelectedAnimation] = useState(model.defaultAnimation);
-  const [compareSplit, setCompareSplit] = useState(0); // 0 = full remix, slider starts on the left
+  const [compareSplit, setCompareSplit] = useState(50); // % of the stage showing the original, from the left
   const [isPlaying, setIsPlaying] = useState(true);
   const clock = useRef<SpineClock>({ trackTime: 0, reverse: false, at: 0 });
 
   const slide = model.slides[currentSlideIndex] ?? model.slides[0];
   const originalSlide = model.slides[0];
 
-  const handlePrev = () => {
-    setCompareSplit(0);
-    setCurrentSlideIndex((prev) => (prev > 0 ? prev - 1 : model.slides.length - 1));
+  const goTo = (index: number) => {
+    setCompareSplit(50);
+    setCurrentSlideIndex((index + model.slides.length) % model.slides.length);
   };
-
-  const handleNext = () => {
-    setCompareSplit(0);
-    setCurrentSlideIndex((prev) => (prev < model.slides.length - 1 ? prev + 1 : 0));
-  };
+  const handlePrev = () => goTo(currentSlideIndex - 1);
+  const handleNext = () => goTo(currentSlideIndex + 1);
 
   // Build pageUrls for the compare slider
   const pageUrls = slide.isOriginal
@@ -127,7 +118,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
                   </>
                 ) : (
                   <>
-                    <Sparkles className="size-3" /> AI Remix #{currentSlideIndex}
+                    <Sparkles className="size-3" /> Remix {currentSlideIndex} of {model.slides.length - 1}
                   </>
                 )}
               </Badge>
@@ -154,10 +145,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
                 {model.slides.map((s, idx) => (
                   <button
                     key={s.id}
-                    onClick={() => {
-                      setCompareSplit(0);
-                      setCurrentSlideIndex(idx);
-                    }}
+                    onClick={() => goTo(idx)}
                     className={cn(
                       "size-2 rounded-full transition-all",
                       idx === currentSlideIndex
@@ -216,7 +204,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
             <div className="flex flex-col gap-1.5">
               <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
                 <Wand2 className="size-3.5 text-primary" />
-                {slide.isOriginal ? "Original Rig Description:" : "AI Prompt used for this Remix:"}
+                {slide.isOriginal ? "The source rig" : "The whole prompt"}
               </span>
               <div className="rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
                 {slide.prompt ?? (
@@ -230,7 +218,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
             {/* Animation Selector */}
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-foreground">
-                Verify Any Keyframe Animation:
+                Same skeleton, every animation:
               </span>
               <div className="flex flex-wrap gap-1">
                 {model.animations.map((anim) => (
@@ -241,12 +229,13 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
                     className="h-7 px-2.5 text-xs"
                     onClick={() => setSelectedAnimation(anim.name)}
                   >
-                    {anim.name} ({anim.durationSec}s)
+                    {anim.name}
+                    {anim.durationSec > 0 && <span className="opacity-60">{anim.durationSec}s</span>}
                   </Button>
                 ))}
               </div>
               <span className="text-[11px] text-muted-foreground">
-                All animations keep working seamlessly with the new textures.
+                These clips come from the original rig&apos;s skeleton file. The remix only ships new atlas pages.
               </span>
             </div>
 
@@ -254,7 +243,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
             {!slide.isOriginal && (
               <div className="flex items-center gap-2 rounded-md bg-primary/5 p-2 text-xs text-primary">
                 <ChevronsLeftRight className="size-4 shrink-0" />
-                <span>Drag the vertical divider on the canvas to wipe between original and remix!</span>
+                <span>Drag the divider on the stage to wipe between the original and the remix.</span>
               </div>
             )}
           </div>
@@ -269,7 +258,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
               className="text-xs"
             >
               <Layers className="size-3.5 mr-1" />
-              {compareSplit === 0 ? "Compare with Original" : "Reset Wipe"}
+              {compareSplit === 0 ? "Compare with original" : "Show full remix"}
             </Button>
 
             <Button size="sm" asChild className="gap-1.5 text-xs">
@@ -297,14 +286,15 @@ export function ModelSlideshowSection() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <Badge variant="outline" className="mb-2 gap-1 text-xs">
-            <Sparkles className="size-3 text-primary" /> 4 In-Depth Model Slideshows
+            <Sparkles className="size-3 text-primary" /> Enemy variants &amp; seasonal skins
           </Badge>
-          <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            Explore 4 Different Models & Their Transformations
+          <h2 id="slideshows-heading" className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            One rig in, a whole cast out
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground max-w-2xl">
-            Each model features its original base rig alongside multiple AI-repainted remixes.
-            Cycle through slides, test walk/attack clips, or drag the divider to wipe between styles.
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            A rigged character is days of an animator&apos;s work. Each remix below reuses that work as is: the
+            same skeleton and the same clips, with new atlas pages painted by Muse Image. Switch clips to check
+            any frame, and drag the divider to compare.
           </p>
         </div>
 
@@ -316,7 +306,7 @@ export function ModelSlideshowSection() {
             onClick={() => setLayoutMode("focused")}
             className="h-7 text-xs"
           >
-            <Maximize2 className="size-3.5 mr-1" /> Tab Focus
+            <Maximize2 className="size-3.5 mr-1" /> One at a time
           </Button>
           <Button
             variant={layoutMode === "grid" ? "secondary" : "ghost"}
@@ -324,7 +314,7 @@ export function ModelSlideshowSection() {
             onClick={() => setLayoutMode("grid")}
             className="h-7 text-xs"
           >
-            <LayoutGrid className="size-3.5 mr-1" /> View All 4
+            <LayoutGrid className="size-3.5 mr-1" /> All four
           </Button>
         </div>
       </div>

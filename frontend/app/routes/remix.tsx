@@ -59,6 +59,8 @@ import { Textarea } from "~/components/ui/textarea";
 import {
   createPartFix,
   createRemixJob,
+  deleteRemixAnimation,
+  renameRemixAnimation,
   getAccount,
   getAsset,
   getLibrary,
@@ -201,6 +203,8 @@ export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   if (form.get("intent") === "fix-parts") return fixParts(session, form);
   if (form.get("intent") === "restore-version") return restoreVersion(session, form);
+  if (form.get("intent") === "delete-animation") return deleteAnimation(session, form);
+  if (form.get("intent") === "rename-animation") return renameAnimation(session, form);
   const errors: FieldErrors = {};
 
   const baseAssetId = String(form.get("baseAssetId") ?? "");
@@ -300,6 +304,30 @@ async function restoreVersion(session: Session, form: FormData) {
   if (!result.ok) return data({ restoreError: result.error }, { status: 400 });
 
   throw redirect(`/remix?${new URLSearchParams({ asset: assetId })}`);
+}
+
+async function deleteAnimation(session: Session, form: FormData) {
+  const assetId = String(form.get("assetId") ?? "");
+  const name = String(form.get("animation") ?? "");
+  if (!assetId || !name) return data({ ok: false as const, error: "Pick an animation to delete." }, { status: 400 });
+
+  const result = await deleteRemixAnimation(session, assetId, name);
+  if (!result.ok) return data({ ok: false as const, error: result.error }, { status: 400 });
+  return { ok: true as const, deleted: name };
+}
+
+async function renameAnimation(session: Session, form: FormData) {
+  const assetId = String(form.get("assetId") ?? "");
+  const name = String(form.get("animation") ?? "");
+  const newName = String(form.get("name") ?? "").trim();
+  if (!assetId || !name) return data({ ok: false as const, error: "Pick an animation to rename." }, { status: 400 });
+  if (!newName) return data({ ok: false as const, error: "Give the animation a name." }, { status: 400 });
+
+  const result = await renameRemixAnimation(session, assetId, name, newName);
+  if (!result.ok) return data({ ok: false as const, error: result.error }, { status: 400 });
+  // The backend may clean the name; the renamed animation keeps its place in the list.
+  const index = Number(form.get("index"));
+  return { ok: true as const, from: name, to: result.asset.animations[index]?.name ?? newName };
 }
 
 /** Optional prompt constraints; all off by default so the model can reshape parts. */
@@ -599,7 +627,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                           <AnimatePanel
                             key={savedRemix?.id ?? ""}
                             remix={savedRemix}
+                            baseAnimations={base?.animations.map((a) => a.name) ?? null}
                             onAnimated={(name) => navigate(withParams({ anim: name }), { replace: true, preventScrollReset: true })}
+                            onDeleted={(name) => anim === name && navigate(withParams({ anim: null }), { replace: true, preventScrollReset: true })}
+                            onRenamed={(from, to) => anim === from && navigate(withParams({ anim: to }), { replace: true, preventScrollReset: true })}
                           />
                         </CardContent>
                       </TabsContent>

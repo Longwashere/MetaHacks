@@ -40,6 +40,14 @@ export interface AnimateResult {
   plan: string;
   /** Bones Muse keyed that were left out, with the reason. */
   dropped: string[];
+  /** For an edit that replaced the original: its name, which the edited animation keeps. */
+  replaced?: string;
+}
+
+/** An animation being edited: its name and how it moves now (see describeMotion), for both calls. */
+export interface EditTarget {
+  name: string;
+  motion: string[];
 }
 
 /** A failure the user can act on; its message is shown as is. */
@@ -226,6 +234,96 @@ function maxTime(value: unknown): number {
   return Math.max(num((value as Record<string, unknown>).time, 0), ...Object.values(value).map(maxTime));
 }
 
+/** At most this many sample times in an edited animation's description. */
+const MAX_MOTION_SAMPLES = 12;
+
+/**
+ * How an animation moves, in the screen terms Muse keys in, posed in the Spine runtime: per keyed
+ * bone its aim (and offset, scale) at the animation's key times, then the effects it uses. Edits
+ * start from this, since the prompt and beat sheet behind an animation aren't stored.
+ */
+export function describeMotion(skeleton: Record<string, unknown>, animName: string): string[] {
+  const raw = record(record(skeleton.animations)[animName]);
+  const data = new spine.SkeletonJson(stubLoader).readSkeletonData(JSON.stringify(skeleton));
+  const anim = data.findAnimation(animName);
+  if (!anim) return [];
+  const keyed = Object.entries(record(raw.bones)).filter(([bone]) => !bone.startsWith(FX_PREFIX));
+
+  const frames = new Set<number>([0, Math.round(anim.duration * FPS)]);
+  for (const [, timelines] of keyed) {
+    for (const keys of Object.values(record(timelines))) for (const k of list(keys)) frames.add(Math.round(num(record(k).time, 0) * FPS));
+  }
+  let times = [...frames].sort((a, b) => a - b).map((f) => f / FPS);
+  if (times.length > MAX_MOTION_SAMPLES) {
+    const all = times;
+    times = Array.from({ length: MAX_MOTION_SAMPLES }, (_, i) => all[Math.round((i * (all.length - 1)) / (MAX_MOTION_SAMPLES - 1))]);
+  }
+
+  const sk = new spine.Skeleton(data);
+  const pose = (t: number | null) => {
+    sk.setToSetupPose();
+    if (t !== null) anim.apply(sk, 0, t, false, [], 1, spine.MixBlend.setup, spine.MixDirection.mixIn);
+    sk.updateWorldTransform(spine.Physics.pose);
+  };
+  pose(null);
+  const rest = new Map(keyed.map(([name]) => {
+    const b = sk.findBone(name);
+    return [name, b ? { aim: b.getWorldRotationX(), x: b.worldX, y: b.worldY } : null];
+  }));
+  const rows = new Map<string, { aims: number[]; moves: [number, number][]; scales: [number, number][] }>();
+  for (const t of times) {
+    pose(t);
+    for (const [name] of keyed) {
+      const b = sk.findBone(name);
+      const r = rest.get(name);
+      if (!b || !r) continue;
+      const row = rows.get(name) ?? { aims: [], moves: [], scales: [] };
+      const previous = row.aims[row.aims.length - 1] ?? r.aim;
+      let aim = b.getWorldRotationX();
+      while (aim - previous > 180) aim -= 360;
+      while (aim - previous < -180) aim += 360;
+      row.aims.push(aim);
+      row.moves.push([b.worldX - r.x, b.worldY - r.y]);
+      row.scales.push([b.scaleX, b.scaleY]);
+      rows.set(name, row);
+    }
+  }
+
+  const at = (i: number) => `${times[i].toFixed(2)}s`;
+  const span = (vs: number[]) => Math.max(...vs) - Math.min(...vs);
+  const lines: string[] = [];
+  for (const [name, timelines] of keyed) {
+    const row = rows.get(name);
+    const t = record(timelines);
+    if (!row) continue;
+    if ((t.rotate || t.translate) && span(row.aims) >= 2) {
+      lines.push(`- ${name} aims (rest ${Math.round(rest.get(name)?.aim ?? 0)}°): ${row.aims.map((a, i) => `${at(i)} ${Math.round(a)}°`).join(" · ")}`);
+    }
+    if (t.translate && Math.max(span(row.moves.map((m) => m[0])), span(row.moves.map((m) => m[1]))) >= 2) {
+      lines.push(`- ${name} moves from rest: ${row.moves.map(([x, y], i) => `${at(i)} (${Math.round(x)}, ${Math.round(y)})`).join(" · ")}`);
+    }
+    if (t.scale && Math.max(span(row.scales.map((m) => m[0])), span(row.scales.map((m) => m[1]))) >= 0.03) {
+      lines.push(`- ${name} scale (its own axes): ${row.scales.map(([x, y], i) => `${at(i)} ${x.toFixed(2)}×${y.toFixed(2)}`).join(" · ")}`);
+    }
+    if (t.shear) lines.push(`- ${name} has shear keys (a smear)`);
+  }
+
+  const effects: string[] = [];
+  const trails = new Set(Object.keys(record(raw.bones)).flatMap((b) => b.match(new RegExp(`^${FX_PREFIX}trail_(.+)_\\d+$`))?.[1] ?? []));
+  if (trails.size) effects.push(`glowing trails behind ${[...trails].join(", ")}`);
+  const slots = Object.entries(record(raw.slots)).filter(([slot]) => !slot.startsWith(FX_PREFIX));
+  const tinted = slots.filter(([, tl]) => ["rgba", "rgba2", "rgb", "rgb2", "alpha"].some((k) => k in record(tl))).map(([slot]) => slot);
+  const visible = readSlots(skeleton).filter((sl) => sl.setup && !sl.name.startsWith(FX_PREFIX)).length;
+  if (tinted.length && tinted.length >= visible / 2) effects.push("a whole-body flash or tint");
+  else if (tinted.length) effects.push(`tints or fades on ${tinted.join(", ")}`);
+  const swaps = slots.filter(([, tl]) => "attachment" in record(tl)).map(([slot]) => slot);
+  if (swaps.length) effects.push(`attachment swaps on ${swaps.join(", ")}`);
+  const order = list(raw.drawOrder).map((k) => num(record(k).time, 0).toFixed(2));
+  if (order.length) effects.push(`draw order changes at ${order.join(", ")} s`);
+  lines.push(`- Effects: ${effects.join("; ") || "none"}`);
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // Asking Muse
 // ---------------------------------------------------------------------------
@@ -317,9 +415,15 @@ Reply with JSON only, no markdown:
 {"name": "<short animation name, 1–3 words>", "notes": "<one or two sentences for the user on what you animated>", "bones": [{"bone": "<bone name>", "rotate": [{"t": 0, "aim": 60}, {"t": 0.4, "aim": 150, "ease": "settle"}, {"t": 0.52, "aim": -20, "ease": "snap"}], "move": [{"t": 0, "x": 0, "y": 0}], "scale": [{"t": 0, "x": 1, "y": 1, "ease": "smooth"}], "shear": [{"t": 0.5, "x": 0, "y": 25}]}], "flash": [{"t": 0.52, "color": "ffffff", "slots": "all", "hold": 0.03, "fade": 0.15}], "slots": [{"slot": "<slot name>", "color": [{"t": 0, "color": "ffffffff"}], "attachment": [{"t": 0.3, "name": "<attachment>"}]}], "drawOrder": [{"t": 0.3, "front": ["<slot>"], "back": []}, {"t": 0.8, "front": [], "back": []}], "trails": [{"bone": "<weapon bone>", "color": "ffcc66", "count": 3}]}
 Each bone entry needs at least one of rotate, move, scale or shear; leave out the ones it doesn't use, and leave out effects you don't use. "t" is seconds from 0 to the duration. "ease" is optional and defaults to "smooth"; the first key's ease is ignored.`;
 
-function userMessage(input: AnimateInput, rig: Rig, skeleton: Record<string, unknown>, plan: string | null): string {
+/** Added to both system prompts when an existing animation is being edited. */
+const EDIT_NOTE = `
+
+This is an edit of an existing animation. You get how it moves now, sampled from the runtime in the same screen terms (aims, offsets from rest), and its effects. Change what the edit request asks for and keep everything else: the same beats, timing, poses, numbers and effects, as close to the current motion as you can. Don't redesign parts the request doesn't mention.`;
+
+function userMessage(input: AnimateInput, rig: Rig, skeleton: Record<string, unknown>, plan: string | null, edit: EditTarget | null): string {
   return [
-    `Request: ${input.prompt}`,
+    edit ? `Edit request for the existing animation "${edit.name}": ${input.prompt}` : `Request: ${input.prompt}`,
+    ...(edit ? ["", `"${edit.name}" as it is now (screen space, +y up):`, ...edit.motion] : []),
     ...(plan ? ["", "Director's beat sheet:", plan, ""] : []),
     `Duration: ${input.durationSec} s. ${input.loop ? "Loops: yes, the last key of every timeline must match its first." : "Loops: no, it plays once."}`,
     `Rig size: ${r1(rig.width)} × ${r1(rig.height)} skeleton units.`,
@@ -339,7 +443,29 @@ function userMessage(input: AnimateInput, rig: Rig, skeleton: Record<string, unk
 export async function generateAnimation(asset: AssetRow, input: AnimateInput, signal: AbortSignal): Promise<AnimateResult> {
   if (!asset.files) throw new AnimateError("This remix has no files to animate.", 404);
   const skeleton = await loadSkeleton(asset.files.skeleton, input.skeleton, signal);
-  return animateSkeleton(asset.id, skeleton, input, signal, (built, next) => save(asset, next, built, input));
+  return animateSkeleton(asset.id, skeleton, input, signal, (built, next) => save(asset, next, built, input, null));
+}
+
+/**
+ * Has Muse Spark rework one of the remix's generated animations from an edit request. The result
+ * replaces the original under its name, or with `keepOriginal` is added beside it.
+ */
+export async function editAnimation(asset: AssetRow, name: string, input: AnimateInput, keepOriginal: boolean, signal: AbortSignal): Promise<AnimateResult> {
+  if (!asset.files) throw new AnimateError("This remix has no files to animate.", 404);
+  await assertGenerated(asset, name, "edited");
+  const skeleton = await loadSkeleton(asset.files.skeleton, input.skeleton, signal);
+  const motion = describeMotion(skeleton, name);
+  if (motion.length === 0) throw new AnimateError(`The remix's skeleton has no animation "${name}".`, 404);
+  return animateSkeleton(asset.id, skeleton, input, signal, (built, next) => save(asset, next, built, input, keepOriginal ? null : name), { name, motion });
+}
+
+/** Throws unless `name` is one of the remix's animations that its original rig doesn't have. */
+async function assertGenerated(asset: AssetRow, name: string, verb: "edited" | "deleted" | "renamed") {
+  if (!asset.animations.some((a) => a.name === name)) throw new AnimateError(`This remix has no animation "${name}".`, 404);
+  // The original may be someone else's private rig; only its animation names are read.
+  const base = asset.remix_of ? await getAssetRow(asset.remix_of, asset.owner_id, true) : null;
+  if (!base) throw new AnimateError(`Only animations made with Animate on a remix can be ${verb}.`);
+  if (base.animations.some((a) => a.name === name)) throw new AnimateError(`"${name}" is one of the rig's own animations, so it can't be ${verb}.`);
 }
 
 /**
@@ -353,24 +479,25 @@ export async function animateSkeleton<T>(
   input: AnimateInput,
   signal: AbortSignal,
   keep: (built: BuiltAnimation, skeleton: Record<string, unknown>) => Promise<T>,
+  edit: EditTarget | null = null,
 ): Promise<T> {
   const rig = readRig(skeleton);
   if (rig.bones.size === 0) throw new AnimateError("This rig has no bones to animate.");
 
-  const run: RunLog = { assetId: logId, startedAt: new Date().toISOString(), model: MUSE_MODEL, input: { ...input, skeleton: null }, attempts: [] };
+  const run: RunLog = { assetId: logId, startedAt: new Date().toISOString(), model: MUSE_MODEL, input: { ...input, skeleton: null }, ...(edit ? { edit: edit.name } : {}), attempts: [] };
   const started = Date.now();
   try {
-    run.planRequest = userMessage(input, rig, skeleton, null);
-    const plan = (await callMuse("plan", PLAN_SYSTEM_PROMPT, run.planRequest, input.images, signal, run))?.trim().slice(0, 4000);
+    run.planRequest = userMessage(input, rig, skeleton, null, edit);
+    const plan = (await callMuse("plan", PLAN_SYSTEM_PROMPT + (edit ? EDIT_NOTE : ""), run.planRequest, input.images, signal, run))?.trim().slice(0, 4000);
     if (!plan) throw new AnimateError("Muse couldn't plan the animation. Try again.", 502);
     run.plan = plan;
 
-    const request = (run.request = userMessage(input, rig, skeleton, plan));
+    const request = (run.request = userMessage(input, rig, skeleton, plan, edit));
     let finished = null;
     // One retry when the reply can't be used: a text call is cheap, and a bad JSON reply is the common failure.
     for (let attempt = 0; attempt < 2 && !finished; attempt++) {
       const retryNote = attempt > 0 ? "\n\nYour last reply couldn't be used (not valid JSON, or no listed bone was keyed). Reply with the JSON object only." : "";
-      const content = await callMuse("keys", SYSTEM_PROMPT, request + retryNote, input.images, signal, run);
+      const content = await callMuse("keys", SYSTEM_PROMPT + (edit ? EDIT_NOTE : ""), request + retryNote, input.images, signal, run);
       finished = content === null ? null : finishAnimation(skeleton, input, plan, content);
     }
     if (!finished) throw new AnimateError("Muse's animation came back unreadable. Try again or reword the request.", 502);
@@ -754,9 +881,13 @@ function toTimeline(keys: Key[], loop: boolean, fields: (v: number[]) => Record<
   });
 }
 
+/** An animation name with only letters, numbers, spaces, - and _, at most 40 characters; empty if nothing is left. */
+function cleanName(value: unknown): string {
+  return typeof value === "string" ? value.replace(/[^\w -]/g, "").replace(/\s+/g, " ").trim().slice(0, 40) : "";
+}
+
 function uniqueName(value: unknown, existing: Set<string>): string {
-  const cleaned = typeof value === "string" ? value.replace(/[^\w -]/g, "").replace(/\s+/g, " ").trim().slice(0, 40) : "";
-  const base = cleaned || "generated";
+  const base = cleanName(value) || "generated";
   let name = base;
   for (let i = 2; existing.has(name); i++) name = `${base} ${i}`;
   return name;
@@ -778,7 +909,8 @@ const round4 = (v: number) => Math.round(v * 10000) / 10000;
 // Saving
 // ---------------------------------------------------------------------------
 
-async function save(asset: AssetRow, skeleton: Record<string, unknown>, built: BuiltAnimation, input: AnimateInput): Promise<AnimateResult> {
+/** Saves `built` (already in `skeleton`) as a new animation, or in place of `replacing` under its name. */
+async function save(asset: AssetRow, skeleton: Record<string, unknown>, built: BuiltAnimation, input: AnimateInput, replacing: string | null): Promise<AnimateResult> {
   // Re-read the row: if the skeleton was saved from the tweak panel or a part fix meanwhile,
   // writing ours would throw those edits away.
   const current = await getAssetRow(asset.id, asset.owner_id);
@@ -788,19 +920,92 @@ async function save(asset: AssetRow, skeleton: Record<string, unknown>, built: B
   }
 
   const next = skeleton;
+  const name = replacing ?? built.name;
+  let animations = [...current.animations, { name, durationSec: input.durationSec, loop: input.loop }];
+  if (replacing) {
+    // The edited animation takes the original's name and place.
+    const all = record(next.animations);
+    next.animations = Object.fromEntries(Object.entries(all).flatMap(([k, v]) => (k === built.name ? [] : k === replacing ? [[k, all[built.name]]] : [[k, v]])));
+    animations = current.animations.map((a) => (a.name === replacing ? { name, durationSec: input.durationSec, loop: input.loop } : a));
+  }
+  const animation = animations.find((a) => a.name === name)!;
   const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_anim_${randomUUID().slice(0, 8)}`;
   const key = await putFile(folder, "skeleton.json", JSON.stringify(next));
-  const animation = { name: built.name, durationSec: input.durationSec, loop: input.loop };
   const row = check(
     await db()
       .from("assets")
-      .update({ files: { ...current.files, skeleton: key }, animations: [...current.animations, animation], rig_hash: rigHashOf(next) })
+      .update({ files: { ...current.files, skeleton: key }, animations, rig_hash: rigHashOf(next) })
       .eq("id", asset.id)
       .select(ASSET_COLUMNS)
       .single()
       .overrideTypes<AssetRow, { merge: false }>(),
   );
-  return { asset: toSpineAsset(row), animation, notes: built.notes, plan: built.plan, dropped: built.dropped };
+  return { asset: toSpineAsset(row), animation, notes: built.notes, plan: built.plan, dropped: built.dropped, ...(replacing ? { replaced: replacing } : {}) };
+}
+
+/**
+ * Removes a generated animation from the remix's skeleton and `animations`. Only animations the
+ * original rig (`remix_of`) doesn't have can go, so the rig's own stay. Run logs are kept.
+ */
+export async function deleteAnimation(asset: AssetRow, name: string): Promise<ReturnType<typeof toSpineAsset>> {
+  if (!asset.files) throw new AnimateError("This remix has no files.", 404);
+  await assertGenerated(asset, name, "deleted");
+  return rewriteAnimations(
+    asset,
+    "unanim",
+    (all) => Object.fromEntries(Object.entries(all).filter(([k]) => k !== name)),
+    asset.animations.filter((a) => a.name !== name),
+    "deleted",
+  );
+}
+
+/** Renames a generated animation, keeping its place in the list. `newName` is cleaned like Muse's names. */
+export async function renameAnimation(asset: AssetRow, name: string, newName: string): Promise<ReturnType<typeof toSpineAsset>> {
+  if (!asset.files) throw new AnimateError("This remix has no files.", 404);
+  const cleaned = cleanName(newName);
+  if (!cleaned) throw new AnimateError("Give the animation a name: letters, numbers, spaces, - or _.");
+  if (cleaned === name) return toSpineAsset(asset);
+  await assertGenerated(asset, name, "renamed");
+  if (asset.animations.some((a) => a.name === cleaned)) throw new AnimateError(`This remix already has an animation called "${cleaned}".`, 409);
+  const rename = (k: string) => (k === name ? cleaned : k);
+  return rewriteAnimations(
+    asset,
+    "rename",
+    (all) => Object.fromEntries(Object.entries(all).map(([k, v]) => [rename(k), v])),
+    asset.animations.map((a) => ({ ...a, name: rename(a.name) })),
+    "renamed",
+  );
+}
+
+/**
+ * Stores the remix's skeleton with `change` applied to its animations, and `animations` as the
+ * list. Generated animations are always in skeleton JSON (see save), so only JSON is handled.
+ */
+async function rewriteAnimations(
+  asset: AssetRow,
+  tag: string,
+  change: (all: Record<string, unknown>) => Record<string, unknown>,
+  animations: AssetRow["animations"],
+  verb: string,
+): Promise<ReturnType<typeof toSpineAsset>> {
+  if (!asset.files) throw new AnimateError("This remix has no files.", 404);
+  const skeleton = await loadSkeleton(asset.files.skeleton, null, AbortSignal.timeout(30_000));
+  const next = { ...skeleton, animations: change(record(skeleton.animations)) };
+  const folder = `${new Date().toISOString().replace(/[:.]/g, "-")}_${tag}_${randomUUID().slice(0, 8)}`;
+  const key = await putFile(folder, "skeleton.json", JSON.stringify(next));
+  const row = check(
+    await db()
+      .from("assets")
+      .update({ files: { ...asset.files, skeleton: key }, animations, rig_hash: rigHashOf(next) })
+      .eq("id", asset.id)
+      // Like save: if the skeleton changed since it was read, writing this would undo that change.
+      .eq("files->>skeleton", asset.files.skeleton)
+      .select(ASSET_COLUMNS)
+      .maybeSingle()
+      .overrideTypes<AssetRow | null, { merge: false }>(),
+  );
+  if (!row) throw new AnimateError(`The remix changed while the animation was being ${verb}. Try again.`, 409);
+  return toSpineAsset(row);
 }
 
 /** One run, as saved to run.json. */
@@ -809,6 +1014,8 @@ interface RunLog {
   startedAt: string;
   model: string;
   input: AnimateInput;
+  /** The animation an edit started from. */
+  edit?: string;
   /** The user messages of the planning call and the keyframing call. */
   planRequest?: string;
   request?: string;

@@ -858,3 +858,44 @@ export const ZOMBIE_ARENA_CHARACTERS: ArenaCharacterConfig[] = [
 ];
 
 
+
+/** A clip Muse Spark keyframed onto a rig that never had it, with the prompt that asked for it when we have it. */
+export interface AddedAnimation {
+  name: string;
+  prompt: string | null;
+}
+
+/**
+ * Public remixes carrying animations their base rig doesn't have, all generated in the remix
+ * page's Animate tab. Names match the stored skeletons; prompts come from the backend's animation
+ * run logs (none were logged for the tempest elemental's, which ran in production).
+ */
+export const ANIMATION_SHOWCASE_RIGS: { assetId: string; added: AddedAnimation[] }[] = [
+  {
+    assetId: "skeleton-priest-vestments-7f41d551",
+    added: [
+      { name: "Thriller Stomp", prompt: "do the thriller." },
+      { name: "Victory Dance", prompt: "Make him do a victory dance" },
+      { name: "Eruption Cast", prompt: "Animate a spell casting animation" },
+      { name: "Victory Shuffle", prompt: "do a victory shuffle" },
+    ],
+  },
+  {
+    assetId: "leaping-two-hand-slam-7c5197ab",
+    added: [
+      {
+        name: "Meteor Slash",
+        prompt: "A jumping attack where the orc is holding two hands on the axe and jumping down on a vertical slash.",
+      },
+      { name: "Jolly Orc Jig", prompt: "Make him dance in a jolly way" },
+    ],
+  },
+  {
+    assetId: "tempest-wind-elemental-523d43e4",
+    added: [
+      { name: "hadoken blast", prompt: null },
+      { name: "Double Punch", prompt: null },
+      { name: "Victory Bounce", prompt: null },
+    ],
+  },
+];

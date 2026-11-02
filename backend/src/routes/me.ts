@@ -3,7 +3,7 @@ import express, { Router } from "express";
 import { deleteAsset, getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
-import { AnimateError, generateAnimation, parseAnimateInput } from "../lib/animate.js";
+import { AnimateError, deleteAnimation, editAnimation, renameAnimation, generateAnimation, parseAnimateInput } from "../lib/animate.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
 import { copyRemix } from "../lib/copies.js";
 import { getPartFixView, isFixRunning, startPartFix } from "../lib/part-fix-jobs.js";
@@ -316,6 +316,90 @@ meRouter.post("/remixes/:assetId/animations", express.json({ limit: MAX_SKELETON
     }
     console.error("Generating an animation failed", error);
     res.status(502).json({ error: error instanceof AiTimeoutError ? "Muse took too long to write the animation. Try again." : "Couldn't make the animation. Try again." });
+  }
+});
+
+/**
+ * POST /me/remixes/:assetId/animations/:name/edit  body = { prompt, durationSec, loop, images?, keepOriginal? } → 201 AnimateResult
+ * Muse reworks one of the remix's generated animations from the edit request. It replaces the
+ * original under its name unless `keepOriginal`, which adds it beside it. Doesn't use the allowance.
+ */
+meRouter.post("/remixes/:assetId/animations/:name/edit", express.json({ limit: MAX_SKELETON_BYTES }), async (req, res) => {
+  const input = parseAnimateInput(req.body);
+  const keepOriginal: unknown = req.body?.keepOriginal ?? false;
+  const name = req.params.name;
+  if ("error" in input || typeof keepOriginal !== "boolean" || !name || name.length > 200) {
+    res.status(400).json({ error: "error" in input ? input.error : "Expected { prompt, durationSec, loop, keepOriginal? } and an animation name." });
+    return;
+  }
+  const asset = await ownedAsset(userIdOf(res), req.params.assetId);
+  if (!asset?.files) {
+    res.status(404).json({ error: "You can only edit animations on your own remixes." });
+    return;
+  }
+  try {
+    res.status(201).json(await editAnimation(asset, name, input, keepOriginal, AbortSignal.timeout(MUSE_TIMEOUT_MS * 2)));
+  } catch (error) {
+    if (error instanceof AnimateError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    console.error("Editing an animation failed", error);
+    res.status(502).json({ error: error instanceof AiTimeoutError ? "Muse took too long to edit the animation. Try again." : "Couldn't edit the animation. Try again." });
+  }
+});
+
+/**
+ * PATCH /me/remixes/:assetId/animations/:name  body = { name } → SpineAsset with it renamed, 400
+ * (one of the rig's own animations, or no usable name), 404, or 409 (the name is taken, or the
+ * skeleton changed meanwhile). Only generated animations can be renamed.
+ */
+meRouter.patch("/remixes/:assetId/animations/:name", json, async (req, res) => {
+  const name = req.params.name;
+  const newName: unknown = req.body?.name;
+  if (!name || name.length > 200 || typeof newName !== "string" || newName.length > 200) {
+    res.status(400).json({ error: "Expected { name } with the animation's new name." });
+    return;
+  }
+  const asset = await ownedAsset(userIdOf(res), req.params.assetId);
+  if (!asset?.files) {
+    res.status(404).json({ error: "You can only rename animations on your own remixes." });
+    return;
+  }
+  try {
+    res.json(await renameAnimation(asset, name, newName));
+  } catch (error) {
+    if (error instanceof AnimateError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+});
+
+/**
+ * DELETE /me/remixes/:assetId/animations/:name → SpineAsset without it, 400 (one of the rig's own
+ * animations), 404 or 409 (the skeleton changed meanwhile). Only generated animations can be deleted.
+ */
+meRouter.delete("/remixes/:assetId/animations/:name", async (req, res) => {
+  const name = req.params.name;
+  if (!name || name.length > 200) {
+    res.status(400).json({ error: "Name the animation to delete." });
+    return;
+  }
+  const asset = await ownedAsset(userIdOf(res), req.params.assetId);
+  if (!asset?.files) {
+    res.status(404).json({ error: "You can only delete animations from your own remixes." });
+    return;
+  }
+  try {
+    res.json(await deleteAnimation(asset, name));
+  } catch (error) {
+    if (error instanceof AnimateError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
   }
 });
 

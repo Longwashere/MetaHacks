@@ -4,7 +4,7 @@
 
 import type { Session } from "~/lib/auth.server";
 import { ASSET_CATEGORIES } from "~/lib/types";
-import type { AnimateInput, AnimateResult, AssetCategory, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AnimateEdit, AnimateInput, AnimateResult, AssetCategory, AssetQuery, AssetVersion, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -326,13 +326,46 @@ export async function animateRemix(
   session: Session,
   assetId: string,
   input: AnimateInput,
+  edit: AnimateEdit | null = null,
 ): Promise<{ ok: true; result: AnimateResult } | { ok: false; error: string }> {
   try {
-    const result = await backend<AnimateResult>(`/me/remixes/${id(assetId)}/animations`, { session, method: "POST", body: input });
+    const path = edit ? `/me/remixes/${id(assetId)}/animations/${encodeURIComponent(edit.name)}/edit` : `/me/remixes/${id(assetId)}/animations`;
+    const result = await backend<AnimateResult>(path, { session, method: "POST", body: edit ? { ...input, keepOriginal: edit.keepOriginal } : input });
     return { ok: true, result };
   } catch (error) {
     if (!(error instanceof BackendError) || error.status === 401 || (error.status >= 500 && error.status !== 502)) throw error;
     return { ok: false, error: errorMessage(error.body, "Couldn't make the animation.") };
+  }
+}
+
+/** PATCH /me/remixes/:assetId/animations/:name — renames a generated animation; the rig's own can't be renamed. */
+export async function renameRemixAnimation(
+  session: Session,
+  assetId: string,
+  name: string,
+  newName: string,
+): Promise<{ ok: true; asset: SpineAsset } | { ok: false; error: string }> {
+  try {
+    const asset = await backend<SpineAsset>(`/me/remixes/${id(assetId)}/animations/${encodeURIComponent(name)}`, { session, method: "PATCH", body: { name: newName } });
+    return { ok: true, asset };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status === 401 || error.status >= 500) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't rename the animation.") };
+  }
+}
+
+/** DELETE /me/remixes/:assetId/animations/:name — removes a generated animation; the rig's own can't be deleted. */
+export async function deleteRemixAnimation(
+  session: Session,
+  assetId: string,
+  name: string,
+): Promise<{ ok: true; asset: SpineAsset } | { ok: false; error: string }> {
+  try {
+    const asset = await backend<SpineAsset>(`/me/remixes/${id(assetId)}/animations/${encodeURIComponent(name)}`, { session, method: "DELETE" });
+    return { ok: true, asset };
+  } catch (error) {
+    if (!(error instanceof BackendError) || error.status === 401 || error.status >= 500) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't delete the animation.") };
   }
 }
 

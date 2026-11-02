@@ -353,6 +353,14 @@ export interface AnimateInput {
   images?: string[];
 }
 
+/** An edit of one of the remix's generated animations: POST /me/remixes/:assetId/animations/:name/edit with AnimateInput & { keepOriginal }. */
+export interface AnimateEdit {
+  /** The animation to edit. */
+  name: string;
+  /** Add the edited one beside it instead of replacing it. */
+  keepOriginal: boolean;
+}
+
 /** A new animation Muse wrote and saved into the remix's skeleton. */
 export interface AnimateResult {
   /** The remix with the new skeleton and the animation added to `animations`. */
@@ -363,4 +371,6 @@ export interface AnimateResult {
   plan: string;
   /** Bones Muse keyed that were left out, with the reason. */
   dropped: string[];
+  /** For an edit that replaced the original: its name, which the edited animation keeps. */
+  replaced?: string;
 }
