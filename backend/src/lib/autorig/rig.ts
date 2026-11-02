@@ -2,6 +2,7 @@ import * as spine from "@esotericsoftware/spine-core";
 import Delaunator from "delaunator";
 import sharp from "sharp";
 import { stubLoader } from "../animate-fx.js";
+import { fillAndPack, type PackedRegion, type PartCut } from "./slice.js";
 import type { AutoRigView, Cutout, Joints, Point } from "./types.js";
 
 // Builds a Spine 4.2 rig from a cutout and its joints (AUTO_RIG_PLAN.md, "How the rig is built").
@@ -22,8 +23,10 @@ type Json = Record<string, unknown>;
 const GRID = 300;
 /** Width of the blend between two bones at a joint, as a share of the character's height. */
 const BLEND_SHARE = 0.032;
-/** How far a part reaches past its own territory, in blend widths. */
+/** How far a part reaches past its own territory, in blend widths (one-texture rigs). */
 const OVERLAP = 2.2;
+/** How far a sliced part's hidden fill reaches from a joint, in limb half-widths there. */
+const HIDDEN_REACH = 1.5;
 /** Spacing of interior mesh points, as a share of the character's height. */
 const SPACING_SHARE = 0.035;
 /** Bones per vertex. */
@@ -59,12 +62,20 @@ interface PartDef {
 export interface BuiltRig {
   skeleton: Json;
   atlas: string;
-  /** The atlas page (the cutout as PNG). */
+  /** The atlas page as PNG, and as pixels. */
   page: Buffer;
+  pageImage: Cutout;
+  /** The page's regions and where each came from in the cutout. */
+  regions: PackedRegion[];
   stats: { parts: { name: string; vertices: number; triangles: number }[] };
 }
 
-export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView): Promise<BuiltRig> {
+export interface RigOptions {
+  /** Cut the art into 14 parts with their hidden areas filled (default), or draw it as one texture. */
+  slice?: boolean;
+}
+
+export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, { slice = true }: RigOptions = {}): Promise<BuiltRig> {
   const bones = boneDefs(joints);
   const parts = partDefs();
   const byName = new Map(bones.map((b) => [b.name, b]));
@@ -88,50 +99,156 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView): 
   const height = map.figureHeight;
   const sigma = (height * BLEND_SHARE) / map.cell;
 
-  // Meshes.
-  const skinNames = map.boneNames;
+  const spacing = (height * SPACING_SHARE) / map.cell;
   const boneIndex = new Map(bones.map((b, i) => [b.name, i]));
+
+  /** A vertex's weights over `allowed` bones by distance through the silhouette, as Spine's weighted vertex entries. */
+  const weigh = (p: Point, allowed: string[]): number[] => {
+    const d = allowed.map((name) => map.distance(name, p));
+    const nearest = Math.min(...d);
+    const weighted = d
+      .map((di, i) => ({ name: allowed[i], w: Math.exp(-(((di - nearest) / sigma) ** 2)) }))
+      .sort((a, b) => b.w - a.w)
+      .slice(0, MAX_INFLUENCES)
+      .filter((x) => x.w >= MIN_WEIGHT);
+    const total = weighted.reduce((s, x) => s + x.w, 0);
+    const out = [weighted.length];
+    const s = toSpine(p);
+    for (const { name, w } of weighted) {
+      const b = world.get(name)!;
+      const r = rad(-b.rotation);
+      const dx = s.x - b.x;
+      const dy = s.y - b.y;
+      out.push(boneIndex.get(name)!, round(dx * Math.cos(r) - dy * Math.sin(r)), round(dx * Math.sin(r) + dy * Math.cos(r)), round(w / total, 4));
+    }
+    return out;
+  };
+
   const attachments: Record<string, Json> = {};
   const stats: BuiltRig["stats"]["parts"] = [];
-  for (const part of parts) {
-    const region = map.partRegion(part.bones, sigma * OVERLAP);
-    const mesh = triangulate(map, region, part.bones.map((n) => byName.get(n)!), (height * SPACING_SHARE) / map.cell);
-    if (!mesh.triangles.length) continue;
-    const vertices: number[] = [];
-    const uvs: number[] = [];
-    for (const p of mesh.points) {
-      uvs.push(round(p.x / cut.width, 5), round(p.y / cut.height, 5));
-      const d = skinNames.map((name) => map.distance(name, p));
-      const nearest = Math.min(...d);
-      const weighted = d
-        .map((di, i) => ({ name: skinNames[i], w: Math.exp(-(((di - nearest) / sigma) ** 2)) }))
-        .sort((a, b) => b.w - a.w)
-        .slice(0, MAX_INFLUENCES)
-        .filter((x) => x.w >= MIN_WEIGHT);
-      const total = weighted.reduce((s, x) => s + x.w, 0);
-      vertices.push(weighted.length);
-      const s = toSpine(p);
-      for (const { name, w } of weighted) {
-        const b = world.get(name)!;
-        const r = rad(-b.rotation);
-        const dx = s.x - b.x;
-        const dy = s.y - b.y;
-        vertices.push(boneIndex.get(name)!, round(dx * Math.cos(r) - dy * Math.sin(r)), round(dx * Math.sin(r) + dy * Math.cos(r)), round(w / total, 4));
-      }
+  let order: string[];
+  let slotBones: Map<string, string>;
+  let pageImage: Cutout;
+  let regions: PackedRegion[];
+
+  if (!slice) {
+    // One texture, six meshes that overlap at the joints.
+    for (const part of parts) {
+      const region = map.partRegion(part.bones, sigma * OVERLAP);
+      const mesh = triangulate(map, region, part.bones.map((n) => byName.get(n)!), spacing);
+      if (!mesh.triangles.length) continue;
+      attachments[part.name] = {
+        [part.name]: {
+          type: "mesh",
+          path: PAGE_NAME,
+          uvs: mesh.points.flatMap((p) => [round(p.x / cut.width, 5), round(p.y / cut.height, 5)]),
+          triangles: mesh.triangles,
+          vertices: mesh.points.flatMap((p) => weigh(p, map.boneNames)),
+          hull: mesh.hull,
+          width: cut.width,
+          height: cut.height,
+        },
+      };
+      stats.push({ name: part.name, vertices: mesh.points.length, triangles: mesh.triangles.length / 3 });
     }
-    attachments[part.name] = {
-      [part.name]: {
-        type: "mesh",
-        path: PAGE_NAME,
-        uvs,
-        triangles: mesh.triangles,
-        vertices,
-        hull: mesh.hull,
-        width: cut.width,
-        height: cut.height,
-      },
-    };
-    stats.push({ name: part.name, vertices: mesh.points.length, triangles: mesh.triangles.length / 3 });
+    // Far limbs first. In a turned view the character's right side is nearer.
+    order = view === "right" ? ["arm_l", "leg_l", "leg_r", "torso", "head", "arm_r"] : ["leg_r", "leg_l", "torso", "head", "arm_r", "arm_l"];
+    slotBones = new Map(parts.map((p) => [p.name, p.slotBone]));
+    pageImage = cut;
+    regions = [{ name: PAGE_NAME, x: 0, y: 0, width: cut.width, height: cut.height, srcX: 0, srcY: 0 }];
+  } else {
+    // Fourteen parts, each with its own region. See AUTO_RIG_PLAN.md, "Slicing".
+    const sliced = slicedParts(view);
+    order = sliced.order;
+    slotBones = new Map(sliced.parts.map((p) => [p.name, p.slotBone]));
+    const partOfBone = new Map(sliced.parts.flatMap((p, i) => p.bones.map((b) => [map.boneNames.indexOf(b), i] as const)));
+    const label = new Int16Array(map.mask.length).fill(-1);
+    for (let c = 0; c < label.length; c++) if (map.mask[c]) label[c] = partOfBone.get(map.nearestBone(c)) ?? -1;
+    const depth = map.depth();
+    const rank = (name: string) => order.indexOf(name);
+
+    const cuts: PartCut[] = [];
+    const meshes: { part: PartDef; mesh: PartMesh; own: Uint8Array; allowed: string[] }[] = [];
+    sliced.parts.forEach((part, pi) => {
+      const own = new Uint8Array(label.length);
+      for (let c = 0; c < label.length; c++) if (label[c] === pi) own[c] = 1;
+      // Hidden areas: around each joint where another part is drawn over this one.
+      const hidden = new Uint8Array(label.length);
+      const allowed = [...part.bones];
+      for (const j of sliced.joints) {
+        if (j.parts[0] !== part.name && j.parts[1] !== part.name) continue;
+        const other = j.parts[0] === part.name ? j.parts[1] : j.parts[0];
+        const otherIndex = sliced.parts.findIndex((p) => p.name === other);
+        if (rank(other) > rank(part.name)) {
+          const at = map.toCell(joints[j.at]);
+          const radius = Math.max(depth[map.cellAt(joints[j.at])], 2) * HIDDEN_REACH;
+          for (let c = 0; c < label.length; c++) {
+            if (label[c] !== otherIndex) continue;
+            const x = c % map.gw;
+            if (Math.hypot(x - at.x, (c - x) / map.gw - at.y) <= radius) hidden[c] = 1;
+          }
+        } else {
+          // On top here: this part's end bends with the part under it.
+          allowed.push(...sliced.parts[otherIndex].bones);
+        }
+      }
+      // The mesh reaches a cell past the cut into its neighbours (drawn clear there), so the
+      // triangles along the cut aren't dropped and every own pixel is covered.
+      const region = map.pad(grow(own.map((v, c) => v | hidden[c]), map.gw, map.gh).map((v, c) => v & map.mask[c]));
+      if (!region.some((v) => v)) return;
+      // Pixels: own cells (and the soft edge beside them) keep their art; hidden cells get filled.
+      let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+      for (let c = 0; c < region.length; c++) {
+        if (!region[c]) continue;
+        const x = c % map.gw;
+        const y = (c - x) / map.gw;
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+      }
+      const px0 = Math.max(0, Math.floor(x0 * map.cell));
+      const py0 = Math.max(0, Math.floor(y0 * map.cell));
+      const px1 = Math.min(cut.width, Math.ceil((x1 + 1) * map.cell));
+      const py1 = Math.min(cut.height, Math.ceil((y1 + 1) * map.cell));
+      const kind = new Uint8Array((px1 - px0) * (py1 - py0));
+      for (let y = py0; y < py1; y++) {
+        for (let x = px0; x < px1; x++) {
+          let c = Math.floor(y / map.cell) * map.gw + Math.floor(x / map.cell);
+          if (!region[c]) continue;
+          if (!map.mask[c]) c = map.nearestSolidOf(c);
+          kind[(y - py0) * (px1 - px0) + x - px0] = c >= 0 && own[c] ? 1 : c >= 0 && hidden[c] ? 2 : 0;
+        }
+      }
+      cuts.push({ name: part.name, x0: px0, y0: py0, x1: px1, y1: py1, kind });
+      const mesh = triangulate(map, region, part.bones.map((n) => byName.get(n)!), spacing);
+      if (mesh.triangles.length) meshes.push({ part, mesh, own, allowed });
+    });
+
+    const packed = fillAndPack(cut, cuts);
+    pageImage = packed.page;
+    regions = packed.regions;
+    for (const { part, mesh, own, allowed } of meshes) {
+      const r = regions.find((x) => x.name === part.name)!;
+      attachments[part.name] = {
+        [part.name]: {
+          type: "mesh",
+          path: part.name,
+          uvs: mesh.points.flatMap((p) => [round((p.x - r.srcX) / r.width, 5), round((p.y - r.srcY) / r.height, 5)]),
+          triangles: mesh.triangles,
+          // Hidden fill moves only with its own part; its own art may also bend with the part beneath.
+          vertices: mesh.points.flatMap((p) => {
+            let c = map.cellAt(p);
+            if (!map.mask[c]) c = map.nearestSolidOf(c);
+            return weigh(p, c >= 0 && own[c] ? allowed : part.bones);
+          }),
+          hull: mesh.hull,
+          width: r.width,
+          height: r.height,
+        },
+      };
+      stats.push({ name: part.name, vertices: mesh.points.length, triangles: mesh.triangles.length / 3 });
+    }
   }
 
   // Bones in parent space.
@@ -152,9 +269,7 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView): 
     return out;
   });
 
-  // Draw order: far limbs first. In a turned view the character's right side is nearer.
-  const order = view === "right" ? ["arm_l", "leg_l", "leg_r", "torso", "head", "arm_r"] : ["leg_r", "leg_l", "torso", "head", "arm_r", "arm_l"];
-  const slots = order.filter((n) => attachments[n]).map((n) => ({ name: n, bone: parts.find((p) => p.name === n)!.slotBone, attachment: n }));
+  const slots = order.filter((n) => attachments[n]).map((n) => ({ name: n, bone: slotBones.get(n)!, attachment: n }));
 
   const skeleton: Json = {
     skeleton: { spine: SPINE_VERSION, x: round(-originX), y: round(originY - cut.height), width: cut.width, height: cut.height, fps: 30 },
@@ -166,9 +281,42 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView): 
   };
   fixBendDirections(skeleton, (name) => world.get(name)!);
 
-  const atlas = `${PAGE_NAME}.png\nsize: ${cut.width}, ${cut.height}\nfilter: Linear, Linear\n${PAGE_NAME}\nbounds: 0, 0, ${cut.width}, ${cut.height}\n`;
-  const page = await sharp(cut.rgba, { raw: { width: cut.width, height: cut.height, channels: 4 } }).png().toBuffer();
-  return { skeleton, atlas, page, stats: { parts: stats } };
+  const atlas =
+    `${PAGE_NAME}.png\nsize: ${pageImage.width}, ${pageImage.height}\nfilter: Linear, Linear\n` +
+    regions.map((r) => `${r.name}\nbounds: ${r.x}, ${r.y}, ${r.width}, ${r.height}\n`).join("");
+  const page = await sharp(pageImage.rgba, { raw: { width: pageImage.width, height: pageImage.height, channels: 4 } }).png().toBuffer();
+  return { skeleton, atlas, page, pageImage, regions, stats: { parts: stats } };
+}
+
+/**
+ * The sliced parts, the joints between them and the draw order (back to front). At each joint the
+ * part drawn later is on top; the part under it gets its hidden area filled there.
+ */
+function slicedParts(view: AutoRigView): { parts: PartDef[]; joints: { at: keyof Joints; parts: [string, string] }[]; order: string[] } {
+  const parts: PartDef[] = [{ name: "head", bones: ["neck", "head"], slotBone: "head" }, { name: "torso", bones: ["spine", "chest"], slotBone: "chest" }];
+  for (const s of SIDES) {
+    for (const b of [`upper_arm_${s}`, `forearm_${s}`, `hand_${s}`, `thigh_${s}`, `shin_${s}`, `foot_${s}`]) parts.push({ name: b, bones: [b], slotBone: b });
+  }
+  const joints: { at: keyof Joints; parts: [string, string] }[] = [{ at: "neck", parts: ["head", "torso"] }];
+  for (const s of SIDES) {
+    joints.push(
+      { at: `shoulder_${s}`, parts: [`upper_arm_${s}`, "torso"] },
+      { at: `elbow_${s}`, parts: [`forearm_${s}`, `upper_arm_${s}`] },
+      { at: `wrist_${s}`, parts: [`hand_${s}`, `forearm_${s}`] },
+      { at: `hip_${s}`, parts: [`thigh_${s}`, "torso"] },
+      { at: `knee_${s}`, parts: [`shin_${s}`, `thigh_${s}`] },
+      { at: `ankle_${s}`, parts: [`foot_${s}`, `shin_${s}`] },
+    );
+  }
+  // Within a limb: thigh over shin over foot, hand over forearm over upper arm. Torso over the
+  // thighs, arms over the torso. In a turned view the far (left) arm and leg go behind everything.
+  const leg = (s: Side) => [`foot_${s}`, `shin_${s}`, `thigh_${s}`];
+  const arm = (s: Side) => [`upper_arm_${s}`, `forearm_${s}`, `hand_${s}`];
+  const order =
+    view === "right"
+      ? [...arm("l"), ...leg("l"), ...leg("r"), "torso", "head", ...arm("r")]
+      : [...leg("r"), ...leg("l"), "torso", "head", ...arm("r"), ...arm("l")];
+  return { parts, joints, order };
 }
 
 function boneDefs(j: Joints): BoneDef[] {
@@ -352,7 +500,11 @@ class BodyMap {
       }
       if (mine - best <= overlap) region[c] = 1;
     }
-    // Pad two cells off the silhouette so the mesh covers its soft edge.
+    return this.pad(region);
+  }
+
+  /** Pads a region two cells off the silhouette, so its mesh covers the soft edge. */
+  pad(region: Uint8Array): Uint8Array {
     const padded = Uint8Array.from(region);
     for (let pass = 0; pass < 2; pass++) {
       const prev = Uint8Array.from(padded);
@@ -372,6 +524,48 @@ class BodyMap {
       }
     }
     return padded;
+  }
+
+  /** The index (in boneNames) of the bone nearest a cell through the silhouette. */
+  nearestBone(c: number): number {
+    let best = 0;
+    for (let b = 1; b < this.fields.length; b++) if (this.fieldAt(b, c) < this.fieldAt(best, c)) best = b;
+    return best;
+  }
+
+  /** The nearest cell on the silhouette to a cell off it (the cell itself when it's on it; -1 if none). */
+  nearestSolidOf(c: number): number {
+    return this.nearestSolid[c];
+  }
+
+  /** Each cell's distance to the nearest cell off the silhouette, in cells (about half the limb's width at a joint). */
+  depth(): Float64Array {
+    const depth = new Float64Array(this.mask.length).fill(Infinity);
+    const heap = new MinHeap();
+    for (let c = 0; c < this.mask.length; c++) {
+      if (!this.mask[c]) {
+        depth[c] = 0;
+        heap.push(c, 0);
+      }
+    }
+    while (heap.size) {
+      const [c, d] = heap.pop();
+      if (d > depth[c]) continue;
+      const x = c % this.gw;
+      const y = (c - x) / this.gw;
+      for (const [dx, dy] of NEIGHBOURS_8) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= this.gw || ny >= this.gh) continue;
+        const n = ny * this.gw + nx;
+        const nd = d + (dx && dy ? Math.SQRT2 : 1);
+        if (nd < depth[n]) {
+          depth[n] = nd;
+          heap.push(n, nd);
+        }
+      }
+    }
+    return depth;
   }
 
   private fieldAt(b: number, c: number): number {
@@ -459,7 +653,7 @@ class BodyMap {
 // ---------------------------------------------------------------------------------------------
 // Meshing a part's region.
 
-interface PartMesh {
+export interface PartMesh {
   /** Image pixels; the first `hull` points are the outline, in order. */
   points: Point[];
   triangles: number[];
@@ -480,11 +674,11 @@ function triangulate(map: BodyMap, region: Uint8Array, bones: BoneDef[], spacing
   };
 
   // Outlines of each piece of the region; the largest is the hull.
-  const pieces = components(region, gw, gh).filter((c) => c.length >= 4);
+  const pieces = components(region, gw, gh);
   pieces.sort((a, b) => b.length - a.length);
   let hull = 0;
   pieces.forEach((piece, i) => {
-    const outline = simplifyClosed(traceOutline(region, gw, gh, piece[0]).map((c) => map.toPixel(c % gw, Math.floor(c / gw))), map.cell * 0.8);
+    const outline = simplifyClosed(traceOutline(region, gw, gh, piece[0]).map((c) => map.toPixel(c % gw, Math.floor(c / gw))), map.cell * 0.4);
     for (const p of outline) add(p, i === 0);
     if (i === 0) hull = points.length;
   });

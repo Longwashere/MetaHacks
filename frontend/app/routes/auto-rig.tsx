@@ -219,7 +219,7 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
                 </Button>
               )}
               <p className="text-xs text-muted-foreground">
-                {posing ? "This takes about 15–35 seconds." : image?.png ? "“As-is” skips Muse. It needs a transparent background and works best when the arms and legs are already spread." : "Muse redraws the character standing with its arms and legs spread."}
+                {posing ? "Muse redraws the character, then places its joints. This takes about 30–60 seconds." : image?.png ? "“As-is” skips Muse. It needs a transparent background and works best when the arms and legs are already spread." : "Muse redraws the character standing with its arms and legs spread."}
               </p>
             </div>
             {poseError && (
@@ -235,13 +235,25 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
           <CardHeader>
             <CardTitle className="text-base">2. Check the joints</CardTitle>
             <CardDescription>
-              {prepared ? "Drag any joint that's off. Shoulders, elbows, hips and knees matter most." : "The posed character and its joints show here."}
+              {!prepared
+                ? "The posed character and its joints show here."
+                : prepared.jointsBy === "spark"
+                  ? `Muse Spark placed the joints.${prepared.flagged.length ? " Check the outlined ones." : ""} Drag any that are off: the rig is cut into parts at the joints, so shoulders, elbows, hips and knees matter most.`
+                  : "Muse Spark couldn't place the joints, so they're guessed from the outline. Check the outlined ones and drag any that are off."}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {prepared && joints ? (
               <>
-                <JointEditor image={prepared.cutout} width={prepared.width} height={prepared.height} joints={joints} onChange={(j) => setEdited({ cutout: prepared.cutout, joints: j })} />
+                <JointEditor
+                  image={prepared.cutout}
+                  width={prepared.width}
+                  height={prepared.height}
+                  joints={joints}
+                  // A flagged joint stops being flagged once the user has moved it.
+                  flagged={prepared.flagged.filter((j) => joints[j].x === prepared.joints[j].x && joints[j].y === prepared.joints[j].y)}
+                  onChange={(j) => setEdited({ cutout: prepared.cutout, joints: j })}
+                />
                 <Button variant="ghost" size="sm" className="self-start" onClick={() => setEdited(null)} disabled={!edited || edited.cutout !== prepared.cutout}>
                   <RotateCcw /> Reset joints
                 </Button>
@@ -249,7 +261,7 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
             ) : (
               <div className="flex aspect-square w-full flex-col items-center justify-center gap-3 rounded-lg border bg-muted/40 text-sm text-muted-foreground">
                 {posing ? <Loader2 className="size-8 animate-spin" aria-hidden /> : <Bone className="size-8" aria-hidden />}
-                <span>{posing ? "Posing…" : "Nothing posed yet"}</span>
+                <span>{posing ? "Posing and placing joints…" : "Nothing posed yet"}</span>
               </div>
             )}
           </CardContent>

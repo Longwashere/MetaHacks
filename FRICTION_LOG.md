@@ -50,6 +50,7 @@ Add the entry in the same task, not later.
 - **Muse Image can't return transparency**, so every page has to be put on a key colour and keyed back out. That's the source of most of the friction below. (2026-10-27)
 - **The key colour bleeds into the repainted art** (e.g. a teal axe on cyan runs), and Muse Image has no setting to stop it. (2026-10-27)
 - **Edit strength can only be set through prompt text.** We haven't found a strength or fidelity parameter for `/images/edits`; check the API reference before building more on prompt wording. (2026-10-27)
+- **No mask on `/images/edits`:** asked to repaint only some areas, Muse Image redraws the whole image and can add content (a second face in an auto-rig parts sheet). (2026-11-02)
 - **Muse Image ignores `size` and returns WebP:** asked for 1024×1024, got 1600×1600 WebP. Decode by content, not by extension, and don't rely on the output size. (2026-11-02)
 - **Muse Image moves and resizes parts** by a few percent, so we need a pixel-alignment step after every call. (2026-10-27)
 - **Muse Image sometimes redraws the whole layout** on big changes, moving and duplicating parts. We check every page and repaint once, which costs an extra image call. (2026-10-28)
@@ -58,6 +59,15 @@ Add the entry in the same task, not later.
 - **Muse Spark can't key weapon swings it plans correctly**, and its review pass sees the failure without fixing it (overhead axe chop). (2026-11-02)
 
 ### Log
+
+### 2026-11-02 — Muse Image can't repaint only part of an image: asked to fill hidden areas, it redrew the whole sheet and added a face
+- **What happened:** for auto-rig slicing, we cut a character into 14 parts and filled each part's hidden areas (where another part covers it at a joint) by smearing colour. We asked Muse Image to repaint only those smeared areas with real detail and leave everything else alone. It painted good detail there (shoulders under the arms, fur cuffs at the wrists, boot tops), but it also repainted every piece, and it drew a complete second orc face into the torso's neck area, which would show whenever the head turns.
+- **Evidence (verified, `POST /v1/images/edits`, `muse-image-1.0`, `size: 1024x1024`, one 870×870 parts sheet on #FF00FF, 12.6 s, usage 12,554 in / 1,008 out):** the pieces' outlines match the input at 92.5% IoU after a 3 px shift, and the pieces cover 4% more pixels. Where both images have a piece, the mean colour difference is 66 (sum over RGB, 0–765), so the art we asked it to keep was redrawn.
+- **Cost:** one test call (about a cent), plus the decision to ship the code fill for now.
+- **Cause (inferred):** `/images/edits` has no mask input, so "repaint only these areas" can only be asked in the prompt, and the model edits the whole image. Pieces that look like part of a body get completed with whatever is typical (a face above shoulders).
+- **Workaround / status:** open. The auto-rig keeps its code fill. A Muse pass would have to keep our pixels, take Muse's only inside the hidden areas, align each piece separately, and check for invented content.
+- **Ask for Meta:** a mask parameter on `/images/edits` (inpaint only where the mask is set), as other image APIs offer.
+- **Lesson:** without a mask, treat an edit as a full repaint, and copy back only the pixels you need.
 
 ### 2026-11-02 — Muse Image under-does pose instructions, and its input token count varies for the same request
 - **What happened:** testing whether Muse Image can redraw an uploaded character in a rig-ready pose (for auto-rigging). Identity, prop removal and the flat magenta background were all good. But each pose instruction was only partly followed: "arms about 45° down" came out at about 20–30° (front view) or near horizontal (three-quarter view); "filling about 80% of the image height" came out at 86–94%, with one character touching the side edges; "three-quarter view facing right" gave a slight turn of roughly 15–30°, and the orc stayed almost front-on.

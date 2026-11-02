@@ -58,7 +58,20 @@ Splitting into parts rather than using one mesh lets a limb move in front of the
 - **Idle animation.** A procedural `idle` loop (breathing in the chest, a slight head bob and arm sway) is added so the rig moves as soon as it's built. Spark can generate more from the Animate tab.
 - **Files.** The outputs are the skeleton JSON, the `.atlas` and the page `.png`. Before saving, the rig is loaded with `@esotericsoftware/spine-core` to check it, the same way uploads are checked.
 
+## Slicing (2026-11-02, built: code fill)
+
+Hand-made Spine art is cut into parts with the hidden areas painted in. The auto-rig does the same:
+
+1. **Cut 14 parts** by the body-part map: `head`, `torso`, and `upper_arm`, `forearm`, `hand`, `thigh`, `shin`, `foot` per side. Each is its own atlas region, slot and mesh, named after its bone.
+2. **Top and bottom at each joint.** Draw order decides which part is on top at each joint (forearm over upper arm, upper arm over torso, torso over thigh…). The top part is cut exactly on the boundary and its end is weighted toward the bottom part's bone, so it stretches to stay attached when the joint bends. The bottom part is filled in under the top part around the joint, out to about the limb's width, so moving the top part reveals art, not a hole.
+3. **Filling:** first in code (colours smeared in from the part's own edge). Then, if a test shows it works, a Muse Image pass that paints the hidden areas properly, with the alignment check from remixes after it.
+4. **Packing:** the parts are packed onto one atlas page, so the download looks like a hand-cut Spine project.
+
+Status: built in `rig.ts` (`slicedParts`, the default; `{ slice: false }` gives the one-texture rig) and `slice.ts` (`fillAndPack`). The `/autoRig` page makes sliced rigs. The fill smears colour from each part's solid interior pixels, then blurs it lightly; the setup pose looks the same as the original. A Muse Image fill test painted good detail but redrew the whole sheet and added a second face to the torso (FRICTION_LOG.md, 2026-11-02), so Muse filling would need to keep our pixels, copy Muse's only inside the hidden areas, align each piece, and check for invented content. Not built.
+
 ## Finding the joints
+
+Status (2026-11-02): built as below in `joints.ts` (silhouette) and `spark-joints.ts` (Spark, `checkJoints`), and used by `/autoRig`. On the 8 test images Spark took 15–33 s and about 2.5–3.8k tokens per call (`reasoning_effort: "low"`, `muse-spark-1.3-contributor`), no joint failed the checks, and it fixed the cases the silhouette got wrong: the knight's shoulder pulled into its plume, and hips placed too low and too wide under belts and armour. If the Spark call fails, the silhouette's guess is used and every inner joint is outlined for the user.
 
 The pose step leaves the character in a clean pose with a gap at every joint, so:
 
@@ -118,7 +131,7 @@ The rig preview reuses `SpineRuntime` / `AssetPlayer`.
 1. **Rig builder alone.** ✅ Done 2026-11-02: `backend/src/lib/autorig/` (`cutout.ts`, `joints.ts`, `rig.ts`, `render.ts`), the preview script `src/scripts/autorig-preview.ts` and `test/autorig.test.ts`. About 250 ms per rig. Joints from the silhouette alone are good on the skeleton, orc and chibi; the knight's plume pulls one shoulder off, which is step 2's job. Take a cutout and joints placed by hand, then `mesh.ts` + `skeleton.ts` produce a rig to load in the player. This is the riskiest part, so it goes first. Done when the 8 test images play idle without tearing.
 (2026-11-02) Steps 3 and 4 were done before step 2, so the page could be tried: `POST /me/autorig/prepare` and `POST /me/autorig` (`lib/autorig/pose.ts`, `create.ts`), and `/autoRig` with `JointEditor`, linked in the header. They're simpler than planned: no `autorig_jobs` table or metering yet (the page holds the cutout between calls, and Muse Image usage is only logged), no rig preview before saving, and no Mirror button.
 
-2. **Joint detection** on the 8 test images, to choose between Spark and the silhouette as described above.
+2. ✅ **Joint detection** on the 8 test images, to choose between Spark and the silhouette as described above.
 3. **Backend endpoints**, the migration, metering and storage.
 4. **The `/autoRig` page:** upload, pose review, joint editor, preview, save.
 5. **Make sure Animate works on an auto-rig.** Generate a walk and an attack on two characters and fix what the animation prompts assume about the rig.

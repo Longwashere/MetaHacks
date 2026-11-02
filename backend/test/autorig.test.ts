@@ -1,6 +1,7 @@
-// Auto-rig builder (src/lib/autorig): rigs built from Muse Image's A-pose redraws must load in the
-// Spine runtime, weight every vertex fully, cover every solid pixel of the character, and draw the
-// art exactly where it was in the setup pose (bind coordinates and leg IK agree with the joints).
+// Auto-rig builder (src/lib/autorig): rigs built from Muse Image's A-pose redraws, sliced into 14
+// parts or drawn as one texture, must load in the Spine runtime, weight every vertex fully, cover
+// every solid pixel of the character, and draw the art exactly where it was in the setup pose
+// (bind coordinates, atlas regions and leg IK agree with the joints).
 //
 // Run with `npm test -w backend`. `npx tsx src/scripts/autorig-preview.ts` renders every fixture.
 import assert from "node:assert/strict";
@@ -13,20 +14,22 @@ import { stubLoader } from "../src/lib/animate-fx.js";
 import { keyCutout } from "../src/lib/autorig/cutout.js";
 import { guessJoints } from "../src/lib/autorig/joints.js";
 import { buildRig } from "../src/lib/autorig/rig.js";
+import { checkJoints } from "../src/lib/autorig/spark-joints.js";
 import type { AutoRigView } from "../src/lib/autorig/types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(here, "fixtures/autorig");
 
-for (const [name, view] of [
-  ["skeleton-front", "front"],
-  ["orc-right", "right"],
-  ["knight-front", "front"],
-] as [string, AutoRigView][]) {
-  test(`auto-rig of ${name} loads, is fully weighted, covers the art and binds in place`, async () => {
+for (const [name, view, slice] of [
+  ["skeleton-front", "front", true],
+  ["orc-right", "right", true],
+  ["knight-front", "front", true],
+  ["orc-front", "front", false],
+] as [string, AutoRigView, boolean][]) {
+  test(`auto-rig of ${name} (${slice ? "sliced" : "one texture"}) loads, is fully weighted, covers the art and binds in place`, async () => {
     const cut = await keyCutout(await readFile(path.join(FIXTURES, `${name}.png`)));
     const joints = guessJoints(cut, view);
-    const rig = await buildRig(cut, joints, view);
+    const rig = await buildRig(cut, joints, view, { slice });
 
     const data = new spine.SkeletonJson(stubLoader).readSkeletonData(JSON.stringify(rig.skeleton));
     assert.ok(data.findAnimation("idle"), "has an idle animation");
@@ -58,20 +61,23 @@ for (const [name, view] of [
       // The setup pose puts every vertex where its UV says it came from.
       const world = new Float32Array(mesh.worldVerticesLength);
       mesh.computeWorldVertices(slot, 0, mesh.worldVerticesLength, world, 0, 2);
-      const uvs = mesh.regionUVs;
+      const region = rig.regions.find((r) => r.name === mesh.path);
+      assert.ok(region, `${mesh.path} has an atlas region`);
+      // A UV inside the mesh's region, back in cutout pixels.
+      const uvs = Array.from(mesh.regionUVs, (v, i) => (i % 2 ? region.srcY + v * region.height : region.srcX + v * region.width));
       for (let i = 0; i < world.length; i += 2) {
-        const x = uvs[i] * cut.width - originX;
-        const y = originY - uvs[i + 1] * cut.height;
+        const x = uvs[i] - originX;
+        const y = originY - uvs[i + 1];
         worstBind = Math.max(worstBind, Math.hypot(world[i] - x, world[i + 1] - y));
       }
       // Mark the pixels the triangles cover (in image space, from the UVs).
       const t = mesh.triangles;
       for (let k = 0; k < t.length; k += 3) {
-        const p = [t[k], t[k + 1], t[k + 2]].map((j) => ({ x: uvs[j * 2] * cut.width, y: uvs[j * 2 + 1] * cut.height }));
+        const p = [t[k], t[k + 1], t[k + 2]].map((j) => ({ x: uvs[j * 2], y: uvs[j * 2 + 1] }));
         markTriangle(covered, cut.width, cut.height, p);
       }
     }
-    assert.equal(meshes, 6, "one mesh per body part");
+    assert.equal(meshes, slice ? 14 : 6, "one mesh per body part");
     assert.ok(worstBind < 0.5, `setup pose moves a vertex by ${worstBind.toFixed(2)} px`);
 
     let solid = 0;
@@ -97,3 +103,30 @@ function markTriangle(out: Uint8Array, width: number, height: number, [a, b, c]:
     }
   }
 }
+
+// Muse Spark's joints are checked before use (src/lib/autorig/spark-joints.ts): extremities stay
+// with the silhouette, mirrored sides are swapped back, and a joint off the body or a limb folded
+// back on itself falls back to the silhouette's guess and is flagged.
+test("Spark joints: mirrored sides are swapped back, bad joints fall back and are flagged", async () => {
+  const cut = await keyCutout(await readFile(path.join(FIXTURES, "skeleton-front.png")));
+  const guess = guessJoints(cut, "front");
+  const shift = (p: { x: number; y: number }, dx: number) => ({ x: p.x + dx, y: p.y });
+
+  // Every pair mirrored, everything else nudged 3 px: sides come back, nudges are kept.
+  const mirrored: Partial<typeof guess> = {};
+  for (const [j, p] of Object.entries(guess) as [keyof typeof guess, { x: number; y: number }][]) {
+    const other = j.endsWith("_l") ? (j.replace(/_l$/, "_r") as keyof typeof guess) : j.endsWith("_r") ? (j.replace(/_r$/, "_l") as keyof typeof guess) : j;
+    mirrored[other] = shift(p, 3);
+  }
+  const fixed = checkJoints(cut, guess, mirrored);
+  assert.deepEqual(fixed.joints.elbow_l, shift(guess.elbow_l, 3));
+  assert.deepEqual(fixed.joints.hand_l, guess.hand_l, "extremities stay with the silhouette");
+
+  // A shoulder out in the empty background, and an elbow folded back past the shoulder.
+  const bad = { ...guess, shoulder_r: { x: 2, y: 2 }, elbow_l: shift(guess.shoulder_l, -(guess.wrist_l.x - guess.shoulder_l.x)) };
+  const checked = checkJoints(cut, guess, bad);
+  assert.ok(checked.flagged.includes("shoulder_r"));
+  assert.deepEqual(checked.joints.shoulder_r, guess.shoulder_r);
+  assert.ok(checked.flagged.includes("elbow_l"));
+  assert.deepEqual(checked.joints.elbow_l, guess.elbow_l);
+});

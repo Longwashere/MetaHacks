@@ -8,13 +8,15 @@ import { nameSlug } from "../upload-rename.js";
 import { alphaCutout, hasTransparentBackground, keyCutout } from "./cutout.js";
 import { guessJoints } from "./joints.js";
 import { poseCharacter } from "./pose.js";
+import { FROM_SILHOUETTE, sparkJoints } from "./spark-joints.js";
 import { buildRig, IDLE_SECONDS, PAGE_NAME } from "./rig.js";
-import { JOINT_NAMES, type AutoRigView, type Cutout, type Joints } from "./types.js";
+import { JOINT_NAMES, type AutoRigView, type Cutout, type JointName, type Joints } from "./types.js";
 
 // The /autoRig flow's two backend steps (AUTO_RIG_PLAN.md):
 //   1. prepare: the upload → Muse Image's redraw in the rig pose (or the upload as-is when it has a
-//      transparent background) → a keyed cutout and joints placed from its silhouette. Nothing is
-//      stored; the page keeps the cutout while the user drags the joints.
+//      transparent background) → a keyed cutout → joints: the extremities from its silhouette and
+//      the inner joints from Muse Spark (the silhouette's guess if Spark fails). Nothing is stored;
+//      the page keeps the cutout while the user drags the joints.
 //   2. create: the cutout and the user's joints → a Spine rig, stored and saved as a new asset.
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -36,6 +38,10 @@ export interface PreparedRig {
   width: number;
   height: number;
   joints: Joints;
+  /** Joints Muse Spark couldn't place sensibly (or all of them if it failed); the page outlines them. */
+  flagged: JointName[];
+  /** Who placed the inner joints. */
+  jointsBy: "spark" | "outline";
   posed: boolean;
 }
 
@@ -89,7 +95,17 @@ export async function prepareAutoRig(input: PrepareInput, signal: AbortSignal): 
     cut = await keyCutout(await sharp(redraw).resize(CUTOUT_SIDE, CUTOUT_SIDE, { fit: "inside" }).png().toBuffer());
   }
   const png = await sharp(cut.rgba, { raw: { width: cut.width, height: cut.height, channels: 4 } }).png().toBuffer();
-  return { cutout: `data:image/png;base64,${png.toString("base64")}`, width: cut.width, height: cut.height, joints: guessJoints(cut, input.view), posed: !input.skipPose };
+  const guess = guessJoints(cut, input.view);
+  let placed: Pick<PreparedRig, "joints" | "flagged" | "jointsBy">;
+  try {
+    const spark = await sparkJoints(cut, input.view, guess, signal);
+    placed = { joints: spark.joints, flagged: spark.flagged, jointsBy: "spark" };
+  } catch (error) {
+    if (signal.aborted) throw error;
+    console.error("[autorig] Spark joints failed; using the outline's guess", error);
+    placed = { joints: guess, flagged: JOINT_NAMES.filter((j) => !FROM_SILHOUETTE.includes(j)), jointsBy: "outline" };
+  }
+  return { cutout: `data:image/png;base64,${png.toString("base64")}`, width: cut.width, height: cut.height, ...placed, posed: !input.skipPose };
 }
 
 export async function createAutoRig(userId: string, input: CreateInput): Promise<{ ok: true; asset: SpineAsset } | { ok: false; error: string }> {

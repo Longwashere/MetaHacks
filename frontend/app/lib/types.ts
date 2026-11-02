@@ -421,6 +421,10 @@ export interface PreparedAutoRig {
   width: number;
   height: number;
   joints: AutoRigJoints;
+  /** Joints Muse Spark couldn't place sensibly (all inner joints if it failed); outlined for the user to check. */
+  flagged: AutoRigJointName[];
+  /** Who placed the inner joints: Muse Spark, or the outline finder when Spark failed. */
+  jointsBy: "spark" | "outline";
   /** False when the upload was rigged as-is. */
   posed: boolean;
 }

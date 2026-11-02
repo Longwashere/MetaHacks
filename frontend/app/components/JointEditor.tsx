@@ -37,11 +37,13 @@ interface JointEditorProps {
   width: number;
   height: number;
   joints: AutoRigJoints;
+  /** Joints to check, drawn with a dashed ring until the user moves them. */
+  flagged?: AutoRigJointName[];
   onChange: (joints: AutoRigJoints) => void;
   className?: string;
 }
 
-export function JointEditor({ image, width, height, joints, onChange, className }: JointEditorProps) {
+export function JointEditor({ image, width, height, joints, flagged = [], onChange, className }: JointEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<AutoRigJointName | null>(null);
   const [hover, setHover] = useState<AutoRigJointName | null>(null);
@@ -77,6 +79,9 @@ export function JointEditor({ image, width, height, joints, onChange, className 
         {LINKS.map(([a, b]) => (
           <line key={`${a}-${b}`} x1={joints[a].x} y1={joints[a].y} x2={joints[b].x} y2={joints[b].y} stroke={SIDE_COLOURS[sideOf(b)]} strokeWidth={r * 0.45} strokeLinecap="round" opacity={0.85} />
         ))}
+        {flagged.map((name) => (
+          <circle key={`flag-${name}`} cx={joints[name].x} cy={joints[name].y} r={r * 2.2} fill="none" stroke="#facc15" strokeWidth={r * 0.35} strokeDasharray={`${r * 0.8} ${r * 0.5}`} pointerEvents="none" />
+        ))}
         {(Object.keys(joints) as AutoRigJointName[]).map((name) => (
           <circle
             key={name}
@@ -101,6 +106,12 @@ export function JointEditor({ image, width, height, joints, onChange, className 
       </svg>
       <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{shown ? shown.replace("_", " ") : "Drag a joint to move it."}</span>
+        {flagged.length > 0 && (
+          <span className="flex items-center gap-1.5">
+            <span className="size-2.5 rounded-full border-2 border-dashed border-yellow-400" aria-hidden />
+            check these
+          </span>
+        )}
         {(["l", "r"] as const).map((s) => (
           <span key={s} className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-full" style={{ background: SIDE_COLOURS[s] }} aria-hidden />

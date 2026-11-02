@@ -162,8 +162,9 @@ const autoRigAllowed: express.RequestHandler = async (_req, res, next) => {
 
 /**
  * POST /me/autorig/prepare  body = { image (data URL), view: "front" | "right", skipPose? }
- * → { cutout (PNG data URL), width, height, joints, posed }. Muse Image redraws the character in
- * the rig pose (about 15–35 s) unless skipPose; nothing is stored. 400 { error } for bad input,
+ * → { cutout (PNG data URL), width, height, joints, flagged, jointsBy, posed }. Muse Image redraws
+ * the character in the rig pose (about 15–35 s) unless skipPose, then Muse Spark places the inner
+ * joints (about 15–30 s); nothing is stored. 400 { error } for bad input,
  * 502 { error } when the model fails. Not charged yet.
  */
 meRouter.post("/autorig/prepare", autoRigAllowed, express.json({ limit: MAX_AUTORIG_BYTES }), async (req, res) => {

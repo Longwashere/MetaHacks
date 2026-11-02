@@ -1,10 +1,11 @@
 import * as spine from "@esotericsoftware/spine-core";
 import sharp from "sharp";
 import { stubLoader } from "../animate-fx.js";
+import type { PackedRegion } from "./slice.js";
 import type { Cutout, Joints, Point } from "./types.js";
 
 // Draws an auto-rig with its texture, posed by any of its animations, without a browser: each
-// mesh's triangles are posed by the Spine runtime and filled by sampling the cutout. Used to check
+// mesh's triangles are posed by the Spine runtime and filled by sampling its region of the page. Used to check
 // rigs (tests, the preview script) and for thumbnails.
 
 type Json = Record<string, unknown>;
@@ -17,7 +18,7 @@ export interface PoseRequest {
 const BACKGROUND = [38, 40, 46];
 
 /** Renders each pose into a square frame, side by side, at one shared scale. Returns a PNG. */
-export async function renderPoses(skeleton: Json, cut: Cutout, poses: PoseRequest[], frame = 360): Promise<Buffer> {
+export async function renderPoses(skeleton: Json, page: Cutout, regions: PackedRegion[], poses: PoseRequest[], frame = 360): Promise<Buffer> {
   const data = new spine.SkeletonJson(stubLoader).readSkeletonData(JSON.stringify(skeleton));
   const sk = new spine.Skeleton(data);
 
@@ -29,13 +30,14 @@ export async function renderPoses(skeleton: Json, cut: Cutout, poses: PoseReques
       anim.apply(sk, 0, time, false, [], 1, spine.MixBlend.setup, spine.MixDirection.mixIn);
     }
     sk.updateWorldTransform(spine.Physics.pose);
-    const meshes: { world: Float32Array; uvs: ArrayLike<number>; triangles: ArrayLike<number> }[] = [];
+    const meshes: { world: Float32Array; uvs: ArrayLike<number>; triangles: ArrayLike<number>; region: PackedRegion }[] = [];
     for (const slot of sk.drawOrder) {
       const a = slot.getAttachment();
       if (!(a instanceof spine.MeshAttachment)) continue;
       const world = new Float32Array(a.worldVerticesLength);
       a.computeWorldVertices(slot, 0, a.worldVerticesLength, world, 0, 2);
-      meshes.push({ world, uvs: a.regionUVs, triangles: a.triangles });
+      const region = regions.find((r) => r.name === a.path);
+      if (region) meshes.push({ world, uvs: a.regionUVs, triangles: a.triangles, region });
     }
     return meshes;
   });
@@ -61,12 +63,12 @@ export async function renderPoses(skeleton: Json, cut: Cutout, poses: PoseReques
       x: f * frame + frame / 2 + (x - (x0 + x1) / 2) * scale,
       y: frame / 2 - (y - (y0 + y1) / 2) * scale,
     });
-    for (const { world, uvs, triangles } of meshes) {
+    for (const { world, uvs, triangles, region } of meshes) {
       for (let t = 0; t < triangles.length; t += 3) {
         const idx = [triangles[t], triangles[t + 1], triangles[t + 2]];
         const p = idx.map((i) => toScreen(world[i * 2], world[i * 2 + 1]));
-        const uv = idx.map((i) => ({ x: uvs[i * 2] * cut.width, y: uvs[i * 2 + 1] * cut.height }));
-        fillTriangle(out, stride, frame * poses.length, frame, p, uv, cut, f * frame, (f + 1) * frame);
+        const uv = idx.map((i) => ({ x: region.x + uvs[i * 2] * region.width, y: region.y + uvs[i * 2 + 1] * region.height }));
+        fillTriangle(out, stride, frame * poses.length, frame, p, uv, page, f * frame, (f + 1) * frame);
       }
     }
   });

@@ -1,6 +1,8 @@
 // Builds auto-rigs from images of characters on magenta and writes, per image: the rig files
-// (skeleton JSON, atlas, page), the joints drawn on the cutout, and frames of the rest pose, the
-// idle and two stress poses. A sheet of every rig goes to <out>/sheet.png.
+// (skeleton JSON, atlas, page), the joints drawn on the cutout, the atlas page, and frames of the
+// rest pose, the idle and two stress poses. A sheet of every rig goes to <out>/sheet.png. Rigs are
+// sliced into parts; set NO_SLICE=1 for one-texture rigs. With SPARK=1 (and the backend .env loaded,
+// `npx tsx --env-file=.env …`), Muse Spark places the inner joints.
 //
 //   npx tsx src/scripts/autorig-preview.ts [images dir] [out dir]
 //
@@ -11,6 +13,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { keyCutout } from "../lib/autorig/cutout.js";
 import { guessJoints } from "../lib/autorig/joints.js";
+import { sparkJoints } from "../lib/autorig/spark-joints.js";
 import { renderJoints, renderPoses } from "../lib/autorig/render.js";
 import { buildRig } from "../lib/autorig/rig.js";
 import type { AutoRigView, Joints } from "../lib/autorig/types.js";
@@ -32,8 +35,15 @@ for (const file of (await readdir(dir)).filter((f) => f.endsWith(".png")).sort()
   const view: AutoRigView = name.endsWith("-right") ? "right" : "front";
   const started = Date.now();
   const cut = await keyCutout(await readFile(path.join(dir, file)));
-  const joints = overrides[name] ?? guessJoints(cut, view);
-  const rig = await buildRig(cut, joints, view);
+  let joints = overrides[name] ?? guessJoints(cut, view);
+  if (process.env.SPARK && !overrides[name]) {
+    // Muse Spark places the inner joints (one call per image; needs META_API_KEY).
+    const t = Date.now();
+    const spark = await sparkJoints(cut, view, joints, new AbortController().signal);
+    joints = spark.joints;
+    console.log(`${name}: Spark joints in ${Date.now() - t} ms; flagged ${spark.flagged.join(", ") || "none"}. ${spark.notes}`);
+  }
+  const rig = await buildRig(cut, joints, view, { slice: !process.env.NO_SLICE });
   const built = Date.now() - started;
 
   const skeleton = { ...rig.skeleton, animations: { ...(rig.skeleton.animations as object), test: stressAnimation(cut.height) } };
@@ -42,12 +52,14 @@ for (const file of (await readdir(dir)).filter((f) => f.endsWith(".png")).sort()
   await writeFile(path.join(target, `${name}.json`), JSON.stringify(rig.skeleton));
   await writeFile(path.join(target, `${name}.atlas`), rig.atlas);
   await writeFile(path.join(target, "body.png"), rig.page);
+  const pageThumb = await sharp(rig.page).resize(FRAME, FRAME, { fit: "contain", background: "#26282e" }).png().toBuffer();
   await writeFile(path.join(target, "joints.json"), JSON.stringify(joints, null, 1));
 
   const overlay = await sharp(await renderJoints(cut, joints)).resize(FRAME, FRAME, { fit: "contain", background: "#26282e" }).png().toBuffer();
   const frames = await renderPoses(
     skeleton,
-    cut,
+    rig.pageImage,
+    rig.regions,
     [
       { animation: null, time: 0 },
       { animation: "idle", time: 1.2 },
@@ -58,12 +70,17 @@ for (const file of (await readdir(dir)).filter((f) => f.endsWith(".png")).sort()
   );
   await writeFile(path.join(target, "joints.png"), overlay);
   await writeFile(path.join(target, "frames.png"), frames);
-  rows.push(await sharp({ create: { width: FRAME * 5, height: FRAME, channels: 3, background: "#26282e" } }).composite([{ input: overlay, left: 0, top: 0 }, { input: frames, left: FRAME, top: 0 }]).png().toBuffer());
+  rows.push(
+    await sharp({ create: { width: FRAME * 6, height: FRAME, channels: 3, background: "#26282e" } })
+      .composite([{ input: overlay, left: 0, top: 0 }, { input: pageThumb, left: FRAME, top: 0 }, { input: frames, left: FRAME * 2, top: 0 }])
+      .png()
+      .toBuffer(),
+  );
   const parts = rig.stats.parts.map((p) => `${p.name} ${p.vertices}v/${p.triangles}t`).join(", ");
   console.log(`${name}: ${cut.width}x${cut.height}, built in ${built} ms; ${parts}`);
 }
 
-await sharp({ create: { width: FRAME * 5, height: FRAME * rows.length, channels: 3, background: "#26282e" } })
+await sharp({ create: { width: FRAME * 6, height: FRAME * rows.length, channels: 3, background: "#26282e" } })
   .composite(rows.map((input, i) => ({ input, left: 0, top: i * FRAME })))
   .png()
   .toFile(path.join(out, "sheet.png"));
