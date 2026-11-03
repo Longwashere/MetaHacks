@@ -23,6 +23,7 @@ Built for the **Meta Global AI Developer Hackathon** (Oct 27 – Nov 4, 2026). E
 - [What it does](#what-it-does)
 - [Meta models we use](#meta-models-we-use)
   - [The 7 agents](#the-agents)
+  - [System prompts](#system-prompts)
 - [How the agent loops work](#how-the-agent-loops-work)
   - [Remix](#1-remix-re-texture-a-rig-from-a-prompt)
   - [Auto-rig](#2-auto-rig-one-image-to-a-playable-rig)
@@ -61,7 +62,7 @@ All calls go to the Meta Model API at `https://api.meta.ai/v1`. Model IDs are se
 
 ### The agents
 
-RigForge runs **7 agents**. Each one has its own job, its own prompts and its own guardrails, and the remix live view credits every step to one of them ([frontend/app/lib/agents.ts](frontend/app/lib/agents.ts)). **6 of them call Muse Spark**, through **15 distinct prompts**. One (Poser Penny) only uses Muse Image.
+RigForge runs **7 agents**. Each one has its own job, its own prompts and its own guardrails, and the remix live view credits every step to one of them. **6 of them call Muse Spark**, through **15 distinct prompts**. One (Poser Penny) only uses Muse Image.
 
 | Agent | Models | Used in | Muse Spark calls | What makes it different |
 | --- | --- | --- | --- | --- |
@@ -74,6 +75,16 @@ RigForge runs **7 agents**. Each one has its own job, its own prompts and its ow
 | 📚 **Librarian Lou** | Muse Spark | Upload | `suggestTags` | Runs in the background, after the upload has already succeeded, so it can never fail one. It picks the art style and 4–8 search tags, reusing the catalogue's existing tags. For admin uploads it also picks the category and names the creature. Short structured replies run at `reasoning_effort: "low"`. |
 
 How they work together in a v3 remix: **Dirk** plans → **Dani** paints → **Stella** checks the style → **Rick** checks the fit → **Dirk** rewrites the plan, or **Dani** fixes a few parts → **Rick** lines the parts back up. Agents never talk to each other directly. Each one's output is checked in code and passed to the next as structured data (an edit prompt, a list of issues, measured fixes), so one agent's bad reply can't derail the loop.
+
+### System prompts
+
+Every agent runs on its **own system prompt**, one per Muse Spark call, 15 in all. Each prompt gives the agent its role, says what it's looking at, sets the rules for its one job, and fixes the exact JSON shape it must reply with. Splitting the work this way keeps each prompt short and focused: an inspector judges only the look or only the fit, never both, and a planner writes only for the model that comes next.
+
+The prompts share three habits:
+
+- **Write for the next model.** Agents that write for Muse Image turn vague requests into concrete paint terms (materials, colours, surfaces) and never mention the rig or the atlas.
+- **Every part is a fixed cut-out.** Prompts keep the models from "completing" pieces, such as painting a face into a helmet or a foot onto a shin. Most of these rules trace back to a failure in the [friction log](FRICTION_LOG.md).
+- **Replies are untrusted.** Every reply is parsed and checked in code: unknown parts are dropped, numbers are clamped, and an unusable reply falls back to a safe default.
 
 Every Meta call's token use is recorded per job from the response's `usage` field and billed as credits, so a failed job costs nothing ([backend/src/v3/lib/meta.ts](backend/src/v3/lib/meta.ts), `recordModelCalls`).
 
