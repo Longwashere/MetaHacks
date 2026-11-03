@@ -62,7 +62,11 @@ export function ZombieArenaPlayer() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [activeClip, setActiveClip] = useState<"walk" | "attack" | "idle">("walk");
   const [enableClash, setEnableClash] = useState(true);
-  const [isAutoSweep, setIsAutoSweep] = useState(false);
+  // The sweep runs by default; it starts off for visitors who ask for reduced motion.
+  const [isAutoSweep, setIsAutoSweep] = useState(true);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setIsAutoSweep(false);
+  }, []);
 
   // Positions and velocities of each character
   const simStatesRef = useRef<Record<string, CharacterSimState>>({});
