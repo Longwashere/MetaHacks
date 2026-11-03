@@ -60,6 +60,46 @@ Add the entry in the same task, not later.
 
 ### Log
 
+### 2026-11-02 — Muse Spark put a knight's hips at knee height, twice
+- **What happened:** an auto-rigged knight tore at the legs whenever it stepped. Each thigh piece was the whole upper leg plus the hip, turning around a point near the knee.
+- **Evidence (verified):** `POST /chat/completions`, `muse-spark-1.3-contributor`, `reasoning_effort: "low"`, JSON reply. The input was the cutout on a 0–1000 grid plus the silhouette's guess. Traces: `remixes/2026-11-02T22-13-46-234Z_autorig-prep_c75cbdd7/prepare.json` and `…22-24-13-471Z_autorig-prep_43bb1a50/prepare.json`.
+  - **The reply:** pelvis at y 683, hips at y 748, knees at y 790. That makes the thighs 0.32–0.47× the length of the shins.
+  - **The prompt said:** "hip: the top of the thigh inside the body, where the leg swings from (under any belt, skirt or loincloth)".
+  - **The notes didn't mention it:** Spark's own notes covered only the neck and shoulders.
+  - **Normal range:** the other runs and the 8 test characters came out at 0.6–2.1×.
+- **Cost:** one bad rig saved, and a wrong turn (blaming the hidden-area fill) until the joints were measured.
+- **Cause (inferred):** the cape and pouches hide the top of the legs, and Spark placed the hips on the visible leg armour instead.
+- **Workaround / status:** fixed in `checkJoints`. A hip further than 20% of the leg's length from the pelvis's height is moved level with it and flagged. A thigh under 0.55× its shin falls back to the silhouette's guess. The joint editor now shows where the rig will cut, so a bad joint can be seen before building. On the second run, the check lifted both hips and flagged them.
+- **Lesson:** check model-placed geometry against body proportions, not just "on the body".
+
+### 2026-11-02 — SAM 3.1's request format isn't on its model page, and generic phrases miss gear on pixel art
+- **What happened:** to test SAM 3.1 gear masks for auto-rig slicing, we first had to find how to call it. The model page (dev.meta.ai/models/sam-3-1) gives the price but no request or response example. Search results led to a community demo before the segmenting guide (dev.meta.ai/docs/sam/segmenting).
+- **Evidence (verified):** `POST https://api.meta.ai/v1/responses`, `model: "sam-3.1"`, one user message with an `input_text` phrase and an `input_image` data URL, `metadata: { include_confidence: "true" }`, not streamed.
+  - **Output:** one `output_text` of special tokens (`<0f>id<|box;…|><|mask;…|>`). It needs `@meta-sam/parser` to decode.
+  - **Usage:** 0 tokens and `images_processed: 1`.
+  - **Speed:** each call took 1.5–3.4 s, and 5 sent at once finished in 2.3–3.4 s.
+  - **Hand-drawn knight (1024 px):** cape, both kneepads, both hands and the plume came back clean, at confidence 0.54–0.95. "Shoulder armor" got one pauldron whole but only part of the other (0.63).
+  - **Pixel-art knight fixture (690 px):** "knee pad" and "helmet plume" returned nothing, and "shoulder armor" matched only two small gems.
+  - **All five phrases in one call:** comma-separated, they returned 0 and 1 matches, as the guide warns.
+- **Cost:** a few searches and one script fix; about 22 SAM calls (~$0.06 at the listed rate).
+- **Cause:** documentation layout for the format. Fixed phrases don't fit every art style, so the phrases have to be written per character.
+- **Workaround / status:** built in `backend/src/lib/autorig/gear.ts`. Muse Spark writes the phrases for each character, and its prompt asks for plain words. One phrase goes per call, all sent at once.
+  - **Wording matters:** on the same knight, "knee armor" found nothing where "knee pad" found both kneepads, and "shoulder pad" found both pauldrons whole where "shoulder armor" got one partly.
+  - **Fallback:** a pad phrase that finds nothing is retried once under its plain name.
+  - **Masks stop inside the outline:** SAM's masks end just inside the art's black outline, so the outline stayed with the neighbouring limb. We grow each mask by 2 grid cells.
+  - **Still open:** "plume" matched on one run and missed on the next. The orc's skull pauldrons aren't found under any phrase we tried.
+- **Ask for Meta:** a request and response example on the model page, and several phrases per image call.
+- **Lesson:** for a Meta model, start from the dev.meta.ai docs guide for its family, not the model page.
+
+### 2026-11-02 — A flat marker colour gets Muse Image to paint hidden areas, but it bleeds the marker into what it paints
+- **What happened:** following the no-mask entry below, we painted each auto-rig part's hidden areas one flat colour the character doesn't use (green, or yellow for a green-haired character) on magenta, asked Muse Image to paint over that colour, lined up each piece with its redraw, and copied back only the marked pixels. Muse painted most of the marker with good detail (a black knight's armour under its arms, an orc's skin and fur cuffs). But on the black knight it painted the thigh tops and crotch as dark green cloth: the marker's colour came through in the art.
+- **Evidence (verified, `POST /v1/images/edits`, `muse-image-1.0`, `size: 1024x1024`, 6 calls on 3 parts sheets, 15–34 s, 13–36k input tokens):** after lining each piece up (shifts of up to 10 px in Muse's redraw, then a mean colour difference of 10–16 on the piece's own pixels), Muse painted 62–100% of the marked pixels. With a check that keeps a painted pixel only if its colour already occurs in that piece's own art, 91–97% are kept and the green cloth is gone.
+- **Cost:** 6 test calls (a few cents) and one rework of the copy-back check.
+- **Cause (inferred):** the same key-colour bleed as remixes (see Open): the model treats the marker as a colour of the scene, not as "nothing here".
+- **Workaround / status:** worked around in `backend/src/lib/autorig/muse-fill.ts` (marker chosen from the art's least-used colours, per-piece alignment, own-palette check, the code's smear kept elsewhere). Still open: in some runs Muse paints a head-like shape into the torso's neck area; it only shows if the head turns far.
+- **Ask for Meta:** a mask input on `/images/edits`; failing that, a way to say "this colour is empty space".
+- **Lesson:** a flat marker colour tells the model where to paint far better than a smear does, but every pixel it paints there still has to be checked.
+
 ### 2026-11-02 — Muse Image can't repaint only part of an image: asked to fill hidden areas, it redrew the whole sheet and added a face
 - **What happened:** for auto-rig slicing, we cut a character into 14 parts and filled each part's hidden areas (where another part covers it at a joint) by smearing colour. We asked Muse Image to repaint only those smeared areas with real detail and leave everything else alone. It painted good detail there (shoulders under the arms, fur cuffs at the wrists, boot tops), but it also repainted every piece, and it drew a complete second orc face into the torso's neck area, which would show whenever the head turns.
 - **Evidence (verified, `POST /v1/images/edits`, `muse-image-1.0`, `size: 1024x1024`, one 870×870 parts sheet on #FF00FF, 12.6 s, usage 12,554 in / 1,008 out):** the pieces' outlines match the input at 92.5% IoU after a 3 px shift, and the pieces cover 4% more pixels. Where both images have a piece, the mean colour difference is 66 (sum over RGB, 0–765), so the art we asked it to keep was redrawn.

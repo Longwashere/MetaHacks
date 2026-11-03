@@ -4,7 +4,7 @@
 
 import type { Session } from "~/lib/auth.server";
 import { ASSET_CATEGORIES } from "~/lib/types";
-import type { AnimateEdit, AnimateInput, AnimateResult, AssetCategory, AssetQuery, AssetVersion, AutoRigJoints, AutoRigView, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, PreparedAutoRig, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
+import type { AnimateEdit, AnimateInput, AnimateResult, AssetCategory, AssetQuery, AssetVersion, AutoRigGear, AutoRigJoints, AutoRigView, AutoTweakInput, AutoTweakReview, CreditHistoryEntry, CreditRules, PartFixInput, PartFixJob, PreparedAutoRig, RemixApiVersion, RemixInput, RemixJob, SpineAsset } from "~/lib/types";
 
 const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -495,10 +495,23 @@ export async function prepareAutoRig(
   }
 }
 
+/** POST /me/autorig/preview — where the rig would cut the prepared character with these joints (a PNG data URL). */
+export async function previewAutoRigCuts(
+  session: Session,
+  input: { traceId: string; view: AutoRigView; joints: AutoRigJoints },
+): Promise<{ ok: true; cuts: string } | { ok: false; error: string }> {
+  try {
+    return { ok: true, ...(await backend<{ cuts: string }>("/me/autorig/preview", { session, method: "POST", body: input })) };
+  } catch (error) {
+    if (!(error instanceof BackendError) || ![400, 403].includes(error.status)) throw error;
+    return { ok: false, error: errorMessage(error.body, "Couldn't show the cuts.") };
+  }
+}
+
 /** POST /me/autorig — builds the rig from the cutout and joints and saves it as the user's asset. */
 export async function createAutoRig(
   session: Session,
-  input: { name: string; view: AutoRigView; visibility: "public" | "private"; cutout: string; joints: AutoRigJoints },
+  input: { name: string; view: AutoRigView; visibility: "public" | "private"; slice: boolean; cutout: string; joints: AutoRigJoints; gear: AutoRigGear[]; traceId: string | null },
 ): Promise<{ ok: true; asset: SpineAsset } | { ok: false; error: string }> {
   try {
     return { ok: true, asset: await backend<SpineAsset>("/me/autorig", { session, method: "POST", body: input }) };

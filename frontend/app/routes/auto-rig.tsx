@@ -10,10 +10,10 @@ import { Checkbox } from "~/components/ui/checkbox";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
-import { createAutoRig, getAccount, prepareAutoRig } from "~/lib/api.server";
+import { createAutoRig, getAccount, prepareAutoRig, previewAutoRigCuts } from "~/lib/api.server";
 import { requireSession } from "~/lib/auth.server";
 import { assetPath, SITE_NAME } from "~/lib/seo";
-import { AUTO_RIG_JOINTS, type AutoRigJoints, type AutoRigView, type PreparedAutoRig } from "~/lib/types";
+import { AUTO_RIG_JOINTS, type AutoRigGear, type AutoRigJoints, type AutoRigView, type PreparedAutoRig } from "~/lib/types";
 
 // Auto-rig: one image of a humanoid → Muse Image redraws it in a rig pose → the user drags the
 // joints into place → the backend builds a Spine rig and saves it (AUTO_RIG_PLAN.md).
@@ -32,7 +32,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   return { proOnly: account.plan === "free" };
 }
 
-type ActionResult = { intent: "prepare"; ok: true; rig: PreparedAutoRig } | { intent: "prepare" | "create"; ok: false; error: string };
+type ActionResult =
+  | { intent: "prepare"; ok: true; rig: PreparedAutoRig }
+  | { intent: "preview"; ok: true; traceId: string; cuts: string }
+  | { intent: "prepare" | "preview" | "create"; ok: false; error: string };
 
 export async function action({ request, context }: Route.ActionArgs) {
   const session = requireSession(context, request);
@@ -47,11 +50,26 @@ export async function action({ request, context }: Route.ActionArgs) {
     return result.ok ? data<ActionResult>({ intent, ok: true, rig: result.rig }) : data<ActionResult>({ intent, ok: false, error: result.error }, { status: 400 });
   }
 
-  if (intent === "create") {
-    const cutout = form.get("cutout");
+  if (intent === "preview") {
+    const traceId = form.get("traceId");
     let joints: unknown = null;
     try {
       joints = JSON.parse(String(form.get("joints")));
+    } catch {
+      // Reported below.
+    }
+    if (typeof traceId !== "string" || typeof joints !== "object" || joints === null) return data<ActionResult>({ intent, ok: false, error: "Pose the character first." }, { status: 400 });
+    const result = await previewAutoRigCuts(session, { traceId, view, joints: joints as AutoRigJoints });
+    return result.ok ? data<ActionResult>({ intent, ok: true, traceId, cuts: result.cuts }) : data<ActionResult>({ intent, ok: false, error: result.error }, { status: 400 });
+  }
+
+  if (intent === "create") {
+    const cutout = form.get("cutout");
+    let joints: unknown = null;
+    let gear: unknown = [];
+    try {
+      joints = JSON.parse(String(form.get("joints")));
+      gear = JSON.parse(String(form.get("gear") ?? "[]"));
     } catch {
       // Reported below.
     }
@@ -60,8 +78,12 @@ export async function action({ request, context }: Route.ActionArgs) {
       name: String(form.get("name") ?? ""),
       view,
       visibility: form.get("visibility") === "public" ? "public" : "private",
+      slice: form.get("slice") === "on",
       cutout,
       joints: joints as AutoRigJoints,
+      // The backend checks every item.
+      gear: Array.isArray(gear) ? (gear as AutoRigGear[]) : [],
+      traceId: typeof form.get("traceId") === "string" ? String(form.get("traceId")) : null,
     });
     if (!result.ok) return data<ActionResult>({ intent, ok: false, error: result.error }, { status: 400 });
     throw redirect(assetPath(result.asset));
@@ -73,6 +95,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
   const pose = useFetcher<typeof action>();
   const build = useFetcher<typeof action>();
+  const preview = useFetcher<typeof action>();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [image, setImage] = useState<{ dataUrl: string; name: string; png: boolean } | null>(null);
@@ -80,13 +103,22 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
   const [view, setView] = useState<AutoRigView>("front");
   const [name, setName] = useState("");
   const [visibility, setVisibility] = useState<"private" | "public">("private");
+  const [showCuts, setShowCuts] = useState(true);
+  // "smooth": the art stays one image, bent by the bones. "parts": it's cut into separate pieces.
+  const [rigStyle, setRigStyle] = useState<"smooth" | "parts">("smooth");
+  const sliced = rigStyle === "parts";
   // The user's joint edits, tied to the cutout they were made on, so a new pose starts fresh.
   const [edited, setEdited] = useState<{ cutout: string; joints: AutoRigJoints } | null>(null);
 
   const posing = pose.state !== "idle";
   const building = build.state !== "idle";
   const prepared = pose.data?.ok && pose.data.intent === "prepare" ? pose.data.rig : null;
-  const joints = prepared ? (edited?.cutout === prepared.cutout ? edited.joints : prepared.joints) : null;
+  const isEdited = !!prepared && edited?.cutout === prepared.cutout;
+  const joints = prepared ? (isEdited ? edited.joints : prepared.joints) : null;
+  // The cuts for the joints as prepared, or the latest preview for this pose once joints are moved.
+  const previewed = preview.data?.ok && preview.data.intent === "preview" && preview.data.traceId === prepared?.traceId ? preview.data.cuts : null;
+  const cuts = prepared ? (isEdited ? (previewed ?? prepared.cuts) : prepared.cuts) : null;
+  const previewError = preview.data && !preview.data.ok ? preview.data.error : null;
   const poseError = pose.data && !pose.data.ok ? pose.data.error : null;
   const buildError = build.data && !build.data.ok ? build.data.error : null;
 
@@ -143,6 +175,17 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
     pose.submit(body, { method: "post" });
   };
 
+  /** Asks the backend where the rig would cut with these joints; runs when a joint is dropped. */
+  const runPreview = (next: AutoRigJoints) => {
+    if (!prepared?.traceId) return;
+    const body = new FormData();
+    body.set("intent", "preview");
+    body.set("traceId", prepared.traceId);
+    body.set("view", view);
+    body.set("joints", JSON.stringify(next));
+    preview.submit(body, { method: "post" });
+  };
+
   const runBuild = () => {
     if (!prepared || !joints) return;
     const body = new FormData();
@@ -150,8 +193,11 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
     body.set("name", name);
     body.set("view", view);
     body.set("visibility", visibility);
+    if (sliced) body.set("slice", "on");
     body.set("cutout", prepared.cutout);
     body.set("joints", JSON.stringify(joints));
+    body.set("gear", JSON.stringify(prepared.gear ?? []));
+    if (prepared.traceId) body.set("traceId", prepared.traceId);
     build.submit(body, { method: "post" });
   };
 
@@ -238,7 +284,7 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
               {!prepared
                 ? "The posed character and its joints show here."
                 : prepared.jointsBy === "spark"
-                  ? `Muse Spark placed the joints.${prepared.flagged.length ? " Check the outlined ones." : ""} Drag any that are off: the rig is cut into parts at the joints, so shoulders, elbows, hips and knees matter most.`
+                  ? `Muse Spark placed the joints.${prepared.flagged.length ? " Check the outlined ones." : ""} Drag any that are off: the rig bends at the joints, so shoulders, elbows, hips and knees matter most.`
                   : "Muse Spark couldn't place the joints, so they're guessed from the outline. Check the outlined ones and drag any that are off."}
             </CardDescription>
           </CardHeader>
@@ -253,7 +299,24 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
                   // A flagged joint stops being flagged once the user has moved it.
                   flagged={prepared.flagged.filter((j) => joints[j].x === prepared.joints[j].x && joints[j].y === prepared.joints[j].y)}
                   onChange={(j) => setEdited({ cutout: prepared.cutout, joints: j })}
+                  onCommit={sliced ? runPreview : undefined}
+                  overlay={sliced && showCuts ? (cuts ?? undefined) : undefined}
+                  overlayStale={preview.state !== "idle"}
                 />
+                {sliced && (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="show-cuts" checked={showCuts} onCheckedChange={(c) => setShowCuts(c === true)} />
+                      <Label htmlFor="show-cuts" className="font-normal">
+                        Show where the rig is cut
+                      </Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Each colour is one piece, and each piece turns at its joint, so a thigh should start at the hip, not at the knee. Pads and hands stay whole on their limb, and a cape (brown) is its own piece behind the body.
+                    </p>
+                    {previewError && <p className="text-xs text-destructive">{previewError}</p>}
+                  </div>
+                )}
                 <Button variant="ghost" size="sm" className="self-start" onClick={() => setEdited(null)} disabled={!edited || edited.cutout !== prepared.cutout}>
                   <RotateCcw /> Reset joints
                 </Button>
@@ -272,6 +335,22 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
                 <Label htmlFor="rig-name">Name</Label>
                 <Input id="rig-name" name="name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="e.g. Swamp Orc" />
               </div>
+              <div className="flex flex-col gap-2">
+                <Label>Rig style</Label>
+                <ToggleGroup type="single" variant="outline" value={rigStyle} onValueChange={(v) => v && setRigStyle(v as "smooth" | "parts")} disabled={building} className="w-full">
+                  <ToggleGroupItem value="smooth" className="flex-1">
+                    Smooth
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="parts" className="flex-1">
+                    Separate parts
+                  </ToggleGroupItem>
+                </ToggleGroup>
+                <p className="text-xs text-muted-foreground">
+                  {sliced
+                    ? "Cut into separate pieces, so limbs can swing far: walks, attacks, big arm moves. Seams can show where Muse has to invent what was hidden."
+                    : "The picture stays whole and bends with the bones: no seams or tears. Best for idles, breathing and gentle moves."}
+                </p>
+              </div>
               <div className="flex items-center gap-2">
                 <Checkbox id="rig-public" checked={visibility === "public"} onCheckedChange={(c) => setVisibility(c === true ? "public" : "private")} />
                 <Label htmlFor="rig-public" className="font-normal">
@@ -288,10 +367,25 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
                 {building ? <Loader2 className="animate-spin" /> : <Bone />}
                 {building ? "Building the rig…" : "Build rig"}
               </Button>
+              <p className="text-xs text-muted-foreground">
+                {!sliced
+                  ? building
+                    ? "Building the rig. This takes a few seconds."
+                    : "The bones are fitted to your joints and the picture is weighted to them. No Muse calls."
+                  : building
+                    ? "Cutting the character into parts, then Muse paints what's hidden behind each joint. This takes about 20–40 seconds."
+                    : `The character is cut into parts at the joints${prepared.gear.length ? `, keeping its ${listGear(prepared.gear)} whole` : " and hands"}, and Muse paints in what's hidden behind them so limbs can move freely.`}
+              </p>
             </CardFooter>
           )}
         </Card>
       </div>
     </div>
   );
+}
+
+/** "red cape, shoulder pad and knee pad", with the hands always kept whole too. */
+function listGear(gear: AutoRigGear[]): string {
+  const names = [...gear.map((g) => g.phrase), "hands"];
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }

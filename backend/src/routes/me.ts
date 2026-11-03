@@ -3,7 +3,7 @@ import express, { Router } from "express";
 import { deleteAsset, getAssetRow, getAssetsByIds, listOwnedAssets } from "../lib/assets.js";
 import { isAdminOf, requireUser, userIdOf } from "../lib/auth.js";
 import { AiTimeoutError } from "../lib/ai-fetch.js";
-import { createAutoRig, parseCreateInput, parsePrepareInput, prepareAutoRig } from "../lib/autorig/create.js";
+import { createAutoRig, parseCreateInput, parsePrepareInput, parsePreviewInput, prepareAutoRig, previewCuts } from "../lib/autorig/create.js";
 import { runAnimationJob } from "../lib/animation-jobs.js";
 import { AnimateError, deleteAnimation, editAnimation, renameAnimation, generateAnimation, parseAnimateInput } from "../lib/animate.js";
 import { parseAutoTweakInput, reviewAutoTweak } from "../lib/auto-tweak.js";
@@ -162,9 +162,12 @@ const autoRigAllowed: express.RequestHandler = async (_req, res, next) => {
 
 /**
  * POST /me/autorig/prepare  body = { image (data URL), view: "front" | "right", skipPose? }
- * → { cutout (PNG data URL), width, height, joints, flagged, jointsBy, posed }. Muse Image redraws
- * the character in the rig pose (about 15–35 s) unless skipPose, then Muse Spark places the inner
- * joints (about 15–30 s); nothing is stored. 400 { error } for bad input,
+ * → { cutout (PNG data URL), width, height, joints, flagged, jointsBy, gear, posed, traceId, cuts }. Muse
+ * Image redraws the character in the rig pose (about 15–35 s) unless skipPose, then Muse Spark
+ * places the inner joints and lists the gear (about 15–30 s), and SAM 3.1 masks the gear (2–4 s).
+ * `cuts` shows where the rig will cut (PNG data URL). Only the trace is stored (remixes/<traceId>/:
+ * prepare.json, Muse's redraw as pose.webp, and cutout.png and gear.json/gear.png for the cut
+ * preview and the build). 400 { error } for bad input,
  * 502 { error } when the model fails. Not charged yet.
  */
 meRouter.post("/autorig/prepare", autoRigAllowed, express.json({ limit: MAX_AUTORIG_BYTES }), async (req, res) => {
@@ -190,9 +193,31 @@ meRouter.post("/autorig/prepare", autoRigAllowed, express.json({ limit: MAX_AUTO
 });
 
 /**
- * POST /me/autorig  body = { name, view, visibility, cutout (PNG data URL from prepare), joints }
- * → 201 SpineAsset: the rig is built from the joints, stored under remixes/<time>_autorig_<id>/ and
- * saved as the user's asset. 400 { error } for bad input or a duplicate.
+ * POST /me/autorig/preview  body = { traceId (from prepare), view, joints } → { cuts }: where the rig
+ * would cut the prepared character with these joints (PNG data URL, about half a second), for the
+ * joint editor. No model calls. 400 { error } for bad input or an unknown pose.
+ */
+meRouter.post("/autorig/preview", autoRigAllowed, express.json({ limit: "64kb" }), async (req, res) => {
+  const parsed = parsePreviewInput(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const result = await previewCuts(parsed.input);
+  if ("error" in result) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+  res.json(result);
+});
+
+/**
+ * POST /me/autorig  body = { name, view, visibility, slice?, cutout (PNG data URL from prepare), joints, gear, traceId }
+ * → 201 SpineAsset: the rig is built from the joints. Without `slice` the art stays one image bent
+ * by weighted meshes (no model calls). With it, the art is cut into parts using the gear masks saved
+ * with the pose (each piece kept whole, a cape its own piece), and Muse Image paints the
+ * parts' hidden areas (about 15–35 s; the smear is kept if it fails), and it's stored under
+ * remixes/<time>_autorig_<id>/ (with autorig.json, the trace) and saved as the user's asset. 400 { error } for bad input or a duplicate.
  */
 meRouter.post("/autorig", autoRigAllowed, express.json({ limit: MAX_AUTORIG_BYTES }), async (req, res) => {
   const parsed = parseCreateInput(req.body);
@@ -200,12 +225,19 @@ meRouter.post("/autorig", autoRigAllowed, express.json({ limit: MAX_AUTORIG_BYTE
     res.status(400).json({ error: parsed.error });
     return;
   }
-  const result = await createAutoRig(userIdOf(res), parsed.input);
-  if (!result.ok) {
-    res.status(400).json({ error: result.error });
-    return;
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+  try {
+    const result = await createAutoRig(userIdOf(res), parsed.input, controller.signal);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.status(201).json(result.asset);
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    throw error;
   }
-  res.status(201).json(result.asset);
 });
 
 // ---------------------------------------------------------------------------

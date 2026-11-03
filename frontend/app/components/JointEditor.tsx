@@ -3,7 +3,8 @@ import type { AutoRigJointName, AutoRigJoints } from "~/lib/types";
 import { cn } from "~/lib/utils";
 
 // Draggable joints over the auto-rig cutout (/autoRig). Coordinates are cutout pixels; the SVG's
-// viewBox is the cutout's size, so pointer positions map through the SVG's screen matrix.
+// viewBox is the cutout's size, so pointer positions map through the SVG's screen matrix. An
+// optional overlay (the backend's cut preview, the cutout's size) is drawn over the character.
 
 const LINKS: [AutoRigJointName, AutoRigJointName][] = [
   ["head", "neck"],
@@ -40,10 +41,16 @@ interface JointEditorProps {
   /** Joints to check, drawn with a dashed ring until the user moves them. */
   flagged?: AutoRigJointName[];
   onChange: (joints: AutoRigJoints) => void;
+  /** Called with the joints when a dragged joint is dropped. */
+  onCommit?: (joints: AutoRigJoints) => void;
+  /** An image the cutout's size drawn translucent over the character, e.g. where the rig is cut. */
+  overlay?: string;
+  /** The overlay is out of date (a new one is loading): draw it fainter. */
+  overlayStale?: boolean;
   className?: string;
 }
 
-export function JointEditor({ image, width, height, joints, flagged = [], onChange, className }: JointEditorProps) {
+export function JointEditor({ image, width, height, joints, flagged = [], onChange, onCommit, overlay, overlayStale = false, className }: JointEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<AutoRigJointName | null>(null);
   const [hover, setHover] = useState<AutoRigJointName | null>(null);
@@ -70,12 +77,16 @@ export function JointEditor({ image, width, height, joints, flagged = [], onChan
           const p = toImage(e);
           if (p) onChange({ ...joints, [dragging]: p });
         }}
-        onPointerUp={() => setDragging(null)}
+        onPointerUp={() => {
+          if (dragging) onCommit?.(joints);
+          setDragging(null);
+        }}
         onPointerCancel={() => setDragging(null)}
         role="img"
         aria-label="Character with draggable joints"
       >
         <image href={image} width={width} height={height} />
+        {overlay && <image href={overlay} width={width} height={height} opacity={overlayStale || dragging ? 0.3 : 0.6} pointerEvents="none" />}
         {LINKS.map(([a, b]) => (
           <line key={`${a}-${b}`} x1={joints[a].x} y1={joints[a].y} x2={joints[b].x} y2={joints[b].y} stroke={SIDE_COLOURS[sideOf(b)]} strokeWidth={r * 0.45} strokeLinecap="round" opacity={0.85} />
         ))}

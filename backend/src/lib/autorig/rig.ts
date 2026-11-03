@@ -2,6 +2,7 @@ import * as spine from "@esotericsoftware/spine-core";
 import Delaunator from "delaunator";
 import sharp from "sharp";
 import { stubLoader } from "../animate-fx.js";
+import type { GearMask } from "./gear.js";
 import { fillAndPack, type PackedRegion, type PartCut } from "./slice.js";
 import type { AutoRigView, Cutout, Joints, Point } from "./types.js";
 
@@ -16,6 +17,12 @@ import type { AutoRigView, Cutout, Joints, Point } from "./types.js";
 // leg never takes pixels from the other leg across the gap between them, and an arm doesn't take
 // the torso it hangs beside. Parts overlap in a band around each joint and their vertices are
 // weighted by the same function of position, so seams stay closed when a joint bends.
+//
+// Gear SAM 3.1 found (gear.ts: pauldrons, kneepads, the hands) overrides that on sliced rigs: each
+// piece goes whole to the part it moves with and is weighted to that part's bones alone, so it
+// isn't cut in half or bent at a joint. A cape is its own piece: drawn behind everything, on a chain
+// of three bones hanging from the chest, so it can sway. And no limb piece reaches far behind its
+// own joint (the side of the belt goes with the torso, not the thigh), so each one turns cleanly.
 
 type Json = Record<string, unknown>;
 
@@ -29,6 +36,25 @@ const OVERLAP = 2.2;
 const HIDDEN_REACH = 1.5;
 /** Spacing of interior mesh points, as a share of the character's height. */
 const SPACING_SHARE = 0.035;
+/**
+ * Hidden fill stays within this many times a part's own width of its bones (the 90th percentile of
+ * its own non-gear cells' distance). Gear that widens the silhouette at a joint (a cape beside the
+ * hip) would otherwise stretch the limb's fill into the gear's shape. Gear beside a limb may be in
+ * front of it or behind it, which the picture doesn't say, so fill never follows gear along a limb.
+ */
+const HIDDEN_WIDTH_SLACK = 1.15;
+/** How far a limb piece may reach behind its own joint, as a share of the character's height. */
+const PIVOT_MARGIN_SHARE = 0.02;
+/** How far a cape's hidden fill reaches in under the body, as a share of the character's height. */
+const CAPE_HIDDEN_SHARE = 0.06;
+/** A non-cape gear piece with more than this share inside a cape is the same cloth, and is dropped. */
+const CAPE_DUPLICATE = 0.8;
+/** A cape smaller than this many grid cells isn't worth its own piece and bones. */
+const MIN_CAPE_CELLS = 40;
+/** A gear mask is used only if at least this share of it is already on its part or a part joined to it. */
+const GEAR_MIN_HOME = 0.15;
+/** Cells a gear mask grows to take in the art's outline around it. */
+const GEAR_GROW = 2;
 /** Bones per vertex. */
 const MAX_INFLUENCES = 3;
 const MIN_WEIGHT = 0.02;
@@ -67,16 +93,21 @@ export interface BuiltRig {
   pageImage: Cutout;
   /** The page's regions and where each came from in the cutout. */
   regions: PackedRegion[];
-  stats: { parts: { name: string; vertices: number; triangles: number }[] };
+  /** Per page pixel: 1 where the art is hidden fill (sliced rigs only; all 0 otherwise). */
+  hidden: Uint8Array;
+  stats: { parts: { name: string; vertices: number; triangles: number }[]; gear: { phrase: string; part: string | null; cells: number }[] };
 }
 
 export interface RigOptions {
   /** Cut the art into 14 parts with their hidden areas filled (default), or draw it as one texture. */
   slice?: boolean;
+  /** Gear masks from SAM 3.1 (sliced rigs only), each kept whole on its part. */
+  gear?: GearMask[];
 }
 
-export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, { slice = true }: RigOptions = {}): Promise<BuiltRig> {
-  const bones = boneDefs(joints);
+export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, { slice = true, gear = [] }: RigOptions = {}): Promise<BuiltRig> {
+  const cape = slice ? capeChain(cut, gear, joints) : null;
+  const bones = boneDefs(joints, cape);
   const parts = partDefs();
   const byName = new Map(bones.map((b) => [b.name, b]));
 
@@ -126,10 +157,12 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
 
   const attachments: Record<string, Json> = {};
   const stats: BuiltRig["stats"]["parts"] = [];
+  const gearStats: BuiltRig["stats"]["gear"] = [];
   let order: string[];
   let slotBones: Map<string, string>;
   let pageImage: Cutout;
   let regions: PackedRegion[];
+  let hidden: Uint8Array;
 
   if (!slice) {
     // One texture, six meshes that overlap at the joints.
@@ -156,14 +189,13 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
     slotBones = new Map(parts.map((p) => [p.name, p.slotBone]));
     pageImage = cut;
     regions = [{ name: PAGE_NAME, x: 0, y: 0, width: cut.width, height: cut.height, srcX: 0, srcY: 0 }];
+    hidden = new Uint8Array(cut.width * cut.height);
   } else {
     // Fourteen parts, each with its own region. See AUTO_RIG_PLAN.md, "Slicing".
-    const sliced = slicedParts(view);
+    const sliced = slicedParts(view, !!cape);
     order = sliced.order;
     slotBones = new Map(sliced.parts.map((p) => [p.name, p.slotBone]));
-    const partOfBone = new Map(sliced.parts.flatMap((p, i) => p.bones.map((b) => [map.boneNames.indexOf(b), i] as const)));
-    const label = new Int16Array(map.mask.length).fill(-1);
-    for (let c = 0; c < label.length; c++) if (map.mask[c]) label[c] = partOfBone.get(map.nearestBone(c)) ?? -1;
+    const { label, gearOf } = labelParts(map, cut, sliced, gear, gearStats);
     const depth = map.depth();
     const rank = (name: string) => order.indexOf(name);
 
@@ -172,9 +204,13 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
     sliced.parts.forEach((part, pi) => {
       const own = new Uint8Array(label.length);
       for (let c = 0; c < label.length; c++) if (label[c] === pi) own[c] = 1;
-      // Hidden areas: around each joint where another part is drawn over this one.
+      // Hidden areas: around each joint where another part is drawn over this one, within the part's
+      // own width of its bones (gear that widens the body there, like a cape, isn't a limb).
       const hidden = new Uint8Array(label.length);
       const allowed = [...part.bones];
+      const width = partWidth(map, part.bones, own, gearOf) * HIDDEN_WIDTH_SLACK;
+      // The cape hangs behind the body: fill it in under the body around its own outline.
+      if (part.name === "cape") map.within(own, (height * CAPE_HIDDEN_SHARE) / map.cell).forEach((v, c) => v && !own[c] && label[c] >= 0 && (hidden[c] = 1));
       for (const j of sliced.joints) {
         if (j.parts[0] !== part.name && j.parts[1] !== part.name) continue;
         const other = j.parts[0] === part.name ? j.parts[1] : j.parts[0];
@@ -183,7 +219,7 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
           const at = map.toCell(joints[j.at]);
           const radius = Math.max(depth[map.cellAt(joints[j.at])], 2) * HIDDEN_REACH;
           for (let c = 0; c < label.length; c++) {
-            if (label[c] !== otherIndex) continue;
+            if (label[c] !== otherIndex || map.lineDistance(part.bones, c) > width) continue;
             const x = c % map.gw;
             if (Math.hypot(x - at.x, (c - x) / map.gw - at.y) <= radius) hidden[c] = 1;
           }
@@ -228,6 +264,7 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
     const packed = fillAndPack(cut, cuts);
     pageImage = packed.page;
     regions = packed.regions;
+    hidden = packed.hidden;
     for (const { part, mesh, own, allowed } of meshes) {
       const r = regions.find((x) => x.name === part.name)!;
       attachments[part.name] = {
@@ -240,7 +277,8 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
           vertices: mesh.points.flatMap((p) => {
             let c = map.cellAt(p);
             if (!map.mask[c]) c = map.nearestSolidOf(c);
-            return weigh(p, c >= 0 && own[c] ? allowed : part.bones);
+            // Gear stays rigid on its own part, so it doesn't bend with the part beneath either.
+            return weigh(p, c >= 0 && own[c] && gearOf[c] < 0 ? allowed : part.bones);
           }),
           hull: mesh.hull,
           width: r.width,
@@ -277,7 +315,7 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
     slots,
     ik: SIDES.map((s, i) => ({ name: `leg_${s}`, order: i, bones: [`thigh_${s}`, `shin_${s}`], target: `foot_target_${s}` })),
     skins: [{ name: "default", attachments }],
-    animations: { idle: idleAnimation(world.get("chest")!.length + world.get("spine")!.length) },
+    animations: { idle: idleAnimation(world.get("chest")!.length + world.get("spine")!.length, !!cape && !!attachments.cape) },
   };
   fixBendDirections(skeleton, (name) => world.get(name)!);
 
@@ -285,15 +323,242 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
     `${PAGE_NAME}.png\nsize: ${pageImage.width}, ${pageImage.height}\nfilter: Linear, Linear\n` +
     regions.map((r) => `${r.name}\nbounds: ${r.x}, ${r.y}, ${r.width}, ${r.height}\n`).join("");
   const page = await sharp(pageImage.rgba, { raw: { width: pageImage.width, height: pageImage.height, channels: 4 } }).png().toBuffer();
-  return { skeleton, atlas, page, pageImage, regions, stats: { parts: stats } };
+  return { skeleton, atlas, page, pageImage, regions, hidden, stats: { parts: stats, gear: gearStats } };
+}
+
+/** How far a part's own non-gear cells reach from its bones (90th percentile, in cells); Infinity if it has too few. */
+function partWidth(map: BodyMap, bones: string[], own: Uint8Array, gearOf: Int16Array): number {
+  const d: number[] = [];
+  for (let c = 0; c < own.length; c++) if (own[c] && gearOf[c] < 0) d.push(map.lineDistance(bones, c));
+  if (d.length < 10) return Infinity;
+  d.sort((a, b) => a - b);
+  return d[Math.floor(d.length * 0.9)];
+}
+
+/**
+ * Each cell's part (index into `sliced.parts`, -1 off the body): its nearest body bone's (the cape's
+ * bones only take the cape's own gear cells), pulled back to the parent part where a limb piece
+ * would reach behind its own joint, then the gear's.
+ */
+function labelParts(map: BodyMap, cut: Cutout, sliced: ReturnType<typeof slicedParts>, gear: GearMask[], stats: BuiltRig["stats"]["gear"]): { label: Int16Array; gearOf: Int16Array } {
+  const body = sliced.parts.filter((p) => p.name !== "cape");
+  const partOfBone = new Map(body.flatMap((p) => p.bones.map((b) => [map.boneNames.indexOf(b), sliced.parts.indexOf(p)] as const)));
+  const bodyBones = [...partOfBone.keys()];
+  const label = new Int16Array(map.mask.length).fill(-1);
+  for (let c = 0; c < label.length; c++) if (map.mask[c]) label[c] = partOfBone.get(map.nearestBoneOf(c, bodyBones)) ?? -1;
+
+  // A limb piece turns about its joint, so anything well behind that joint (the side of the belt
+  // beside a hip, the chest beside a shoulder) belongs to the part it hangs from.
+  const margin = (map.figureHeight * PIVOT_MARGIN_SHARE) / map.cell;
+  for (const s of SIDES) {
+    for (const [limb, parent] of [
+      [`upper_arm_${s}`, "torso"],
+      [`forearm_${s}`, `upper_arm_${s}`],
+      [`thigh_${s}`, "torso"],
+      [`shin_${s}`, `thigh_${s}`],
+    ]) {
+      const [li, pi] = [sliced.parts.findIndex((p) => p.name === limb), sliced.parts.findIndex((p) => p.name === parent)];
+      const [a, b] = map.segment(limb);
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      for (let c = 0; c < label.length; c++) {
+        if (label[c] !== li) continue;
+        const x = c % map.gw;
+        const y = (c - x) / map.gw;
+        if (((x - a.x) * (b.x - a.x) + (y - a.y) * (b.y - a.y)) / len < -margin) label[c] = pi;
+      }
+    }
+  }
+  return { label, gearOf: applyGear(map, cut, sliced, label, gear, stats) };
+}
+
+/**
+ * The cape's bone chain: four points (shoulders to tip) along the cape SAM found, from its cell
+ * nearest the neck to the cell farthest from there through the cape, split in thirds. Null when
+ * there's no cape, or too little of one.
+ */
+function capeChain(cut: Cutout, gear: GearMask[], joints: Joints): Point[] | null {
+  const capes = gear.filter((g) => g.goesWith === "cape");
+  if (!capes.length) return null;
+  const cell = Math.max(cut.width, cut.height) / GRID;
+  const gw = Math.ceil(cut.width / cell);
+  const gh = Math.ceil(cut.height / cell);
+  const counts = new Uint16Array(gw * gh);
+  for (let y = 0; y < cut.height; y++) {
+    for (let x = 0; x < cut.width; x++) {
+      const p = y * cut.width + x;
+      if (cut.rgba[p * 4 + 3] >= 128 && capes.some((g) => g.mask[p])) counts[Math.floor(y / cell) * gw + Math.floor(x / cell)]++;
+    }
+  }
+  const inCape = (c: number) => counts[c] >= (cell * cell) / 2;
+  let start = -1;
+  let best = Infinity;
+  for (let c = 0; c < counts.length; c++) {
+    if (!inCape(c)) continue;
+    const d = Math.hypot(((c % gw) + 0.5) * cell - joints.neck.x, (Math.floor(c / gw) + 0.5) * cell - joints.neck.y);
+    if (d < best) [best, start] = [d, c];
+  }
+  if (start < 0) return null;
+  // Breadth-first through the cape from the top; the farthest cell is its tip.
+  const from = new Int32Array(counts.length).fill(-2);
+  const steps = new Float64Array(counts.length);
+  from[start] = -1;
+  const queue = [start];
+  let tip = start;
+  for (let i = 0; i < queue.length; i++) {
+    const c = queue[i];
+    if (steps[c] > steps[tip]) tip = c;
+    const x = c % gw;
+    const y = (c - x) / gw;
+    for (const [dx, dy] of NEIGHBOURS_8) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const n = ny * gw + nx;
+      if (nx < 0 || ny < 0 || nx >= gw || ny >= gh || from[n] !== -2 || !inCape(n)) continue;
+      from[n] = c;
+      steps[n] = steps[c] + 1;
+      queue.push(n);
+    }
+  }
+  if (queue.length < MIN_CAPE_CELLS) return null;
+  const path: number[] = [];
+  for (let c = tip; c >= 0; c = from[c]) path.unshift(c);
+  const at = (t: number) => {
+    const c = path[Math.min(path.length - 1, Math.round(t * (path.length - 1)))];
+    return { x: ((c % gw) + 0.5) * cell, y: (Math.floor(c / gw) + 0.5) * cell };
+  };
+  return [at(0), at(1 / 3), at(2 / 3), at(1)];
+}
+
+/** Colours for the cut preview: greens and blues on the character's left, oranges and pinks on its right. */
+const PART_COLOURS: Record<string, [number, number, number]> = {
+  head: [235, 235, 235],
+  torso: [140, 140, 150],
+  upper_arm_l: [34, 197, 94],
+  forearm_l: [45, 212, 191],
+  hand_l: [163, 230, 53],
+  thigh_l: [59, 130, 246],
+  shin_l: [34, 211, 238],
+  foot_l: [139, 92, 246],
+  upper_arm_r: [249, 115, 22],
+  forearm_r: [239, 68, 68],
+  hand_r: [250, 204, 21],
+  thigh_r: [236, 72, 153],
+  shin_r: [244, 114, 182],
+  foot_r: [190, 18, 60],
+  cape: [146, 64, 14],
+};
+
+/**
+ * Where the rig will cut the character, as a PNG the size of the cutout: each part's pixels in its
+ * own colour, at the art's alpha. Slicing alone (no meshes, fill or packing), for the joint editor
+ * to show while joints are checked, with the gear SAM found (kept whole, the cape its own piece).
+ */
+export async function cutPreview(cut: Cutout, joints: Joints, view: AutoRigView, gear: GearMask[] = []): Promise<Buffer> {
+  const cape = capeChain(cut, gear, joints);
+  const map = new BodyMap(cut, boneDefs(joints, cape).filter((b) => b.skin));
+  const sliced = slicedParts(view, !!cape);
+  const { label } = labelParts(map, cut, sliced, gear, []);
+  const out = Buffer.alloc(cut.width * cut.height * 4);
+  for (let y = 0; y < cut.height; y++) {
+    for (let x = 0; x < cut.width; x++) {
+      const p = y * cut.width + x;
+      const alpha = cut.rgba[p * 4 + 3];
+      if (!alpha) continue;
+      const part = label[Math.floor(y / map.cell) * map.gw + Math.floor(x / map.cell)];
+      if (part < 0) continue;
+      out.set(PART_COLOURS[sliced.parts[part].name] ?? [0, 0, 0], p * 4);
+      out[p * 4 + 3] = alpha;
+    }
+  }
+  return sharp(out, { raw: { width: cut.width, height: cut.height, channels: 4 } }).png().toBuffer();
+}
+
+/**
+ * Gives each gear mask's cells to the part the gear goes with, overwriting `label`; smaller pieces
+ * win where masks overlap (a kneepad over a cape). A sided piece goes to the side whose bone is
+ * nearer. Returns, per cell, the part its gear went to (-1 where there's none).
+ */
+function applyGear(map: BodyMap, cut: Cutout, sliced: ReturnType<typeof slicedParts>, label: Int16Array, gear: GearMask[], stats: BuiltRig["stats"]["gear"]): Int16Array {
+  const gearOf = new Int16Array(label.length).fill(-1);
+  const half = (map.cell * map.cell) / 2;
+  const pieces = gear.map((g) => {
+    const counts = new Uint16Array(label.length);
+    for (let y = 0; y < cut.height; y++) {
+      for (let x = 0; x < cut.width; x++) if (g.mask[y * cut.width + x]) counts[Math.floor(y / map.cell) * map.gw + Math.floor(x / map.cell)]++;
+    }
+    const inside = new Uint8Array(label.length);
+    for (let c = 0; c < label.length; c++) if (map.mask[c] && counts[c] >= half) inside[c] = 1;
+    // SAM's masks stop just inside the art's outline, which would leave the gear's outer border
+    // with the nearest limb (a cape's outline swinging with the thigh). Grow each piece a couple
+    // of cells into cells its mask touches or that lie on the character's outer edge.
+    for (let pass = 0; pass < GEAR_GROW; pass++) {
+      const prev = Uint8Array.from(inside);
+      for (let c = 0; c < label.length; c++) {
+        if (prev[c] || !map.mask[c]) continue;
+        const x = c % map.gw;
+        const y = (c - x) / map.gw;
+        let touches = false;
+        let edge = false;
+        for (const [dx, dy] of NEIGHBOURS_8) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= map.gw || ny >= map.gh || !map.mask[ny * map.gw + nx]) edge = true;
+          else if (prev[ny * map.gw + nx]) touches = true;
+        }
+        if (touches && (edge || counts[c] > 0)) inside[c] = 1;
+      }
+    }
+    const cells: number[] = [];
+    for (let c = 0; c < label.length; c++) if (inside[c]) cells.push(c);
+    return { g, cells };
+  });
+  pieces.sort((a, b) => b.cells.length - a.cells.length);
+  // SAM can return the same cloth for two phrases ("red cape" and "red scarf" on one continuous
+  // cloth). A piece mostly inside a cape is that cape, so it can't pull the cape onto the torso.
+  const capeCells = new Set(pieces.filter((x) => x.g.goesWith === "cape" && sliced.parts.some((p) => p.name === "cape")).flatMap((x) => x.cells));
+  for (const { g, cells } of pieces) {
+    const record = (part: string | null) => stats.push({ phrase: g.phrase, part, cells: part ? cells.length : 0 });
+    if (g.goesWith !== "cape" && capeCells.size && cells.filter((c) => capeCells.has(c)).length > cells.length * CAPE_DUPLICATE) {
+      record(null);
+      continue;
+    }
+    if (!cells.length) {
+      record(null);
+      continue;
+    }
+    if (g.goesWith === "cape" && !sliced.parts.some((p) => p.name === "cape")) {
+      record(null);
+      continue;
+    }
+    const candidates = g.goesWith === "head" || g.goesWith === "torso" || g.goesWith === "cape" ? [g.goesWith] : SIDES.map((s) => `${g.goesWith}_${s}`);
+    const meanDistance = (name: string) => {
+      const bone = sliced.parts.find((p) => p.name === name)!.bones.at(-1)!;
+      return cells.reduce((sum, c) => sum + map.distance(bone, map.toPixel(c % map.gw, Math.floor(c / map.gw))), 0) / cells.length;
+    };
+    const name = candidates.reduce((a, b) => (meanDistance(b) < meanDistance(a) ? b : a));
+    const pi = sliced.parts.findIndex((p) => p.name === name);
+    // A piece that's nowhere near its part is a wrong match (or a wrong goesWith): leave it.
+    const home = new Set([pi, ...sliced.joints.filter((j) => j.parts.includes(name)).map((j) => sliced.parts.findIndex((p) => p.name === (j.parts[0] === name ? j.parts[1] : j.parts[0])))]);
+    if (name !== "cape" && cells.filter((c) => home.has(label[c])).length < cells.length * GEAR_MIN_HOME) {
+      record(null);
+      continue;
+    }
+    for (const c of cells) {
+      label[c] = pi;
+      gearOf[c] = pi;
+    }
+    record(name);
+  }
+  return gearOf;
 }
 
 /**
  * The sliced parts, the joints between them and the draw order (back to front). At each joint the
  * part drawn later is on top; the part under it gets its hidden area filled there.
  */
-function slicedParts(view: AutoRigView): { parts: PartDef[]; joints: { at: keyof Joints; parts: [string, string] }[]; order: string[] } {
+function slicedParts(view: AutoRigView, cape = false): { parts: PartDef[]; joints: { at: keyof Joints; parts: [string, string] }[]; order: string[] } {
   const parts: PartDef[] = [{ name: "head", bones: ["neck", "head"], slotBone: "head" }, { name: "torso", bones: ["spine", "chest"], slotBone: "chest" }];
+  if (cape) parts.push({ name: "cape", bones: CAPE_BONES, slotBone: CAPE_BONES[0] });
   for (const s of SIDES) {
     for (const b of [`upper_arm_${s}`, `forearm_${s}`, `hand_${s}`, `thigh_${s}`, `shin_${s}`, `foot_${s}`]) parts.push({ name: b, bones: [b], slotBone: b });
   }
@@ -316,10 +581,13 @@ function slicedParts(view: AutoRigView): { parts: PartDef[]; joints: { at: keyof
     view === "right"
       ? [...arm("l"), ...leg("l"), ...leg("r"), "torso", "head", ...arm("r")]
       : [...leg("r"), ...leg("l"), "torso", "head", ...arm("r"), ...arm("l")];
-  return { parts, joints, order };
+  // A cape hangs behind the whole body.
+  return { parts, joints, order: cape ? ["cape", ...order] : order };
 }
 
-function boneDefs(j: Joints): BoneDef[] {
+const CAPE_BONES = ["cape_1", "cape_2", "cape_3"];
+
+function boneDefs(j: Joints, cape: Point[] | null = null): BoneDef[] {
   const lerp = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
   const mid = lerp(j.pelvis, j.neck, 0.45);
   const headBase = lerp(j.neck, j.head, 0.25);
@@ -351,6 +619,7 @@ function boneDefs(j: Joints): BoneDef[] {
       { name: `foot_${s}`, parent: `foot_target_${s}`, head: j[`ankle_${s}`], tail: j[`toe_${s}`], skin: true },
     );
   }
+  if (cape) CAPE_BONES.forEach((name, i) => defs.push({ name, parent: i ? CAPE_BONES[i - 1] : "chest", head: cape[i], tail: cape[i + 1], skin: true }));
   return defs;
 }
 
@@ -387,7 +656,7 @@ function fixBendDirections(skeleton: Json, worldOf: (name: string) => { x: numbe
 }
 
 /** A gentle breathing loop: the chest rises, the head and arms follow a beat later. */
-function idleAnimation(torsoLength: number): Json {
+function idleAnimation(torsoLength: number, cape = false): Json {
   const dur = IDLE_SECONDS;
   const half = dur / 2;
   const wave = (amount: number) =>
@@ -413,6 +682,8 @@ function idleAnimation(torsoLength: number): Json {
         }),
       },
       chest: { rotate: wave(1.5) },
+      // The cape lags the body a little more at each bone down.
+      ...(cape ? { cape_1: { rotate: wave(1.5) }, cape_2: { rotate: wave(2.5) }, cape_3: { rotate: wave(3.5) } } : {}),
       head: { rotate: wave(-2) },
       upper_arm_l: { rotate: wave(3) },
       upper_arm_r: { rotate: wave(-3) },
@@ -524,6 +795,48 @@ class BodyMap {
       }
     }
     return padded;
+  }
+
+  /** Straight-line distance from a cell to the nearest of these bones, in cells. */
+  lineDistance(bones: string[], c: number): number {
+    const p = { x: c % this.gw, y: Math.floor(c / this.gw) };
+    return Math.min(...bones.map((b) => segmentDistance(p, this.segments[this.boneNames.indexOf(b)])));
+  }
+
+  /** A bone's head and tail, in cells. */
+  segment(bone: string): [Point, Point] {
+    return this.segments[this.boneNames.indexOf(bone)];
+  }
+
+  /** The index of the bone nearest a cell through the silhouette, among `bones` (indices into boneNames). */
+  nearestBoneOf(c: number, bones: number[]): number {
+    let best = bones[0];
+    for (const b of bones) if (this.fieldAt(b, c) < this.fieldAt(best, c)) best = b;
+    return best;
+  }
+
+  /** Cells on the silhouette within `reach` cells of `region`, counted in steps through the silhouette. */
+  within(region: Uint8Array, reach: number): Uint8Array {
+    const out = Uint8Array.from(region);
+    let frontier: number[] = [];
+    for (let c = 0; c < region.length; c++) if (region[c]) frontier.push(c);
+    for (let step = 0; step < reach && frontier.length; step++) {
+      const next: number[] = [];
+      for (const c of frontier) {
+        const x = c % this.gw;
+        const y = (c - x) / this.gw;
+        for (const [dx, dy] of NEIGHBOURS_8) {
+          const nx = x + dx;
+          const ny = y + dy;
+          const n = ny * this.gw + nx;
+          if (nx < 0 || ny < 0 || nx >= this.gw || ny >= this.gh || out[n] || !this.mask[n]) continue;
+          out[n] = 1;
+          next.push(n);
+        }
+      }
+      frontier = next;
+    }
+    return out;
   }
 
   /** The index (in boneNames) of the bone nearest a cell through the silhouette. */

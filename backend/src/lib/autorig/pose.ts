@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { aiFetch } from "../ai-fetch.js";
 import { IMAGE_MODEL, IMAGE_TIMEOUT_MS, META_API_BASE_URL } from "../config.js";
 import { apiKey, getPath, logPrompt } from "../meta.js";
+import type { RigTrace, TraceStep } from "./trace.js";
 import type { AutoRigView } from "./types.js";
 
 // The pose step: Muse Image redraws the uploaded character in a rig-ready pose on flat magenta
@@ -34,10 +35,19 @@ function posePrompt(view: AutoRigView): string {
 }
 
 /** Asks Muse Image for the character in the rig pose; returns the redraw (any format sharp reads). */
-export async function poseCharacter(image: Buffer, view: AutoRigView, signal: AbortSignal): Promise<Buffer> {
-  const input = await squareInput(image);
-  const prompt = posePrompt(view);
-  logPrompt(`images/edits (${IMAGE_MODEL}) auto-rig ${view}`, prompt);
+export async function poseCharacter(image: Buffer, view: AutoRigView, signal: AbortSignal, trace?: RigTrace): Promise<Buffer> {
+  return imageEdit(await squareInput(image), posePrompt(view), `pose ${view}`, signal, trace, "pose");
+}
+
+/** One Muse Image edit of a square PNG; returns the reply image (a WebP, whatever size is asked for). */
+export async function imageEdit(input: Buffer, prompt: string, label: string, signal: AbortSignal, trace?: RigTrace, step: TraceStep = "pose"): Promise<Buffer> {
+  if (trace) return trace.call(step, IMAGE_MODEL, label, (record) => editOnce(input, prompt, label, signal, record));
+  return editOnce(input, prompt, label, signal, {});
+}
+
+async function editOnce(input: Buffer, prompt: string, label: string, signal: AbortSignal, record: { usage?: unknown; detail?: Record<string, unknown> }): Promise<Buffer> {
+  logPrompt(`images/edits (${IMAGE_MODEL}) auto-rig ${label}`, prompt);
+  record.detail = { prompt, attempts: 0 };
   const body = JSON.stringify({
     model: IMAGE_MODEL,
     prompt,
@@ -47,6 +57,7 @@ export async function poseCharacter(image: Buffer, view: AutoRigView, signal: Ab
   });
   // One retry for the API's retryable errors (503), as in repaintPage.
   for (let attempt = 0; ; attempt++) {
+    record.detail.attempts = attempt + 1;
     const res = await aiFetch(`${META_API_BASE_URL}/images/edits`, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey()}`, "content-type": "application/json" },
@@ -57,14 +68,15 @@ export async function poseCharacter(image: Buffer, view: AutoRigView, signal: Ab
     if (res.ok) {
       const json: unknown = await res.json();
       const usage = getPath(json, ["usage"]);
-      console.log(`[meta] auto-rig pose (${IMAGE_MODEL}) usage: ${JSON.stringify(usage)}`);
+      record.usage = usage;
+      console.log(`[meta] auto-rig ${label} (${IMAGE_MODEL}) usage: ${JSON.stringify(usage)}`);
       const b64 = getPath(json, ["data", 0, "b64_json"]);
       if (typeof b64 !== "string" || !b64) throw new Error("The image model returned no image. Try again.");
       return Buffer.from(b64, "base64");
     }
     const text = await res.text();
     if (res.status === 503 && attempt === 0) continue;
-    console.error(`[meta] auto-rig pose failed (${res.status})`, text.slice(0, 500));
+    console.error(`[meta] auto-rig ${label} failed (${res.status})`, text.slice(0, 500));
     throw new Error(res.status === 400 ? "The image model couldn't use this image. Try another one." : "The image model is unavailable right now. Try again in a minute.");
   }
 }

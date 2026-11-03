@@ -31,7 +31,14 @@ export interface PackedRegion {
 /** Space between packed regions, so linear filtering doesn't bleed one into the next. */
 const GUTTER = 2;
 
-export function fillAndPack(cut: Cutout, parts: PartCut[]): { page: Cutout; regions: PackedRegion[] } {
+export interface PackedPage {
+  page: Cutout;
+  regions: PackedRegion[];
+  /** Per page pixel: 1 where the art is hidden fill (smeared, for a later paint pass to replace). */
+  hidden: Uint8Array;
+}
+
+export function fillAndPack(cut: Cutout, parts: PartCut[]): PackedPage {
   const images = parts.map((p) => ({ part: p, rgba: fillPart(cut, p) }));
 
   // Shelf packing, tallest first, on a page about as wide as it is tall.
@@ -56,12 +63,18 @@ export function fillAndPack(cut: Cutout, parts: PartCut[]): { page: Cutout; regi
   const pageHeight = y + rowHeight + GUTTER;
 
   const page = Buffer.alloc(pageWidth * pageHeight * 4);
+  const hidden = new Uint8Array(pageWidth * pageHeight);
   const regions = images.map(({ part, rgba }, i) => {
     const { w, h } = sizes[i];
-    for (let row = 0; row < h; row++) rgba.copy(page, ((placed[i].y + row) * pageWidth + placed[i].x) * 4, row * w * 4, (row + 1) * w * 4);
+    for (let row = 0; row < h; row++) {
+      rgba.copy(page, ((placed[i].y + row) * pageWidth + placed[i].x) * 4, row * w * 4, (row + 1) * w * 4);
+      for (let x = 0; x < w; x++) {
+        if (part.kind[row * w + x] === 2 && rgba[(row * w + x) * 4 + 3] > 0) hidden[(placed[i].y + row) * pageWidth + placed[i].x + x] = 1;
+      }
+    }
     return { name: part.name, x: placed[i].x, y: placed[i].y, width: w, height: h, srcX: part.x0, srcY: part.y0 };
   });
-  return { page: { width: pageWidth, height: pageHeight, rgba: page }, regions };
+  return { page: { width: pageWidth, height: pageHeight, rgba: page }, regions, hidden };
 }
 
 /** The part's pixels, with its hidden area filled by smearing colour in from its own pixels. */

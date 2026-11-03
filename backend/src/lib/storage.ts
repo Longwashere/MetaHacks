@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { AwsClient } from "aws4fetch";
 import { ASSET_BASE_URL, PUBLIC_URL, R2, REMIX_OUTPUT_DIR } from "./config.js";
@@ -52,6 +52,12 @@ export async function putFile(folder: string, name: string, body: Buffer | strin
   // prompts.json is rewritten mid-job; everything else is written once.
   await putR2Object(key, body, name === "prompts.json" ? "no-cache" : "public, max-age=31536000, immutable");
   return key;
+}
+
+/** Reads back a file stored with putFile. */
+export async function getFile(folder: string, name: string): Promise<Buffer> {
+  if (!r2) return readFile(path.join(REMIX_OUTPUT_DIR, folder, name));
+  return getR2Object(`remixes/${folder}/${name}`);
 }
 
 const R2_PUT_ATTEMPTS = 3;

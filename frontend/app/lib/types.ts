@@ -414,6 +414,13 @@ export const AUTO_RIG_JOINTS = [
 export type AutoRigJointName = (typeof AUTO_RIG_JOINTS)[number];
 export type AutoRigJoints = Record<AutoRigJointName, { x: number; y: number }>;
 
+/** A piece of gear the rig keeps whole on one body part. */
+export interface AutoRigGear {
+  phrase: string;
+  /** The body part it moves with, or "cape": its own piece behind the body, on its own bones. */
+  goesWith: "head" | "torso" | "upper_arm" | "forearm" | "hand" | "thigh" | "shin" | "foot" | "cape";
+}
+
 /** POST /me/autorig/prepare: the character keyed out of Muse's redraw, with joints guessed from its silhouette. */
 export interface PreparedAutoRig {
   /** PNG data URL. */
@@ -425,6 +432,12 @@ export interface PreparedAutoRig {
   flagged: AutoRigJointName[];
   /** Who placed the inner joints: Muse Spark, or the outline finder when Spark failed. */
   jointsBy: "spark" | "outline";
+  /** Gear Muse Spark found (cape, pauldrons, kneepads…); sent back with Build rig so SAM 3.1 keeps each piece whole. */
+  gear: AutoRigGear[];
   /** False when the upload was rigged as-is. */
   posed: boolean;
+  /** The prepare step's trace folder (backend debugging); sent back with Build rig to link the traces, and with cut previews. */
+  traceId: string;
+  /** Where the rig will cut the character with `joints`: a PNG data URL the cutout's size, each part in its own colour. */
+  cuts: string;
 }
