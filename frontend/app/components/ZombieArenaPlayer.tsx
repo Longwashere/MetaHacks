@@ -1,21 +1,13 @@
 import {
-  ArrowRight,
-  ChevronsLeftRight,
   Pause,
   Play,
-  Skull,
-  Sparkles,
   Swords,
-  Wand2,
   Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
+import { CompareDivider } from "~/components/SpinePreview";
 import { SpineRuntime } from "~/components/SpineRuntime";
-import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import { Card, CardContent } from "~/components/ui/card";
-import { Slider } from "~/components/ui/slider";
 import { ZOMBIE_ARENA_CHARACTERS } from "~/lib/showcase-models";
 import { cn } from "~/lib/utils";
 
@@ -38,7 +30,6 @@ export function ZombieArenaPlayer() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [activeClip, setActiveClip] = useState<"walk" | "attack" | "idle">("walk");
   const [enableClash, setEnableClash] = useState(true);
-  const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
   const [isAutoSweep, setIsAutoSweep] = useState(false);
 
   // Positions and velocities of each character
@@ -234,8 +225,6 @@ export function ZombieArenaPlayer() {
     }
   };
 
-  const selectedChar = ZOMBIE_ARENA_CHARACTERS.find((c) => c.id === selectedCharId);
-  const selectedState = selectedChar ? simStatesRef.current[selectedChar.id] : null;
 
   const remixedCount = ZOMBIE_ARENA_CHARACTERS.filter((c) => simStatesRef.current[c.id]?.isZombie).length;
   const totalCount = ZOMBIE_ARENA_CHARACTERS.length;
@@ -317,7 +306,7 @@ export function ZombieArenaPlayer() {
         </div>
         {/* Interactive Walking Battlefield Stage */}
         <div
-          className="relative h-[620px] w-full select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-stone-900 via-stone-950 to-black sm:h-[720px]"
+          className="relative isolate h-[620px] w-full select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-stone-900 via-stone-950 to-black sm:h-[720px]"
           style={{
             backgroundImage: `
               radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.05), transparent 70%),
@@ -330,65 +319,16 @@ export function ZombieArenaPlayer() {
           {/* Subtle Ground Shadows & Isometric Floor Lines */}
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-stone-950/80 via-transparent to-stone-950/40" />
 
-          {/* Corner labels: remixed on the left of the line, originals on the right */}
-          <div
-            className="pointer-events-none absolute top-4 left-4 z-10 flex flex-col gap-0.5 rounded-md border border-emerald-500/20 bg-stone-950/70 px-2.5 py-2 backdrop-blur transition-opacity duration-300"
-            style={{ opacity: sliderVal > 12 ? 0.95 : 0 }}
-          >
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-              <span className="size-2 rounded-full bg-emerald-400" />
-              Remixed with Muse
-            </div>
-            <div className="text-[11px] text-stone-400">One art direction</div>
+          {/* The same draggable divider as the spine viewer: remixes left of the line, originals right of it.
+              Rigs are stacked by depth (z-index up to ~1000), so the divider sits above them all to stay grabbable. */}
+          <div className="pointer-events-none absolute inset-0 z-[2000]">
+            <CompareDivider
+              split={sliderVal}
+              onSplitChange={(split) => jumpTo(Math.round(split))}
+              leftLabel="Remixed with Muse"
+              rightLabel="Original asset packs"
+            />
           </div>
-          <div
-            className="pointer-events-none absolute top-4 right-4 z-10 flex flex-col gap-0.5 rounded-md border border-sky-500/20 bg-stone-950/70 px-2.5 py-2 text-right backdrop-blur transition-opacity duration-300"
-            style={{ opacity: sliderVal < 88 ? 0.95 : 0 }}
-          >
-            <div className="flex items-center justify-end gap-1.5 text-xs font-semibold text-sky-400">
-              Original asset packs
-              <span className="size-2 rounded-full bg-sky-400" />
-            </div>
-            <div className="text-[11px] text-stone-400">Different artists, palettes, line weights</div>
-          </div>
-          {/* Vertical Scanner Line / Energy Rift Divider */}
-          {(
-            <div
-              className="pointer-events-none absolute top-0 bottom-0 z-20 flex w-px -translate-x-1/2 flex-col items-center"
-              style={{ left: `${sliderVal}%` }}
-            >
-              {/* Glowing vertical line */}
-              <div
-                className={cn(
-                  "h-full bg-gradient-to-b from-sky-400 via-emerald-400 to-emerald-500 transition-all duration-300",
-                  isAutoSweep
-                    ? "w-[3px] shadow-[0_0_24px_rgba(52,211,153,1)]"
-                    : "w-[2px] shadow-[0_0_15px_rgba(52,211,153,0.8)]"
-                )}
-              />
-
-              {/* Top Handle Pill */}
-              <div
-                className={cn(
-                  "absolute top-2 flex items-center gap-1.5 whitespace-nowrap rounded-full border bg-stone-950 px-2.5 py-0.5 text-[10px] font-mono font-medium shadow-lg transition-colors",
-                  isAutoSweep
-                    ? "border-emerald-400 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                    : "border-emerald-500/50 text-emerald-300"
-                )}
-              >
-                <ChevronsLeftRight className={cn("size-3 text-emerald-400", isAutoSweep && "animate-pulse")} />
-                <span>REMIX ◂ ▸ ORIGINAL</span>
-              </div>
-
-              {/* Bottom Particle Emitter Dot */}
-              <div
-                className={cn(
-                  "absolute bottom-2 size-3 rounded-full border-2 border-emerald-400 bg-stone-950 shadow-[0_0_10px_#10b981]",
-                  isAutoSweep && "animate-ping"
-                )}
-              />
-            </div>
-          )}
 
           {/* Walking & Flying Characters in the Arena */}
           {ZOMBIE_ARENA_CHARACTERS.map((char) => {
@@ -399,7 +339,6 @@ export function ZombieArenaPlayer() {
               isZombie: false,
             };
 
-            const isSelected = selectedCharId === char.id;
             const currentTimeSec = performance.now() / 1000;
             const isClashing = Boolean(st.attackingUntil && currentTimeSec < st.attackingUntil);
 
@@ -421,8 +360,7 @@ export function ZombieArenaPlayer() {
             return (
               <div
                 key={char.id}
-                onClick={() => setSelectedCharId(isSelected ? null : char.id)}
-                className="group absolute cursor-pointer transition-transform duration-75"
+                className="pointer-events-none absolute transition-transform duration-75"
                 style={{
                   left: `${st.x}%`,
                   top: `${st.y}%`,
@@ -430,47 +368,13 @@ export function ZombieArenaPlayer() {
                   transform: "translate(-50%, -70%)",
                 }}
               >
-                {/* Name tag, shown on hover or when selected */}
-                <div
-                  className={cn(
-                    "pointer-events-none mb-1 flex items-center justify-center transition-opacity",
-                    isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-medium tracking-tight backdrop-blur-[2px] border transition-colors",
-                      st.isZombie
-                        ? "border-emerald-500/30 bg-emerald-950/40 text-emerald-200"
-                        : "border-sky-500/25 bg-stone-950/40 text-stone-300",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "size-1 rounded-full",
-                        st.isZombie ? "bg-emerald-400" : "bg-sky-400/80",
-                      )}
-                    />
-                    <span>{st.isZombie ? char.zombieName : char.baseName}</span>
-                    <span
-                      className={cn(
-                        "text-[8px] font-mono",
-                        st.isZombie ? "text-emerald-400 font-semibold" : "text-stone-400 opacity-60"
-                      )}
-                    >
-                      • {st.isZombie ? "Comic Ghoul" : char.baseStyle.split(" ")[0]}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Ground Shadow & Selection Reticle */}
+                {/* Ground Shadow */}
                 <div className="relative">
                   <div
                     className={cn(
                       "absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full blur-xs transition-all",
                       isFlying ? "h-3 w-28 opacity-30" : "h-5 w-36",
                       st.isZombie ? "bg-emerald-500/20" : "bg-black/50",
-                      isSelected && "ring-2 ring-emerald-400 ring-offset-2 ring-offset-stone-950",
                     )}
                   />
 
@@ -500,99 +404,17 @@ export function ZombieArenaPlayer() {
           })}
         </div>
 
-        {/* Repaint slider */}
-        <div className="flex flex-col gap-3 border-t border-stone-800 bg-stone-900/95 p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-3 text-xs sm:text-sm">
-            <span className="font-medium text-sky-400">Original packs</span>
-            <span className="font-mono text-[11px] text-stone-400 tabular-nums">
-              {remixedCount} of {totalCount} rigs repainted
-            </span>
-            <span className="font-medium text-emerald-400">One art direction</span>
-          </div>
-          <div className="px-1">
-            <Slider
-              value={[sliderVal]}
-              onValueChange={handleSliderChange}
-              min={0}
-              max={100}
-              step={1}
-              className="cursor-grab py-1 active:cursor-grabbing"
-              aria-label="Move the repaint line across the arena"
-            />
-          </div>
+        {/* Repaint status */}
+        <div className="flex flex-col gap-2 border-t border-stone-800 bg-stone-900/95 p-4 sm:p-5">
+          <span className="text-center font-mono text-[11px] text-stone-400 tabular-nums">
+            {remixedCount} of {totalCount} rigs repainted
+          </span>
           <p className="text-center text-xs text-stone-400">
             The line swaps each rig's texture atlas between its original and its Muse remix. Skeleton, meshes and
             animations are the same files on both sides, so walk, attack and idle keep playing mid-swap.
           </p>
         </div>
       </div>
-
-      {/* Selected Character Deep-Dive Card */}
-      {selectedChar && selectedState && (
-        <Card className="border-emerald-500/30 bg-emerald-950/10 transition-all duration-300">
-          <CardContent className="grid gap-4 p-5 sm:grid-cols-3">
-            {/* Before vs After Textures */}
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-muted-foreground uppercase">
-                  Inspected Rig
-                </span>
-                <Badge
-                  variant={selectedState.isZombie ? "default" : "secondary"}
-                  className="gap-1 text-xs"
-                >
-                  {selectedState.isZombie ? (
-                    <>
-                      <Skull className="size-3" /> Remixed Ghoul
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="size-3" /> Original Look
-                    </>
-                  )}
-                </Badge>
-              </div>
-              <h4 className="text-lg font-bold text-foreground">
-                {selectedState.isZombie ? selectedChar.zombieName : selectedChar.baseName}
-              </h4>
-              <p className="text-xs text-muted-foreground">
-                Current State:{" "}
-                <span className="font-medium text-foreground">
-                  {selectedState.isZombie ? selectedChar.zombieStyle : selectedChar.baseStyle}
-                </span>
-              </p>
-            </div>
-
-            {/* AI Prompt Used */}
-            <div className="flex flex-col justify-center gap-1 sm:col-span-2">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                <Wand2 className="size-3.5" />
-                Prompt Fed into Meta Muse Image:
-              </div>
-              <blockquote className="rounded-md border bg-muted/60 p-2.5 text-xs text-muted-foreground italic">
-                &ldquo;{selectedChar.zombiePrompt}&rdquo;
-              </blockquote>
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">
-                  Atlas region coordinates & keyframes: <strong className="text-foreground">100% Preserved</strong>
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" asChild className="gap-1 text-xs">
-                    <Link to={`/assets/${selectedChar.baseAssetId}`}>
-                      View Base Rig <ArrowRight className="size-3" />
-                    </Link>
-                  </Button>
-                  <Button size="sm" asChild className="gap-1 text-xs">
-                    <Link to={`/remix?asset=${selectedChar.remixAssetId}`}>
-                      Remix Studio <ArrowRight className="size-3" />
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

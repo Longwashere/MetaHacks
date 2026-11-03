@@ -303,7 +303,7 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
           Knights, cavalry, golems, slimes and dragons from different creators, each with its own palette and line
           weight. Every one was remixed into the same comic-ink ghoul style. Drag the line across the arena and
           watch each rig swap textures mid-stride. Rigs that bump into each other stop and fight, so you see attack
-          animations too. Click any rig to see its prompt.
+          animations too.
         </SectionHeading>
         <ZombieArenaPlayer />
       </section>
