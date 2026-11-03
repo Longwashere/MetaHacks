@@ -2,6 +2,12 @@
 
 **Spine 2D game assets, made with Meta's models.** Browse rigged 2D characters, remix their art from a prompt, auto-rig a character from one image, generate animations from a sentence, and upload your own rigs.
 
+<p align="center">
+  <img src="docs/media/remix-showcase.gif" width="440" alt="One armored knight rig wiping between five Muse remixes: a treant warrior, a fire knight, a samurai warlord and more, all playing the same animation">
+  <br>
+  <sub>One rig, five remixes. Same bones and animations; Muse Image repainted the art from a prompt.</sub>
+</p>
+
 Built for the **Meta Global AI Developer Hackathon** (Oct 27 – Nov 4, 2026). Every AI feature runs on the Meta Model API: **Muse Spark**, **Muse Image** and **SAM 3.1**.
 
 - [What it does](#what-it-does)
@@ -60,9 +66,15 @@ When a check fails, the loop feeds the problem back as a rewritten prompt, a tar
 
 ### 1. Remix: re-texture a rig from a prompt
 
-The remix page offers three versions. **v2** (the default) is a single pass: Spark plans, Muse Image paints each page, and code fits the result back. **v3** ("self-checking") wraps that in an inspect-and-repair loop, described below. v1 is the first version, kept for comparison.
+Remixes run on **v3**, the self-checking pipeline: Muse Spark plans, Muse Image paints, and then Spark inspects the result and repairs it in a loop until its checks pass. The remix page also offers **v2**, the same plan-and-paint step run once with no inspection (faster, and half the credits), and v1, the first version, kept for comparison.
 
 Code: [backend/src/v3/lib/remix.ts](backend/src/v3/lib/remix.ts) (`runRemix`), model calls in [backend/src/v3/lib/meta.ts](backend/src/v3/lib/meta.ts).
+
+<p align="center">
+  <img src="docs/media/arena.gif" width="640" alt="An arena of 14 rigs from different asset packs; a line sweeps across and swaps each rig between its original art and its remix in one comic-ink ghoul style while they walk and fight">
+  <br>
+  <sub>14 rigs from different packs, remixed into one art direction. The line swaps each rig's atlas mid-stride.</sub>
+</p>
 
 #### Setup
 
@@ -119,11 +131,23 @@ The tweaks are written into the rig's skeleton JSON. The same measure-then-appro
 
 **Live view.** Every step emits an event (planned, painted, rejected, checked, revised, chosen, tweaked) that the page streams into a timeline, with each painted page, each rejected attempt and each inspector verdict ([frontend/app/components/RemixLiveView.tsx](frontend/app/components/RemixLiveView.tsx)). Each round's files and a `prompts.json` of every check are saved for debugging.
 
-**Part fixes on their own.** Users can also pick parts on a finished remix and describe a fix. This runs the same part-fix step outside the loop ([backend/src/v3/lib/part-fix.ts](backend/src/v3/lib/part-fix.ts)). It has its own check: at least 85% of the paint must touch the chosen parts, and no part may need to shrink below 50% (25% when it's well placed). A failed check is repainted once with a corrective note.
+**Part fixes on their own.** Users can also pick parts on a finished remix and describe a fix. This runs the part-fix step outside the loop ([backend/src/v2/lib/part-fix.ts](backend/src/v2/lib/part-fix.ts)). It has its own check: at least 85% of the paint must touch the chosen parts, and no part may need to shrink below 50% (25% when it's well placed). A failed check is repainted once with a corrective note.
 
 ### 2. Auto-rig: one image to a playable rig
 
 Code: [backend/src/lib/autorig/](backend/src/lib/autorig/), entry point [create.ts](backend/src/lib/autorig/create.ts). Design notes: [AUTO_RIG_PLAN.md](AUTO_RIG_PLAN.md).
+
+<p align="center">
+  <img src="docs/media/autorig-steps.png" width="800" alt="Three steps: Muse Image redraws a knight in an A-pose on magenta; Muse Spark places 19 joints and SAM 3.1 masks the gear; the character is cut into fifteen parts on one atlas page">
+  <br>
+  <sub>Muse Image poses the character, Muse Spark places the joints and names the gear, SAM 3.1 masks it, and the rig is cut into parts.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/media/autorig-rig.gif" width="640" alt="The auto-rigged knight playing its idle loop with bones shown, followed by three remixes of it: an orc, an elf and a rotting ghoul">
+  <br>
+  <sub>The finished rig plays like any Spine rig, and can be remixed: orc, elf and ghoul versions of the same auto-rigged knight.</sub>
+</p>
 
 ```mermaid
 flowchart TD
@@ -163,6 +187,12 @@ Each step saves a trace of every model call and decision (`prepare.json`, `autor
 ### 3. Animate: keyframes from a sentence
 
 Code: [backend/src/lib/animate.ts](backend/src/lib/animate.ts) (`animateSkeleton`), with [animate-render.ts](backend/src/lib/animate-render.ts) and [animate-fx.ts](backend/src/lib/animate-fx.ts).
+
+<p align="center">
+  <img src="docs/media/animate.gif" width="640" alt="A ghoul warrior rig playing four animations Muse Spark keyframed from one-sentence prompts: a thriller shuffle, a nervous glance, a zombie split taunt and a chest-thump taunt">
+  <br>
+  <sub>Four animations Muse Spark keyframed onto a rig that shipped with only an attack, a run and a death.</sub>
+</p>
 
 A Spine animation is a set of sparse keyframes per bone that the runtime interpolates, so a language model can write a whole one in a single reply. Asked to do it in one go, Spark wrote small, evenly timed, softly eased motion. Splitting the job into a director, a keyframer and a reviewer made it bold.
 
@@ -234,7 +264,7 @@ flowchart LR
 | --- | --- |
 | [frontend/](frontend/) | React Router v8 (framework mode), React 19, shadcn/ui, Tailwind v4, Spine web player |
 | [backend/](backend/) | Express 5 API in strict TypeScript. Runs every model call, plus image processing with `sharp` and headless Spine posing with `@esotericsoftware/spine-core` |
-| [backend/src/v3/](backend/src/v3/) | The self-checking remix loop |
+| [backend/src/v3/](backend/src/v3/) | The self-checking remix loop (the default) |
 | [backend/src/lib/autorig/](backend/src/lib/autorig/) | Auto-rig: pose, joints, gear masks, mesh building, hidden-area fill |
 | [supabase/migrations/](supabase/migrations/) | Database schema: assets, remix jobs, versions, credits |
 

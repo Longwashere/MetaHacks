@@ -1424,7 +1424,7 @@ function RemixForm({
   const location = useLocation();
   const [prompt, setPrompt] = useState("");
   const [strength, setStrength] = useState(60);
-  const [apiVersion, setApiVersion] = useState<RemixApiVersion>("v2");
+  const [apiVersion, setApiVersion] = useState<RemixApiVersion>("v3");
   const navigation = useNavigation();
   const submitting = navigation.state === "submitting" && navigation.formData?.get("baseAssetId") === base.id;
   const pages = Math.max(base.files?.textureUrls.length ?? 1, 1);
@@ -1535,7 +1535,7 @@ function RemixForm({
           <SelectContent>
             {REMIX_API_VERSIONS.map((v) => (
               <SelectItem key={v} value={v}>
-                {v === "v2" ? "v2 (default)" : v === "v3" ? "v3 (self-checking, slower)" : v}
+                {v === "v3" ? "v3 (self-checking, default)" : v === "v2" ? "v2 (single pass, faster)" : v}
                 {usage && ` · ${creditsLabel(usage.credits.perPage[v])}/page`}
               </SelectItem>
             ))}

@@ -102,8 +102,8 @@ export type PromptStatus = "original" | "rewording" | "reworded";
  * A remix keeps the base rig's skeleton, bones, slots and animations and only
  * regenerates the texture (atlas pages) from a prompt.
  */
-/** Which backend remix pipeline runs the job. v2 is the default; v3 loops paint and inspection until its checks pass; v1 is kept for comparison. */
-export const REMIX_API_VERSIONS = ["v2", "v3", "v1"] as const;
+/** Which backend remix pipeline runs the job. v3 is the default: it loops paint and inspection until its checks pass; v2 paints once; v1 is kept for comparison. */
+export const REMIX_API_VERSIONS = ["v3", "v2", "v1"] as const;
 export type RemixApiVersion = (typeof REMIX_API_VERSIONS)[number];
 
 /** What remixes and part fixes cost from the monthly credits (Account.credits). */

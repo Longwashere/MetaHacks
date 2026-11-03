@@ -190,7 +190,7 @@ export type CreateRemixResult =
 export async function createRemixJob(
   session: Session,
   input: Omit<RemixInput, "referenceImage">,
-  apiVersion: RemixApiVersion = "v2",
+  apiVersion: RemixApiVersion = "v3",
   referenceImage: string | null = null,
 ): Promise<CreateRemixResult> {
   try {
