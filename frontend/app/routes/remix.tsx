@@ -1,3 +1,4 @@
+import { AGENTS } from "~/lib/agents";
 import { Activity, AlertCircle, ArrowLeftRight, ShieldAlert, Bone, Circle, CircleCheck, Download, ExternalLink, Film, History, Loader2, Paintbrush, Palette, Repeat, RotateCcw, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -459,7 +460,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
   const canTweak = !job || savedRemix !== null;
   const [panelTab, setPanelTab] = useState<"generate" | "tweak" | "animate">("generate");
   // The folder tab the user picked, and the job running when they picked it: a newly started job
-  // switches to "What Muse is doing" until the user picks again.
+  // switches to "What the agents are doing" until the user picks again.
   const [picked, setPicked] = useState<{ view: "edit" | "muse"; jobId: string | null }>({ view: "edit", jobId: null });
   // The log to show: the job on screen, else the one that made the open remix.
   const logJob = job ?? remixJob;
@@ -582,7 +583,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                     <Sparkles /> Remix
                   </TabsTrigger>
                   <TabsTrigger value="muse" className={FOLDER_TAB}>
-                    {jobActive ? <Loader2 className="animate-spin" /> : <Activity />} What Muse is doing
+                    {jobActive ? <Loader2 className="animate-spin" /> : <Activity />} What the agents are doing
                   </TabsTrigger>
                 </TabsList>
                 <Card className="rounded-tl-none">
@@ -644,10 +645,10 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                       <RemixTimeline job={logJob} />
                     ) : (
                       <CardHeader>
-                        <CardTitle>What Muse is doing</CardTitle>
+                        <CardTitle>What the agents are doing</CardTitle>
                         <CardDescription>
                           {logJob
-                            ? "This remix didn't keep a log of Muse's steps."
+                            ? "This remix didn't keep a log of the agents' steps."
                             : "Start a remix and Muse's steps show up here: planning the look, painting each page and checking the result."}
                         </CardDescription>
                       </CardHeader>
@@ -733,7 +734,7 @@ export default function Remix({ loaderData, actionData }: Route.ComponentProps) 
                         <ShieldAlert />
                         <AlertTitle>The image model declined the prompt</AlertTitle>
                         <AlertDescription>
-                          Its content policy rejected the prompt below, so Muse is re-wording it to keep the same look. The
+                          Its content policy rejected the prompt below, so {AGENTS.director.name} is re-wording it with Muse Spark to keep the same look. The
                           page is then painted again.
                         </AlertDescription>
                       </Alert>
@@ -920,7 +921,7 @@ function PartFixSection({
                     {submitting
                       ? "Starting…"
                       : fixing
-                        ? "Repainting…"
+                        ? `${AGENTS.designer.name} is repainting…`
                         : selected.length === 0
                           ? "Repaint parts"
                           : `Repaint ${selected.length} part${selected.length === 1 ? "" : "s"}`}
@@ -1248,7 +1249,7 @@ function useAutoTweak(
   const stage = capturing
     ? "Snapshotting and measuring both rigs…"
     : fetcher.state !== "idle"
-      ? "Muse is reviewing the fixes…"
+      ? `${AGENTS.rigger.name} is reviewing the fixes…`
       : null;
   return { onRun, stage, disabledReason, result, onUndo };
 }

@@ -1,4 +1,5 @@
 import { Bone, ImageUp, Loader2, RotateCcw, Sparkles, TriangleAlert, Wand2 } from "lucide-react";
+import { AGENTS } from "~/lib/agents";
 import { useRef, useState, type ChangeEvent } from "react";
 import { data, Link, redirect, useFetcher } from "react-router";
 import type { Route } from "./+types/auto-rig";
@@ -257,7 +258,7 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
             <div className="flex flex-col gap-2">
               <Button onClick={() => runPose(false)} disabled={!image || posing}>
                 {posing ? <Loader2 className="animate-spin" /> : <Sparkles />}
-                {posing ? "Muse is posing your character…" : prepared ? "Pose again with Muse" : "Pose with Muse"}
+                {posing ? `${AGENTS.poser.name} is posing your character…` : prepared ? `Pose again with ${AGENTS.poser.name}` : `Pose with ${AGENTS.poser.name}`}
               </Button>
               {image?.png && (
                 <Button variant="outline" onClick={() => runPose(true)} disabled={posing}>
@@ -265,7 +266,11 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
                 </Button>
               )}
               <p className="text-xs text-muted-foreground">
-                {posing ? "Muse redraws the character, then places its joints. This takes about 30–60 seconds." : image?.png ? "“As-is” skips Muse. It needs a transparent background and works best when the arms and legs are already spread." : "Muse redraws the character standing with its arms and legs spread."}
+                {posing
+                  ? `${AGENTS.poser.name} redraws the character with Muse Image, then ${AGENTS.rigger.name} places its joints with Muse Spark. This takes about 30–60 seconds.`
+                  : image?.png
+                    ? `“As-is” skips ${AGENTS.poser.name}. It needs a transparent background and works best when the arms and legs are already spread.`
+                    : `${AGENTS.poser.name} redraws the character with Muse Image, standing with its arms and legs spread.`}
               </p>
             </div>
             {poseError && (
@@ -373,8 +378,8 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
                     ? "Building the rig. This takes a few seconds."
                     : "The bones are fitted to your joints and the picture is weighted to them. No Muse calls."
                   : building
-                    ? "Cutting the character into parts, then Muse paints what's hidden behind each joint. This takes about 20–40 seconds."
-                    : `The character is cut into parts at the joints${prepared.gear.length ? `, keeping its ${listGear(prepared.gear)} whole` : " and hands"}, and Muse paints in what's hidden behind them so limbs can move freely.`}
+                    ? `Cutting the character into parts, then ${AGENTS.designer.name} paints what's hidden behind each joint with Muse Image. This takes about 20–40 seconds.`
+                    : `The character is cut into parts at the joints${prepared.gear.length ? `, keeping its ${listGear(prepared.gear)} whole` : " and hands"}, and ${AGENTS.designer.name} paints in what's hidden behind them with Muse Image so limbs can move freely.`}
               </p>
             </CardFooter>
           )}

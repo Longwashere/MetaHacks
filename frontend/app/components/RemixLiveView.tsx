@@ -3,6 +3,8 @@ import { type ReactNode, useEffect, useState } from "react";
 import { SpinePreview } from "~/components/SpinePreview";
 import { defaultAnimation } from "~/lib/animation";
 import { Badge } from "~/components/ui/badge";
+import { AgentAvatar } from "~/components/AgentAvatar";
+import { AGENTS, type AgentStep, activityAgent, eventAgent } from "~/lib/agents";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { type AtlasPage, parseAtlas } from "~/lib/atlas";
@@ -10,35 +12,51 @@ import type { RemixActivity, RemixEvent, RemixIssue, RemixJob, SpineAnimation } 
 import { cn } from "~/lib/utils";
 
 // The live view of a running v2 or v3 remix (RemixJob.live): the rig redrawn as each page is painted,
-// the sprite sheet with what's being worked on and what the checks flagged, and a timeline.
+// the sprite sheet with what's being worked on and what the checks flagged, and a timeline. Each step
+// is credited to one of the loop's agents (lib/agents.ts).
 
 /** Activities that show the scanning band: something is being painted or looked at. */
 const SCANNING: RemixActivity["kind"][] = ["planning", "painting", "checking-style", "checking-rig", "fixing", "revising", "tweaking"];
 
 export function activityLabel(activity: RemixActivity): string {
   const attempt = activity.round > 1 ? ` (attempt ${activity.round})` : "";
+  const { agent, models } = activityAgent(activity.kind);
+  const who = AGENTS[agent].name;
+  const using = models.length > 0 ? ` with ${models.join(" and ")}` : "";
   switch (activity.kind) {
     case "reading":
-      return "Reading the rig and its atlas";
+      return `${who} is reading the rig and its atlas`;
     case "reference":
-      return "Muse Spark is studying your reference image";
+      return `${who} is studying your reference image${using}`;
     case "planning":
-      return "Muse Spark is planning the new look";
+      return `${who} is planning the new look${using}`;
     case "painting":
-      return `Muse Image is painting ${activity.page ?? "the atlas"}${attempt}`;
+      return `${who} is painting ${activity.page ?? "the atlas"}${using}${attempt}`;
     case "checking-style":
-      return `Muse Spark is checking the style${attempt}`;
+      return `${who} is checking the style${using}${attempt}`;
     case "checking-rig":
-      return `Muse Spark is checking how the parts fit${attempt}`;
+      return `${who} is checking how the parts fit${using}${attempt}`;
     case "fixing":
-      return `Repainting ${activity.regions?.join(", ") || "parts"}`;
+      return `${who} is repainting ${activity.regions?.join(", ") || "parts"}${using}`;
     case "revising":
-      return "Muse Spark is rewriting the plan from the feedback";
+      return `${who} is rewriting the plan from the feedback${using}`;
     case "tweaking":
-      return "Lining the parts back up";
+      return `${who} is lining the parts back up${using}`;
     case "packing":
-      return "Packing the atlas";
+      return `${who} is packing the atlas`;
   }
+}
+
+/** Who did a step and with which Muse model, for the timeline. */
+function AgentByline({ step }: { step: AgentStep }) {
+  const agent = AGENTS[step.agent];
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground" title={`${agent.name} ${agent.role}`}>
+      <AgentAvatar agent={step.agent} className="size-3.5" />
+      <span className="font-medium text-foreground">{agent.name}</span>
+      {step.models.length > 0 && <span>· {step.models.join(" + ")}</span>}
+    </span>
+  );
 }
 
 /** Activities before any painting starts, while the bones are drawn over the original skin. */
@@ -102,8 +120,9 @@ export function RemixLivePlayer({ job, className }: { job: RemixJob; className?:
       {activity && (
         <div className="pointer-events-none absolute inset-x-3 bottom-3 flex">
           <span className="flex min-w-0 items-center gap-1.5 rounded-full border bg-background/85 px-2.5 py-1 text-xs font-medium shadow-xs backdrop-blur-xs">
-            <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
+            <AgentAvatar agent={activityAgent(activity.kind).agent} />
             <span className="truncate">{activityLabel(activity)}</span>
+            <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
           </span>
         </div>
       )}
@@ -330,11 +349,11 @@ export function RemixTimeline({ job }: { job: RemixJob }) {
   return (
     <>
       <CardHeader>
-        <CardTitle>What Muse is doing</CardTitle>
+        <CardTitle>What the agents are doing</CardTitle>
         <CardDescription>
           {job.apiVersion === "v3"
-            ? "Muse Spark plans the look, Muse Image paints each page, then Muse Spark checks it."
-            : "Muse Spark plans the look, then Muse Image paints each page."}
+            ? `${AGENTS.director.name} plans the look with Muse Spark, ${AGENTS.designer.name} paints each page with Muse Image, then ${AGENTS.stylist.name} and ${AGENTS.rigger.name} check it with Muse Spark.`
+            : `${AGENTS.director.name} plans the look with Muse Spark, then ${AGENTS.designer.name} paints each page with Muse Image.`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -342,7 +361,10 @@ export function RemixTimeline({ job }: { job: RemixJob }) {
           {activity && (
             <li className="flex gap-3 text-sm font-medium">
               <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-primary" />
-              <span>{activityLabel(activity)}</span>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <span>{activityLabel(activity)}</span>
+                <AgentByline step={activityAgent(activity.kind)} />
+              </div>
             </li>
           )}
           {[...events].reverse().map((event) => (
@@ -469,6 +491,7 @@ function TimelineItem({ event, offset }: { event: RemixEvent; offset: number }) 
           <span className="font-medium">{title}</span>
           <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{formatOffset(offset)}</span>
         </div>
+        <AgentByline step={eventAgent(event)} />
         {body && <div className="text-xs text-muted-foreground">{body}</div>}
         {image && (
           <a href={image} target="_blank" rel="noreferrer" className="w-fit">

@@ -1,3 +1,4 @@
+import { AGENTS } from "~/lib/agents";
 import { CheckCircle2, FolderOpen, Lightbulb, Loader2, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { useRef, useState, type DragEvent } from "react";
 import { Link } from "react-router";
@@ -319,10 +320,10 @@ export default function UploadPage({ loaderData }: Route.ComponentProps) {
               disabled={uploading}
             >
               <SelectTrigger id="category" className="w-full">
-                <SelectValue placeholder={isAdmin ? "Muse picks for each rig" : "Pick a category"} />
+                <SelectValue placeholder={isAdmin ? `${AGENTS.librarian.name} picks for each rig` : "Pick a category"} />
               </SelectTrigger>
               <SelectContent>
-                {isAdmin && <SelectItem value={MUSE_PICKS}>Muse picks for each rig</SelectItem>}
+                {isAdmin && <SelectItem value={MUSE_PICKS}>{AGENTS.librarian.name} picks for each rig</SelectItem>}
                 {ASSET_CATEGORIES.map((c) => (
                   <SelectItem key={c} value={c}>
                     {categoryLabel(c)}

@@ -1,4 +1,5 @@
 import { CircleCheck, Film, Loader2, Pencil, X } from "lucide-react";
+import { AGENTS } from "~/lib/agents";
 import { type FormEvent, useEffect, useState } from "react";
 import { useFetcher } from "react-router";
 import { toast } from "sonner";
@@ -220,11 +221,11 @@ export function AnimatePanel({ remix, baseAnimations, onAnimated, onDeleted, onR
         <div className="flex flex-col gap-2">
           <Button type="submit" disabled={!prompt.trim() || pending || outOfCredits} className="w-full">
             {pending ? <Loader2 className="animate-spin" /> : <Film />}
-            {pending ? "Muse is keyframing…" : editing ? "Edit animation" : "Animate"}
+            {pending ? `${AGENTS.animator.name} is keyframing…` : editing ? "Edit animation" : "Animate"}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
             {pending
-              ? "Muse plans the beats, keys them, then checks its work. This takes a few minutes."
+              ? `${AGENTS.animator.name} plans the beats, keys them, then checks the result with Muse Spark. This takes a few minutes.`
               : outOfCredits
                 ? "You're out of credits this month."
                 : `Charged by what Muse uses, usually ${minCredits} credit${minCredits === 1 ? "" : "s"}${creditsLeft !== null && Number.isFinite(creditsLeft) ? ` · ${creditsLeft} left this month` : ""}. Failed runs are free.`}
