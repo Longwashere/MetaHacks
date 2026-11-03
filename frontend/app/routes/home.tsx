@@ -3,6 +3,7 @@ import { Form, Link } from "react-router";
 import type { Route } from "./+types/home";
 import { AssetGrid } from "~/components/AssetGrid";
 import { RemixShowcase } from "~/components/RemixShowcase";
+import { RotatingWord } from "~/components/RotatingWord";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -15,9 +16,9 @@ import { getSiteUrl } from "~/lib/site.server";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return seoMeta({
-    title: `${SITE_NAME} — Remix Spine2D Rigs & Animations with AI Textures`,
+    title: `${SITE_NAME} — Remix, Rig & Animate Spine2D Characters with AI`,
     description:
-      "Browse a library of rigged, animated Spine2D characters and props, then remix any rig with new AI-generated textures — every animation keeps working.",
+      "Auto-rig a Spine2D character from a single image, remix any rig with new AI-generated textures, and generate new animations. Export production-ready Spine 4.2 rigs.",
     canonical: `${loaderData.siteUrl}/`,
     jsonLd: [
       {
@@ -86,13 +87,15 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       <section className="grid items-center gap-10 pt-4 lg:grid-cols-2 lg:gap-12">
         <div className="flex flex-col items-center gap-6 text-center lg:items-start lg:text-left">
           <Badge variant="secondary" className="gap-1">
-            <Sparkles className="size-3" /> AI textures by Muse Image
+            <Sparkles className="size-3" /> Powered by Muse
           </Badge>
-          <h1 className="text-4xl font-bold tracking-tight text-balance sm:text-5xl">
-            Remix production-ready Spine2D rigs with a prompt
+          <h1 className="text-4xl leading-tight font-bold tracking-tight text-balance sm:text-5xl">
+            <span className="sr-only">Remix, rig and animate Spine2D characters with a prompt</span>
+            <RotatingWord words={["Remix", "Rig", "Animate"]} className="text-primary" />{" "}
+            <span aria-hidden>Spine2D characters with a prompt</span>
           </h1>
           <p className="max-w-xl text-lg text-pretty text-muted-foreground">
-            Start from a fully rigged, animated character or prop and give it a brand-new look. Every walk cycle, attack and idle keeps working.
+            Turn one image into a playable rig, give any library rig a new look, or generate new animations. Then export production-ready Spine 4.2 rigs.
           </p>
           <Form method="get" action="/remix" className="flex w-full max-w-xl flex-col gap-2 sm:flex-row">
             <label htmlFor="hero-q" className="sr-only">
