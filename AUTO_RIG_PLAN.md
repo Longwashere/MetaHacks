@@ -18,7 +18,7 @@ Details are in `FRICTION_LOG.md` (2026-11-02, "Muse Image under-does pose instru
 
 ## User flow
 
-1. **Upload.** One PNG, JPG or WebP image of up to 8 MB. The user picks a view, **Front** (the default) or **Facing right**, and a name. Only Pro users and admins can use `/autoRig`. Free users see an upgrade card, like `/upload`, and the backend answers `403`.
+1. **Upload.** One PNG, JPG or WebP image of up to 8 MB. The user picks a view, **Front** (the default), **Facing right** or **Side** (a strict 90° profile facing right, for side-on games), and a name. Only Pro users and admins can use `/autoRig`. Free users see an upgrade card, like `/upload`, and the backend answers `403`.
 2. **Pose.** If the upload is a PNG with a transparent background, the page also offers **Rig my image as-is**, which skips Muse and goes straight to step 3. This works best when the character is already in an A-pose with a gap between each limb and the body. Otherwise Muse Image redraws the character in that pose on magenta (about 15–35 s). The page shows the original next to the redraw, with **Use this**, **Try again** (each try costs credits) and **Start over**.
 3. **Joints.** The page shows the redraw with about 17 joints placed automatically. The user drags any that are wrong. A **Mirror** button copies one side's joints to the other for front views.
 4. **Rig.** The backend builds the bones and weighted meshes and returns a preview that plays a generated idle animation. **Adjust joints** goes back to step 3 and rebuilds.
@@ -38,7 +38,7 @@ foot_target_l, foot_target_r   (children of root; IK targets)
 ```
 
 - There are two IK constraints, `leg_l` and `leg_r` (thigh to shin, aimed at the foot target), so the feet can stay planted. The arms have no IK, because the animation keys aim them directly.
-- `_l` and `_r` are the character's own left and right. In both views the character's right (`_r`) is on the left of the image, and in a "Facing right" rig `_r` is the near side.
+- `_l` and `_r` are the character's own left and right. In every view the character's right (`_r`) is on the left of the image, and in a "Facing right" or "Side" rig `_r` is the near side. The side pose puts the near arm and leg back (image left) and the far ones forward (image right) so this holds. Untested on Muse Image so far.
 - Every bone gets its position and direction from the joints. Image y points down and Spine y points up, so y is flipped and the root sits at the lowest foot.
 - Using the same names on every rig means the animation generator's rig description, `clampReach` (which pulls IK feet back into reach) and trails work without changes.
 
@@ -240,7 +240,7 @@ The first build step tests this on the 8 test images. If Spark's points are poor
 
 | File | What it does |
 | --- | --- |
-| `src/lib/autorig/pose.ts` | Calls Muse Image with the pose prompt (front or facing right), keys the result, pads and trims it, and checks it isn't cut off. |
+| `src/lib/autorig/pose.ts` | Calls Muse Image with the pose prompt (front, facing right or side), keys the result, pads and trims it, and checks it isn't cut off. |
 | `src/lib/autorig/joints.ts` | Places joints from the silhouette, calls Spark for the rest, and runs the checks. |
 | `src/lib/autorig/mesh.ts` | Builds the body-part map, outlines, triangles and weights. |
 | `src/lib/autorig/skeleton.ts` | Writes the Spine 4.2 JSON (bones, IK, slots, weighted meshes, the idle animation) and the `.atlas`. |
@@ -254,7 +254,7 @@ New dependency: `delaunator` (`-w backend`).
 
 | Endpoint | Body | Returns |
 | --- | --- | --- |
-| `POST /me/autorig` | `{ image (data URL), view: "front" \| "right", name, skipPose? }`. With `skipPose`, the image must be a PNG with transparency; it's trimmed and padded, and no model is called. | `201 AutoRigJob`: `posedUrl`, `cutoutUrl`. Synchronous, about 15–35 s. `403` for free users. |
+| `POST /me/autorig` | `{ image (data URL), view: "front" \| "right" \| "side", name, skipPose? }`. With `skipPose`, the image must be a PNG with transparency; it's trimmed and padded, and no model is called. | `201 AutoRigJob`: `posedUrl`, `cutoutUrl`. Synchronous, about 15–35 s. `403` for free users. |
 | `POST /me/autorig/:id/pose` | `{}` | The same job with a new pose (Try again). |
 | `POST /me/autorig/:id/joints` | `{}` | `{ joints: Record<JointName, {x, y}>, flagged: JointName[] }` |
 | `POST /me/autorig/:id/rig` | `{ joints, name, visibility }` | `201 SpineAsset` (files under `remixes/<time>_autorig_<id>/`, fingerprinted like uploads). Calling it again with new joints rebuilds and replaces the job's asset. |
@@ -270,7 +270,7 @@ New dependency: `delaunator` (`-w backend`).
 | `app/routes.ts` | Adds `route("autoRig", "routes/auto-rig.tsx")` and `route("api/autorig", "routes/api.autorig.ts")`. |
 | `app/routes/auto-rig.tsx` | The page: signed-in only, with a `meta` export. The step and job id live in the URL (`?job=…&step=joints`). Its action handles the intents `pose`, `retry`, `joints` and `rig`. |
 | `app/routes/api.autorig.ts` | A resource route that streams the image upload to the backend, like `api.upload.ts`. |
-| `app/components/AutoRigUpload.tsx` | Drop zone, view choice (Front or Facing right) and name. |
+| `app/components/AutoRigUpload.tsx` | Drop zone, view choice (Front, Facing right or Side) and name. |
 | `app/components/PoseReview.tsx` | The original and the redraw side by side, with Use this, Try again and Start over. |
 | `app/components/JointEditor.tsx` | An SVG layer over the image with draggable joints (pointer events, works with touch), a bone overlay, flagged joints outlined, and Mirror. |
 | `app/lib/api.server.ts`, `app/lib/types.ts` | `createAutoRig`, `retryAutoRigPose`, `detectAutoRigJoints` and `buildAutoRig`; the `AutoRigJob` and `JointName` types. |

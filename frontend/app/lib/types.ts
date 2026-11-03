@@ -386,8 +386,8 @@ export interface AnimateResult {
 // Auto-rig (/autoRig; backend/src/lib/autorig, AUTO_RIG_PLAN.md)
 // ---------------------------------------------------------------------------
 
-/** "front" faces the viewer; "right" is turned toward the right of the image. */
-export type AutoRigView = "front" | "right";
+/** "front" faces the viewer; "right" is turned toward the right of the image; "side" is a strict 90° profile facing right. */
+export type AutoRigView = "front" | "right" | "side";
 
 /** Joints in cutout pixels. `_l` / `_r` are the character's own sides, so `_r` is on the image's left. */
 export const AUTO_RIG_JOINTS = [

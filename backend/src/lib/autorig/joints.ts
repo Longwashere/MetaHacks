@@ -102,7 +102,7 @@ export function guessJoints(cut: Cutout, view: AutoRigView): Joints {
     const kneeX = centreAt(Math.round(kneeY), (legX + ankleX) / 2);
     // Toe: the lowest point in front for a turned view, the middle of the sole for a front view.
     let toe: Point = { x: ankleX, y: footY };
-    if (view === "right") {
+    if (view !== "front") {
       for (let y = Math.round(footY - tall * 0.05); y <= footY; y++) {
         for (let x = 0; x < width; x++) if (inLeg(x) && solid(x, y) && x > toe.x) toe = { x, y };
       }
@@ -111,7 +111,7 @@ export function guessJoints(cut: Cutout, view: AutoRigView): Joints {
     }
     return { hip: { x: legX, y: hipY }, knee: { x: kneeX, y: kneeY }, ankle: { x: ankleX, y: ankleY }, toe };
   };
-  // In both views the character's right side is on the left of the image.
+  // In every view the character's right side is on the left of the image.
   const legR = leg(-1);
   const legL = leg(1);
 

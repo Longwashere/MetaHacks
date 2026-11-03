@@ -185,7 +185,7 @@ export async function buildRig(cut: Cutout, joints: Joints, view: AutoRigView, {
       stats.push({ name: part.name, vertices: mesh.points.length, triangles: mesh.triangles.length / 3 });
     }
     // Far limbs first. In a turned view the character's right side is nearer.
-    order = view === "right" ? ["arm_l", "leg_l", "leg_r", "torso", "head", "arm_r"] : ["leg_r", "leg_l", "torso", "head", "arm_r", "arm_l"];
+    order = view !== "front" ? ["arm_l", "leg_l", "leg_r", "torso", "head", "arm_r"] : ["leg_r", "leg_l", "torso", "head", "arm_r", "arm_l"];
     slotBones = new Map(parts.map((p) => [p.name, p.slotBone]));
     pageImage = cut;
     regions = [{ name: PAGE_NAME, x: 0, y: 0, width: cut.width, height: cut.height, srcX: 0, srcY: 0 }];
@@ -578,7 +578,7 @@ function slicedParts(view: AutoRigView, cape = false): { parts: PartDef[]; joint
   const leg = (s: Side) => [`foot_${s}`, `shin_${s}`, `thigh_${s}`];
   const arm = (s: Side) => [`upper_arm_${s}`, `forearm_${s}`, `hand_${s}`];
   const order =
-    view === "right"
+    view !== "front"
       ? [...arm("l"), ...leg("l"), ...leg("r"), "torso", "head", ...arm("r")]
       : [...leg("r"), ...leg("l"), "torso", "head", ...arm("r"), ...arm("l")];
   // A cape hangs behind the whole body.

@@ -161,7 +161,7 @@ const autoRigAllowed: express.RequestHandler = async (_req, res, next) => {
 };
 
 /**
- * POST /me/autorig/prepare  body = { image (data URL), view: "front" | "right", skipPose? }
+ * POST /me/autorig/prepare  body = { image (data URL), view: "front" | "right" | "side", skipPose? }
  * → { cutout (PNG data URL), width, height, joints, flagged, jointsBy, gear, posed, traceId, cuts }. Muse
  * Image redraws the character in the rig pose (about 15–35 s) unless skipPose, then Muse Spark
  * places the inner joints and lists the gear (about 15–30 s), and SAM 3.1 masks the gear (2–4 s).

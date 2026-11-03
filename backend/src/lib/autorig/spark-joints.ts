@@ -38,7 +38,7 @@ Place each joint at the centre of the body where that joint pivots, not on the e
 - hip: the top of the thigh inside the body, where the leg swings from (under any belt, skirt or loincloth).
 - head: the top of the skull (not a plume or crest). hand: the fingertips. toe: the tip of the foot.
 
-Sides: _l is the CHARACTER's own left and _r its own right. The character faces the viewer or is turned to the right, so its right side (_r) is on the LEFT of the picture and its left side (_l) on the RIGHT of the picture.
+Sides: _l is the CHARACTER's own left and _r its own right. The character faces the viewer or is turned to the right, so its right side (_r) is on the LEFT of the picture and its left side (_l) on the RIGHT of the picture. In a side profile the near arm and leg are reaching back (the LEFT of the picture) and are _r; the far arm and leg are reaching forward (the RIGHT of the picture) and are _l.
 
 Also list the character's gear that the rig must not cut in half: capes, cloaks, scarves, long skirts or coat tails, shoulder pads or pauldrons, elbow pads, knee pads, helmet plumes or crests, and similar pieces. Up to ${MAX_GEAR} items, the biggest first. For each give:
 - phrase: 1 to 3 plain, common words an image segmenter knows, with at most one colour word, such as "red cape", "shoulder pad", "knee pad", "elbow pad", "plume", "scarf", "loincloth". Don't describe its material or shape ("skull shoulder armor", "round knee pad", "knee armor"). Not a sentence, no left or right, no lists. One phrase covers both sides of a pair.
@@ -65,7 +65,7 @@ async function askSpark(cut: Cutout, view: AutoRigView, guess: Joints, signal: A
   const image = await gridImage(cut);
   const toUnits = (p: Point) => [Math.round((p.x / cut.width) * UNITS), Math.round((p.y / cut.height) * UNITS)];
   const request = [
-    `View: ${view === "front" ? "front, facing the viewer" : "turned to face the right of the picture"}.`,
+    `View: ${{ front: "front, facing the viewer", right: "turned to face the right of the picture", side: "strict side profile facing the right of the picture" }[view]}.`,
     "A rough first guess from the character's outline (often wrong at the neck, shoulders and hips, so check every joint against the picture):",
     JSON.stringify(Object.fromEntries(JOINT_NAMES.map((j) => [j, toUnits(guess[j])]))),
   ].join("\n");

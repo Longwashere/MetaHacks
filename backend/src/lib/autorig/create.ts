@@ -90,7 +90,7 @@ export function parsePrepareInput(body: unknown): Parsed<PrepareInput> {
   const decoded = decodeDataUrl(image, ["image/png", "image/jpeg", "image/webp"]);
   if (!decoded) return { ok: false, error: "Send a PNG, JPG or WebP image." };
   if (decoded.length > MAX_IMAGE_BYTES) return { ok: false, error: "The image is too big. Use one under 8 MB." };
-  if (view !== "front" && view !== "right") return { ok: false, error: "Pick a view: front or facing right." };
+  if (view !== "front" && view !== "right" && view !== "side") return { ok: false, error: "Pick a view: front, facing right or side." };
   return { ok: true, input: { image: decoded, view, skipPose: skipPose === true } };
 }
 
@@ -98,7 +98,7 @@ export function parseCreateInput(body: unknown): Parsed<CreateInput> {
   if (typeof body !== "object" || body === null) return { ok: false, error: "Nothing to rig." };
   const { name, view, visibility, cutout, joints, gear, traceId, slice } = body as Record<string, unknown>;
   if (typeof name !== "string" || !name.trim() || name.trim().length > MAX_NAME_LENGTH) return { ok: false, error: `Give the rig a name (up to ${MAX_NAME_LENGTH} characters).` };
-  if (view !== "front" && view !== "right") return { ok: false, error: "Pick a view: front or facing right." };
+  if (view !== "front" && view !== "right" && view !== "side") return { ok: false, error: "Pick a view: front, facing right or side." };
   if (visibility !== "public" && visibility !== "private") return { ok: false, error: "Visibility must be public or private." };
   const png = decodeDataUrl(cutout, ["image/png"]);
   if (!png || png.length > MAX_IMAGE_BYTES) return { ok: false, error: "The cutout is missing. Start over." };
@@ -112,7 +112,7 @@ export function parsePreviewInput(body: unknown): Parsed<PreviewInput> {
   if (typeof body !== "object" || body === null) return { ok: false, error: "Nothing to preview." };
   const { traceId, view, joints } = body as Record<string, unknown>;
   if (typeof traceId !== "string" || !PREPARE_FOLDER.test(traceId)) return { ok: false, error: "Pose the character first." };
-  if (view !== "front" && view !== "right") return { ok: false, error: "Pick a view: front or facing right." };
+  if (view !== "front" && view !== "right" && view !== "side") return { ok: false, error: "Pick a view: front, facing right or side." };
   const out = parseJoints(joints);
   if (typeof out === "string") return { ok: false, error: out };
   return { ok: true, input: { traceId, view, joints: out } };

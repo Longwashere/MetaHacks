@@ -42,7 +42,8 @@ export async function action({ request, context }: Route.ActionArgs) {
   const session = requireSession(context, request);
   const form = await request.formData();
   const intent = form.get("intent");
-  const view: AutoRigView = form.get("view") === "right" ? "right" : "front";
+  const formView = form.get("view");
+  const view: AutoRigView = formView === "right" || formView === "side" ? formView : "front";
 
   if (intent === "prepare") {
     const image = form.get("image");
@@ -251,6 +252,9 @@ export default function AutoRigPage({ loaderData }: Route.ComponentProps) {
                 </ToggleGroupItem>
                 <ToggleGroupItem value="right" className="flex-1">
                   Facing right
+                </ToggleGroupItem>
+                <ToggleGroupItem value="side" className="flex-1">
+                  Side
                 </ToggleGroupItem>
               </ToggleGroup>
             </div>

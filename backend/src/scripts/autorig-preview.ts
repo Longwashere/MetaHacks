@@ -32,7 +32,7 @@ try {
 const rows: Buffer[] = [];
 for (const file of (await readdir(dir)).filter((f) => f.endsWith(".png")).sort()) {
   const name = file.replace(/\.png$/, "");
-  const view: AutoRigView = name.endsWith("-right") ? "right" : "front";
+  const view: AutoRigView = name.endsWith("-right") ? "right" : name.endsWith("-side") ? "side" : "front";
   const started = Date.now();
   const cut = await keyCutout(await readFile(path.join(dir, file)));
   let joints = overrides[name] ?? guessJoints(cut, view);

@@ -58,7 +58,7 @@ function tinted(rig: BuiltRig): Promise<Buffer> {
 
 for (const name of process.argv.slice(2)) {
   const label = path.basename(name, ".png");
-  const view: AutoRigView = label.endsWith("-right") ? "right" : "front";
+  const view: AutoRigView = label.endsWith("-right") ? "right" : label.endsWith("-side") ? "side" : "front";
   const fixture = await readFile(path.join(FIXTURES, `${name}.png`)).catch(() => null);
   const cut: Cutout = fixture ? await keyCutout(fixture) : await alphaCutout(await readFile(name));
 

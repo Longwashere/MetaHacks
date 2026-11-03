@@ -21,6 +21,12 @@ const VIEWS: Record<AutoRigView, string> = {
     "View: three-quarter view, with the character's body and face turned toward the right side of the image (the character faces right), standing upright. " +
     "Both arms fully visible: arms straight and held out away from the body, about 45 degrees down from horizontal, the near arm in front of the body and the far arm clearly visible behind it, each with a clear gap between the arm and the torso. " +
     "Hands open and empty. Legs straight and apart in a wide stance, both legs fully visible with a clear gap between them, feet flat. ",
+  // The near (right) limbs reach back to the left of the image and the far (left) ones forward to
+  // the right, so each side's limbs are on the same side of the image as in the other views.
+  side:
+    "View: strict side profile, exactly 90 degrees, the character faces the right edge of the image; only one eye is visible and the nose points right. Standing upright. " +
+    "Arms straight and spread apart like scissors: the near arm reaches back toward the left of the image and the far arm reaches forward toward the right, both about 45 degrees down from horizontal, each with a clear gap between the arm and the torso, so the two arms don't overlap. " +
+    "Hands open and empty. Legs straight in a long walking stride: the near leg back toward the left and the far leg forward toward the right, a clear gap between them, both feet flat. ",
 };
 
 function posePrompt(view: AutoRigView): string {

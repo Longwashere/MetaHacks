@@ -34,7 +34,7 @@ const bend = {
 
 const rows: Buffer[] = [];
 for (const name of process.argv.slice(2)) {
-  const view: AutoRigView = name.endsWith("-right") ? "right" : "front";
+  const view: AutoRigView = name.endsWith("-right") ? "right" : name.endsWith("-side") ? "side" : "front";
   const cut = await keyCutout(await readFile(path.join(FIXTURES, `${name}.png`)));
   let joints: Joints;
   try {

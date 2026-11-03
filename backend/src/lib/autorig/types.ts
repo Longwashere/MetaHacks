@@ -2,8 +2,8 @@
 // AUTO_RIG_PLAN.md at the repo root). Coordinates are image pixels of the cutout, x to the right
 // and y down; the rig builder flips y for Spine.
 
-/** "front" faces the viewer; "right" is turned toward the right of the image. */
-export type AutoRigView = "front" | "right";
+/** "front" faces the viewer; "right" is turned toward the right of the image; "side" is a strict 90° profile facing right. */
+export type AutoRigView = "front" | "right" | "side";
 
 /**
  * The joints a rig is built from. `_l` / `_r` are the character's own left and right, so in a
