@@ -398,6 +398,14 @@ Every reply was a **1600×1600 WebP** although the request asked for `size: "102
 
 ### Log
 
+### 2026-11-02 — Showcase slideshow linked remix folders that don't exist in R2
+- **What happened:** on the "One rig in, a whole cast out" slideshow, many remixes didn't load: the texture and atlas requests returned 404 from the R2 public bucket.
+- **Cost:** the user's time to find it; seven of the 18 remix slides were broken on the home page.
+- **Cause:** `frontend/app/lib/showcase-models.ts` had seven remix URLs whose folder names didn't match R2. Four used the real job ID with a made-up timestamp (`cc9f0961`, `7e215105`, `7c067abb`, `523d43e4`; the last two also dropped the `round-1/` subfolder). Three (`a88d75ea`, `032fcfc3`, `4859a0f9`) have no folder in R2 at all.
+- **Workaround / status:** fixed. Pointed the four at their real folders, after checking each `prompts.json` matched the slide, and removed the three slides with no stored data. Every R2 URL in the file now returns 200.
+- **Follow-up (same day):** the Axe Barbarian tab didn't load at all, for a different reason. The tab view reused one `SingleModelSlideshow` without a `key`, so the clip stayed at the first model's `"Run"`; the barbarian's clips are lowercase, and spine-player stops with "Animation does not exist in skeleton". Fixed by keying it on the model ID in `ModelSlideshowSection.tsx`.
+- **Lesson:** build showcase URLs from `listR2("remixes/", "/")` (or copy them from `showcase.ts`), never by hand, and check them with a HEAD request before committing.
+
 ### 2026-11-01 — Headless Chrome screenshots show Spine players blank
 - **What happened:** While checking the showcase rework, headless Chrome screenshots (`--headless=new` with SwiftShader, and playwright-core headless) showed the arena and slideshow stages empty: ground shadows but no characters. It looked like a regression; the original component was blank the same way.
 - **Cost:** about five capture runs, plus a revert-and-retest of `ZombieArenaPlayer.tsx` to rule out the change.

@@ -20,25 +20,30 @@ import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { type ShowcaseModel, SHOWCASE_SLIDESHOW_MODELS } from "~/lib/showcase-models";
 import { cn } from "~/lib/utils";
 
+// Where the divider starts: 40% original on the left, 60% remix on the right.
+const START_SPLIT = 40;
+
 interface SingleModelSlideshowProps {
   model: ShowcaseModel;
   className?: string;
 }
 
 export function SingleModelSlideshow({ model, className }: SingleModelSlideshowProps) {
-  // Open on the first remix with the wipe half way, so the before/after is visible without a click.
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(model.slides.length > 1 ? 1 : 0);
+  // The original is never a slide of its own: it's the left side of the wipe on every remix.
+  const originalSlide = model.slides.find((s) => s.isOriginal) ?? model.slides[0];
+  const remixes = model.slides.filter((s) => !s.isOriginal);
+
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [selectedAnimation, setSelectedAnimation] = useState(model.defaultAnimation);
-  const [compareSplit, setCompareSplit] = useState(50); // % of the stage showing the original, from the left
+  const [compareSplit, setCompareSplit] = useState(START_SPLIT); // % of the stage showing the original, from the left
   const [isPlaying, setIsPlaying] = useState(true);
   const clock = useRef<SpineClock>({ trackTime: 0, reverse: false, at: 0 });
 
-  const slide = model.slides[currentSlideIndex] ?? model.slides[0];
-  const originalSlide = model.slides[0];
+  const slide = remixes[currentSlideIndex] ?? originalSlide;
 
   const goTo = (index: number) => {
-    setCompareSplit(50);
-    setCurrentSlideIndex((index + model.slides.length) % model.slides.length);
+    setCompareSplit(START_SPLIT);
+    setCurrentSlideIndex((index + remixes.length) % remixes.length);
   };
   const handlePrev = () => goTo(currentSlideIndex - 1);
   const handleNext = () => goTo(currentSlideIndex + 1);
@@ -118,14 +123,10 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
                   </>
                 ) : (
                   <>
-                    <Sparkles className="size-3" /> Remix {currentSlideIndex} of {model.slides.length - 1}
+                    <Sparkles className="size-3" /> Remix {currentSlideIndex + 1} of {remixes.length}
                   </>
                 )}
               </Badge>
-
-              <div className="flex items-center gap-1 rounded-md bg-background/80 px-2 py-0.5 text-[11px] font-mono text-muted-foreground backdrop-blur">
-                Slide {currentSlideIndex + 1} / {model.slides.length}
-              </div>
             </div>
 
             {/* Bottom Floating Navigation Arrows */}
@@ -142,7 +143,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
 
               {/* Dot Indicators */}
               <div className="flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 backdrop-blur">
-                {model.slides.map((s, idx) => (
+                {remixes.map((s, idx) => (
                   <button
                     key={s.id}
                     onClick={() => goTo(idx)}
@@ -253,7 +254,7 @@ export function SingleModelSlideshow({ model, className }: SingleModelSlideshowP
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCompareSplit(compareSplit === 0 ? 50 : 0)}
+              onClick={() => setCompareSplit(compareSplit === 0 ? START_SPLIT : 0)}
               disabled={slide.isOriginal}
               className="text-xs"
             >
@@ -332,7 +333,8 @@ export function ModelSlideshowSection() {
             </TabsList>
           </Tabs>
 
-          <SingleModelSlideshow model={currentModel} />
+          {/* Keyed so the clip, slide and wipe reset per model: clip names differ between rigs. */}
+          <SingleModelSlideshow key={currentModel.id} model={currentModel} />
         </div>
       ) : (
         /* 2x2 Grid View of All 4 Slideshows */
