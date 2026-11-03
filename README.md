@@ -3,6 +3,16 @@
 **Spine 2D game assets, made with Meta's models.** Browse rigged 2D characters, remix their art from a prompt, auto-rig a character from one image, generate animations from a sentence, and upload your own rigs.
 
 <p align="center">
+  <a href="https://rigforge.app"><strong>▶ Try it live at rigforge.app</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://rigforge.app/showcase">Showcase</a>
+  &nbsp;·&nbsp;
+  <a href="https://rigforge.app/remix">Remix Studio</a>
+  &nbsp;·&nbsp;
+  <a href="https://rigforge.app/autoRig">Auto-rig</a>
+</p>
+
+<p align="center">
   <img src="docs/media/remix-showcase.gif" width="440" alt="One armored knight rig wiping between five Muse remixes: a treant warrior, a fire knight, a samurai warlord and more, all playing the same animation">
   <br>
   <sub>One rig, five remixes. Same bones and animations; Muse Image repainted the art from a prompt.</sub>
