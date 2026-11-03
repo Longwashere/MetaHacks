@@ -22,6 +22,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/showcase";
 import { AnimationShowcase, type AnimationShowcaseRig } from "~/components/AnimationShowcase";
+import { AutoRigShowcase, type AutoRigShowcaseRig } from "~/components/AutoRigShowcase";
 import { ModelSlideshowSection } from "~/components/ModelSlideshowSection";
 import { ZombieArenaPlayer } from "~/components/ZombieArenaPlayer";
 import { Badge } from "~/components/ui/badge";
@@ -30,20 +31,24 @@ import { Card, CardContent } from "~/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { getAsset } from "~/lib/api.server";
 import { SITE_NAME, seoMeta } from "~/lib/seo";
-import { ANIMATION_SHOWCASE_RIGS } from "~/lib/showcase-models";
+import { ANIMATION_SHOWCASE_RIGS, AUTO_RIG_SHOWCASE } from "~/lib/showcase-models";
 import { getSiteUrl } from "~/lib/site.server";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return seoMeta({
-    title: `Showcase — New Art and New Animations for Rigged 2D Characters | ${SITE_NAME}`,
+    title: `Showcase — Rig, Repaint and Animate 2D Characters | ${SITE_NAME}`,
     description:
-      "RigForge repaints Spine 2D characters with Meta's Muse Spark and Muse Image while every animation keeps working, and keyframes brand-new animations onto existing skeletons from a text prompt. Enemy variants, seasonal skins and new moves in about a minute each.",
+      "RigForge turns one character image into a Spine rig, repaints Spine 2D characters with Meta's Muse Spark and Muse Image while every animation keeps working, and keyframes brand-new animations onto existing skeletons from a text prompt.",
     canonical: `${loaderData.siteUrl}/showcase`,
   });
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const assets = await Promise.all(ANIMATION_SHOWCASE_RIGS.map((rig) => getAsset(rig.assetId, null)));
+  const autoRigIds = [AUTO_RIG_SHOWCASE.rig.assetId, ...AUTO_RIG_SHOWCASE.remixIds];
+  const [assets, autoRigAssets] = await Promise.all([
+    Promise.all(ANIMATION_SHOWCASE_RIGS.map((rig) => getAsset(rig.assetId, null))),
+    Promise.all(autoRigIds.map((id) => getAsset(id, null))),
+  ]);
   // Only what the player needs; a missing or private rig is skipped.
   const animationRigs: AnimationShowcaseRig[] = ANIMATION_SHOWCASE_RIGS.flatMap((rig, i) => {
     const asset = assets[i];
@@ -51,7 +56,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     const { id, name, category, accent, animations, files, tint } = asset;
     return [{ id, name, category, accent, animations, files, tint, added: rig.added }];
   });
-  return { siteUrl: getSiteUrl(request), animationRigs };
+  const autoRigs: AutoRigShowcaseRig[] = autoRigAssets.flatMap((asset) => {
+    if (!asset?.files) return [];
+    const { id, name, category, accent, animations, files, tint, prompt } = asset;
+    return [{ id, name, category, accent, animations, files, tint, prompt }];
+  });
+  // The remixes alone don't tell the story without the rig they came from.
+  return { siteUrl: getSiteUrl(request), animationRigs, autoRigs: autoRigs[0]?.prompt === null ? autoRigs : [] };
 }
 
 /**
@@ -97,7 +108,7 @@ const USE_CASES = [
     title: "Restyle a rigged cast",
     description:
       "Reuse a rigged cast across productions: restyle it, then block out new acting beats from a sentence before an animator polishes them.",
-    example: "\"do the thriller.\" → 4 s clip",
+    example: "\"do the thriller shuffle.\" → new clip",
   },
 ];
 
@@ -234,7 +245,7 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
       <section className="flex flex-col items-center pt-2 text-center md:pt-8">
         <Badge variant="secondary" className="mb-5 gap-1.5 px-3 py-1 text-xs">
           <Sparkles className="size-3.5 text-primary" />
-          Built on Meta Muse Spark and Muse Image
+          Built on Meta Muse Spark, Muse Image and SAM 3.1
         </Badge>
         <h1 className="max-w-4xl text-4xl font-extrabold tracking-tight text-balance sm:text-5xl lg:text-6xl">
           New art and new moves for your 2D characters.{" "}
@@ -245,7 +256,8 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
         <p className="mt-5 max-w-2xl text-lg text-muted-foreground text-pretty">
           Rigging and animating a 2D character takes days, and every new skin or new move takes days more. RigForge
           uses Meta&apos;s Muse models to repaint a Spine rig in about a minute with every animation still working,
-          and to keyframe brand-new animations onto the skeleton you already have from one sentence.
+          to keyframe brand-new animations onto the skeleton you already have from one sentence, and to rig a new
+          character from a single image.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Button size="lg" asChild className="gap-2">
@@ -254,6 +266,11 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
             </Link>
           </Button>
           <Button size="lg" variant="outline" asChild className="gap-2">
+            <a href="#autorig-heading">
+              <Bone className="size-4" /> Rig from one image
+            </a>
+          </Button>
+          <Button size="lg" variant="ghost" asChild className="gap-2">
             <a href="#animate-heading">
               See new animations <ArrowRight className="size-4" />
             </a>
@@ -275,6 +292,11 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
         </p>
       </section>
 
+      {/* Slideshows */}
+      <section aria-labelledby="slideshows-heading" className="flex flex-col gap-6">
+        <ModelSlideshowSection />
+      </section>
+
       {/* Live arena */}
       <section aria-labelledby="arena-heading" className="flex scroll-mt-20 flex-col gap-6">
         <SectionHeading id="arena-heading" eyebrow="Live demo" title="14 rigs from different packs, pulled into one art direction">
@@ -294,9 +316,10 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
             eyebrow="New animations"
             title="Type a move. Muse Spark keyframes it onto the skeleton you already have."
           >
-            None of the rigs below shipped with a victory dance, a meteor slash or a hadoken. Each was described in one
-            sentence and keyframed by Muse Spark on the rig&apos;s existing bones in about a minute: no new rig, no new
-            art, no animator. Turn on the bones to see it&apos;s real skeletal animation, not a video.
+            This ghoul shipped with an attack, a run and a death. It never had a zombie split, a thriller shuffle or a
+            philosopher&apos;s pose. Each was described in a sentence and keyframed by Muse Spark on the rig&apos;s
+            existing bones in about a minute: no new rig, no new art, no animator. Turn on the bones to see it&apos;s
+            real skeletal animation, not a video.
           </SectionHeading>
           <AnimationShowcase rigs={loaderData.animationRigs} />
           <ol className="grid gap-4 sm:grid-cols-3">
@@ -312,6 +335,19 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
               </li>
             ))}
           </ol>
+        </section>
+      )}
+
+      {/* Auto-rig: one image to a Spine rig */}
+      {loaderData.autoRigs.length > 0 && (
+        <section aria-labelledby="autorig-heading" className="flex scroll-mt-20 flex-col gap-6">
+          <SectionHeading id="autorig-heading" eyebrow="Auto-rig" title="No rig yet? Start from one image.">
+            Upload a picture of a character and get a Spine rig you can play, remix and animate. Muse Image poses it,
+            Muse Spark places the joints and names the gear, SAM 3.1 keeps each piece of gear whole, and RigForge
+            builds the bones, meshes and weights. Posing and joints take about 45 seconds; the rig builds in 2–30
+            more, depending on whether it&apos;s one smooth image or cut into parts.
+          </SectionHeading>
+          <AutoRigShowcase rigs={loaderData.autoRigs} />
         </section>
       )}
 
@@ -340,11 +376,6 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
             </Card>
           ))}
         </div>
-      </section>
-
-      {/* Slideshows */}
-      <section aria-labelledby="slideshows-heading" className="flex flex-col gap-6">
-        <ModelSlideshowSection />
       </section>
 
       {/* Comparison */}
@@ -439,12 +470,17 @@ export default function ShowcaseRoute({ loaderData }: Route.ComponentProps) {
           </h2>
           <p className="text-muted-foreground text-pretty">
             Upload a Spine export (skeleton, atlas and pages), remix it with a prompt and give it moves it never had.
-            Or start from a rig in the library. Your existing animations come back untouched either way.
+            No rig yet? Auto-rig one from a single image. Or start from a rig in the library.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <Button size="lg" asChild className="gap-2">
               <Link to="/upload">
                 <Upload className="size-4" /> Upload a Spine rig
+              </Link>
+            </Button>
+            <Button size="lg" variant="outline" asChild className="gap-2">
+              <Link to="/autoRig">
+                <Bone className="size-4" /> Auto-rig an image
               </Link>
             </Button>
             <Button size="lg" variant="outline" asChild className="gap-2">

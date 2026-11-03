@@ -1,4 +1,4 @@
-import type { SpineAssetFiles } from "~/lib/types";
+import type { AutoRigJoints, SpineAssetFiles } from "~/lib/types";
 
 export interface ShowcaseSlide {
   id: string;
@@ -866,36 +866,60 @@ export interface AddedAnimation {
 }
 
 /**
- * Public remixes carrying animations their base rig doesn't have, all generated in the remix
- * page's Animate tab. Names match the stored skeletons; prompts come from the backend's animation
- * run logs (none were logged for the tempest elemental's, which ran in production).
+ * The public remix whose generated animations the showcase plays, all made in the remix page's
+ * Animate tab. Names match the stored skeleton; prompts come from the backend's animation run logs
+ * (none was logged for "zombie split taunt").
  */
 export const ANIMATION_SHOWCASE_RIGS: { assetId: string; added: AddedAnimation[] }[] = [
   {
-    assetId: "skeleton-priest-vestments-7f41d551",
+    assetId: "gangrenous-ghoul-warrior-aeb5c6c7",
     added: [
-      { name: "Thriller Stomp", prompt: "do the thriller." },
-      { name: "Victory Dance", prompt: "Make him do a victory dance" },
-      { name: "Eruption Cast", prompt: "Animate a spell casting animation" },
-      { name: "Victory Shuffle", prompt: "do a victory shuffle" },
-    ],
-  },
-  {
-    assetId: "leaping-two-hand-slam-7c5197ab",
-    added: [
+      { name: "Thriller Shuffle", prompt: "Make him do the thriller shuffle." },
+      { name: "Nervous Glance", prompt: "nervous idle: small quick breaths, glancing left and right" },
+      { name: "zombie split taunt", prompt: null },
+      { name: "Chest Thump Taunt", prompt: "taunt: lean forward, beat the chest twice, then shake the head" },
       {
-        name: "Meteor Slash",
-        prompt: "A jumping attack where the orc is holding two hands on the axe and jumping down on a vertical slash.",
+        name: "Philosopher Think",
+        prompt: "Make him think about life in philosopher thinking stance. We can hide the axe or put it on the ground for this one.",
       },
-      { name: "Jolly Orc Jig", prompt: "Make him dance in a jolly way" },
-    ],
-  },
-  {
-    assetId: "tempest-wind-elemental-523d43e4",
-    added: [
-      { name: "hadoken blast", prompt: null },
-      { name: "Double Punch", prompt: null },
-      { name: "Victory Bounce", prompt: null },
     ],
   },
 ];
+
+const R2 = "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/remixes";
+
+/**
+ * The showcase's auto-rig demo: one knight image through /autoRig. The step pictures come from the
+ * traced run of 2026-11-02 22:47 (prepare `autorig-prep_0a122779`, build `autorig_53c07d61`, a
+ * "Separate parts" rig); the live player plays the public "Smooth" rig of the same image and its
+ * remixes. Times are from the 5 traced prepare runs and their builds on 2026-11-02.
+ */
+export const AUTO_RIG_SHOWCASE = {
+  rig: { assetId: "screenshot-2026-11-02-at-9-13-52-am-536c7691", label: "Auto-rigged knight" },
+  remixIds: ["orcish-plumed-knight-d5ef12a3", "elven-silver-warden-481d2d15", "rotting-ghoul-knight-cdd440a3"],
+  poseUrl: `${R2}/2026-11-02T22-47-05-644Z_autorig-prep_0a122779/pose.webp`,
+  cutout: { url: `${R2}/2026-11-02T22-47-05-644Z_autorig-prep_0a122779/cutout.png`, width: 1044, height: 1039 },
+  partsUrl: `${R2}/2026-11-02T22-48-42-740Z_autorig_53c07d61/body.png`,
+  joints: {
+    head: { x: 507, y: 157 },
+    neck: { x: 483, y: 343 },
+    pelvis: { x: 483, y: 660 },
+    shoulder_l: { x: 635, y: 344 },
+    elbow_l: { x: 761, y: 394 },
+    wrist_l: { x: 812, y: 386 },
+    hand_l: { x: 1013, y: 418 },
+    shoulder_r: { x: 327, y: 338 },
+    elbow_r: { x: 214, y: 473 },
+    wrist_r: { x: 125, y: 530 },
+    hand_r: { x: 30, y: 527 },
+    hip_l: { x: 569, y: 686 },
+    knee_l: { x: 665, y: 788 },
+    ankle_l: { x: 712, y: 943 },
+    toe_l: { x: 795, y: 989 },
+    hip_r: { x: 392, y: 686 },
+    knee_r: { x: 309, y: 790 },
+    ankle_r: { x: 290, y: 935 },
+    toe_r: { x: 225, y: 966 },
+  } satisfies AutoRigJoints,
+  gear: ["red cape", "red plume", "shoulder pads", "knee pads", "hands"],
+};
