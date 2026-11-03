@@ -14,10 +14,29 @@ import { cn } from "~/lib/utils";
 const ARENA_GRASS_URL = "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/showcase/arena/grass.webp";
 const ARENA_BLIGHT_URL = "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/showcase/arena/blight.webp";
 
-// Vertical walking band, in % of the stage height. The stage is short (440–500px) while the rigs keep
-// their full size, so ground rigs stay low enough that their heads aren't cut off at the top edge.
-const GROUND_Y = { min: 34, max: 78 };
-const FLYING_Y = { min: 12, max: 36 };
+// Auto-sweep timing: an eased pass from one edge to the other, then a hold at that edge.
+const SWEEP_PASS_SEC = 3.7;
+const SWEEP_HOLD_SEC = 2;
+
+/** Where the auto-sweep puts the line (0–100) at time `t`: across, hold, back, hold. */
+function sweepLine(t: number): number {
+  const cycle = 2 * (SWEEP_PASS_SEC + SWEEP_HOLD_SEC);
+  const p = ((t % cycle) + cycle) % cycle;
+  const ease = (f: number) => 50 - 50 * Math.cos(Math.PI * f); // 0 → 100, slow at both ends
+  if (p < SWEEP_PASS_SEC) return Math.round(ease(p / SWEEP_PASS_SEC));
+  if (p < SWEEP_PASS_SEC + SWEEP_HOLD_SEC) return 100;
+  const back = p - SWEEP_PASS_SEC - SWEEP_HOLD_SEC;
+  if (back < SWEEP_PASS_SEC) return Math.round(100 - ease(back / SWEEP_PASS_SEC));
+  return 0;
+}
+
+// Every rig (and its shadow) is drawn this much bigger than its own `scale` in the arena.
+const ARENA_RIG_SCALE = 1.3;
+
+// Vertical walking band, in % of the stage height. The stage is short (440–500px) while the rigs are
+// drawn large, so ground rigs stay low enough that their heads aren't cut off at the top edge.
+const GROUND_Y = { min: 40, max: 76 };
+const FLYING_Y = { min: 18, max: 38 };
 const isFlyingRig = (id: string) => id === "char-whelp" || id === "char-dragon-frost";
 const clampY = (id: string, y: number) => {
   const band = isFlyingRig(id) ? FLYING_Y : GROUND_Y;
@@ -147,8 +166,8 @@ export function ZombieArenaPlayer() {
           }
         }
 
-        // The sweep moves the repaint line back and forth on its own
-        const lineVal = isAutoSweep ? Math.round(50 + 42 * Math.sin(currentTimeSec * 0.85)) : sliderVal;
+        // The sweep moves the repaint line back and forth on its own, edge to edge
+        const lineVal = isAutoSweep ? sweepLine(currentTimeSec) : sliderVal;
         if (lineVal !== sliderVal) setSliderVal(lineVal);
 
         // 3. Movement and boundary collision
@@ -382,8 +401,8 @@ export function ZombieArenaPlayer() {
                   transform: "translate(-50%, -70%)",
                 }}
               >
-                {/* Ground Shadow */}
-                <div className="relative">
+                {/* Ground Shadow, scaled with the rig so it stays under its feet */}
+                <div className="relative" style={{ transform: `scale(${ARENA_RIG_SCALE})` }}>
                   <div
                     className={cn(
                       "absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full blur-xs transition-all",
