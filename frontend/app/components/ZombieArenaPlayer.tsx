@@ -11,6 +11,19 @@ import { Button } from "~/components/ui/button";
 import { ZOMBIE_ARENA_CHARACTERS } from "~/lib/showcase-models";
 import { cn } from "~/lib/utils";
 
+const ARENA_GRASS_URL = "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/showcase/arena/grass.webp";
+const ARENA_BLIGHT_URL = "https://pub-031b686616924ec98b0bb5679cd777c7.r2.dev/showcase/arena/blight.webp";
+
+// Vertical walking band, in % of the stage height. The stage is short (440–500px) while the rigs keep
+// their full size, so ground rigs stay low enough that their heads aren't cut off at the top edge.
+const GROUND_Y = { min: 34, max: 78 };
+const FLYING_Y = { min: 12, max: 36 };
+const isFlyingRig = (id: string) => id === "char-whelp" || id === "char-dragon-frost";
+const clampY = (id: string, y: number) => {
+  const band = isFlyingRig(id) ? FLYING_Y : GROUND_Y;
+  return Math.min(band.max, Math.max(band.min, y));
+};
+
 interface CharacterSimState {
   x: number; // percentage (0 - 100)
   y: number; // percentage (0 - 100)
@@ -24,8 +37,8 @@ interface CharacterSimState {
 }
 
 export function ZombieArenaPlayer() {
-  // Position of the repaint line, 0–100% of the arena width: rigs left of it wear their remix.
-  // 0 shows every original, 100 every remix.
+  // Position of the repaint line, 0–100% of the arena width: rigs right of it wear their remix,
+  // like the slideshow's original-left / remix-right wipe. 100 shows every original, 0 every remix.
   const [sliderVal, setSliderVal] = useState(50);
   const [isPlaying, setIsPlaying] = useState(true);
   const [activeClip, setActiveClip] = useState<"walk" | "attack" | "idle">("walk");
@@ -41,11 +54,11 @@ export function ZombieArenaPlayer() {
     for (const c of ZOMBIE_ARENA_CHARACTERS) {
       simStatesRef.current[c.id] = {
         x: c.initialX,
-        y: c.initialY,
+        y: clampY(c.id, c.initialY),
         vx: c.vx,
         vy: c.vy,
         facing: c.vx >= 0 ? 1 : -1,
-        isZombie: c.initialX < 50,
+        isZombie: c.initialX > 50,
       };
     }
   }
@@ -156,11 +169,9 @@ export function ZombieArenaPlayer() {
             nextY = s.y + s.vy * dt;
 
             // Airborne units (whelp, dragon) can fly closer to edges; ground units stay on the floor
-            const isFlying = c.id === "char-whelp" || c.id === "char-dragon-frost";
             const minX = 4;
             const maxX = 92;
-            const minY = isFlying ? 4 : 16;
-            const maxY = isFlying ? 32 : 78;
+            const { min: minY, max: maxY } = isFlyingRig(c.id) ? FLYING_Y : GROUND_Y;
 
             // Bounce horizontally
             if (nextX > maxX) {
@@ -186,8 +197,8 @@ export function ZombieArenaPlayer() {
             nextFacing = states[s.targetCharId].x >= s.x ? 1 : -1;
           }
 
-          // Rigs left of the repaint line wear their remix
-          const nextZombie = nextX < lineVal;
+          // Rigs right of the repaint line wear their remix
+          const nextZombie = nextX > lineVal;
 
           states[c.id] = {
             ...s,
@@ -221,7 +232,7 @@ export function ZombieArenaPlayer() {
     for (const c of ZOMBIE_ARENA_CHARACTERS) {
       const s = states[c.id];
       if (!s) continue;
-      s.isZombie = s.x < val;
+      s.isZombie = s.x > val;
     }
   };
 
@@ -242,9 +253,9 @@ export function ZombieArenaPlayer() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-800 bg-stone-900/90 px-4 py-2.5 backdrop-blur">
           <div className="flex items-center rounded-lg border border-stone-800 bg-stone-950 p-0.5">
             <Button
-              variant={sliderVal === 0 && !isAutoSweep ? "secondary" : "ghost"}
+              variant={sliderVal === 100 && !isAutoSweep ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => jumpTo(0)}
+              onClick={() => jumpTo(100)}
               className="h-7 px-2.5 text-xs text-stone-300"
             >
               Original packs
@@ -258,9 +269,9 @@ export function ZombieArenaPlayer() {
               <Zap className={cn("size-3 text-emerald-400", isAutoSweep && "animate-pulse")} /> Sweep
             </Button>
             <Button
-              variant={sliderVal === 100 && !isAutoSweep ? "secondary" : "ghost"}
+              variant={sliderVal === 0 && !isAutoSweep ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => jumpTo(100)}
+              onClick={() => jumpTo(0)}
               className="h-7 px-2.5 text-xs text-stone-300"
             >
               One art direction
@@ -306,27 +317,30 @@ export function ZombieArenaPlayer() {
         </div>
         {/* Interactive Walking Battlefield Stage */}
         <div
-          className="relative isolate h-[620px] w-full select-none overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-stone-900 via-stone-950 to-black sm:h-[720px]"
-          style={{
-            backgroundImage: `
-              radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.05), transparent 70%),
-              linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)
-            `,
-            backgroundSize: "100% 100%, 32px 32px, 32px 32px",
-          }}
+          className="relative isolate h-[440px] w-full select-none overflow-hidden bg-stone-950 sm:h-[500px]"
         >
-          {/* Subtle Ground Shadows & Isometric Floor Lines */}
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-stone-950/80 via-transparent to-stone-950/40" />
+          {/* Arena floor, painted by Muse Image in the ghouls' comic-ink style: healthy grass on the originals'
+              side, and the same field blighted on the remix side, clipped at the line so the two meet there.
+              The floor layers sit at -z-10, under every rig (their z-index is their depth, always positive). */}
+          <div
+            className="pointer-events-none absolute inset-0 -z-10 bg-cover bg-center"
+            style={{ backgroundImage: `url(${ARENA_GRASS_URL})` }}
+          />
+          <div
+            className="pointer-events-none absolute inset-0 -z-10 bg-cover bg-center"
+            style={{ backgroundImage: `url(${ARENA_BLIGHT_URL})`, clipPath: `inset(0 0 0 ${sliderVal}%)` }}
+          />
+          {/* Soft vignette so the rigs stand out from the floor */}
+          <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-t from-stone-950/50 via-transparent to-stone-950/30" />
 
-          {/* The same draggable divider as the spine viewer: remixes left of the line, originals right of it.
+          {/* The same draggable divider as the spine viewer: originals left of the line, remixes right of it.
               Rigs are stacked by depth (z-index up to ~1000), so the divider sits above them all to stay grabbable. */}
           <div className="pointer-events-none absolute inset-0 z-[2000]">
             <CompareDivider
               split={sliderVal}
               onSplitChange={(split) => jumpTo(Math.round(split))}
-              leftLabel="Remixed with Muse"
-              rightLabel="Original asset packs"
+              leftLabel="Original asset packs"
+              rightLabel="Remixed with Muse"
             />
           </div>
 
@@ -334,7 +348,7 @@ export function ZombieArenaPlayer() {
           {ZOMBIE_ARENA_CHARACTERS.map((char) => {
             const st = simStatesRef.current[char.id] ?? {
               x: char.initialX,
-              y: char.initialY,
+              y: clampY(char.id, char.initialY),
               facing: 1,
               isZombie: false,
             };
@@ -355,7 +369,7 @@ export function ZombieArenaPlayer() {
               [char.pageName]: st.isZombie ? char.zombieTextureUrl : char.baseTextureUrl,
             };
 
-            const isFlying = char.id === "char-whelp" || char.id === "char-dragon-frost";
+            const isFlying = isFlyingRig(char.id);
 
             return (
               <div

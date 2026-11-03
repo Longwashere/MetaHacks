@@ -51,7 +51,7 @@ Add the entry in the same task, not later.
 - **The key colour bleeds into the repainted art** (e.g. a teal axe on cyan runs), and Muse Image has no setting to stop it. (2026-10-27)
 - **Edit strength can only be set through prompt text.** We haven't found a strength or fidelity parameter for `/images/edits`; check the API reference before building more on prompt wording. (2026-10-27)
 - **No mask on `/images/edits`:** asked to repaint only some areas, Muse Image redraws the whole image and can add content (a second face in an auto-rig parts sheet). (2026-11-02)
-- **Muse Image ignores `size` and returns WebP:** asked for 1024×1024, got 1600×1600 WebP. Decode by content, not by extension, and don't rely on the output size. (2026-11-02)
+- **Muse Image ignores `size` and returns WebP:** asked for 1024×1024, got 1600×1600 WebP. Decode by content, not by extension, and don't rely on the output size. (2026-11-02) Same for landscape: `size: "1536x1024"` came back as a 1920×1280 WebP (verified, showcase arena floor, 2026-11-02).
 - **Muse Image moves and resizes parts** by a few percent, so we need a pixel-alignment step after every call. (2026-10-27)
 - **Muse Image sometimes redraws the whole layout** on big changes, moving and duplicating parts. We check every page and repaint once, which costs an extra image call. (2026-10-28)
 - **Ambiguous atlas pieces get the wrong content:** Spark called the scarf-wrapped torso a helm, and Muse Image painted a face into it. (2026-10-28)

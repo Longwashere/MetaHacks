@@ -12,6 +12,7 @@ import { ASSET_BASE_URL, PUBLIC_URL, R2, REMIX_OUTPUT_DIR } from "./config.js";
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".webp": "image/webp",
   ".json": "application/json",
   ".atlas": "text/plain; charset=utf-8",
   ".skel": "application/octet-stream",
