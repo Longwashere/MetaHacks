@@ -22,6 +22,7 @@ Built for the **Meta Global AI Developer Hackathon** (Oct 27 – Nov 4, 2026). E
 
 - [What it does](#what-it-does)
 - [Meta models we use](#meta-models-we-use)
+  - [The 7 agents](#the-agents)
 - [How the agent loops work](#how-the-agent-loops-work)
   - [Remix](#1-remix-re-texture-a-rig-from-a-prompt)
   - [Auto-rig](#2-auto-rig-one-image-to-a-playable-rig)
@@ -57,6 +58,22 @@ All calls go to the Meta Model API at `https://api.meta.ai/v1`. Model IDs are se
 | **SAM 3.1** (`sam-3.1`) | `/responses` | The segmenter. It masks each piece of gear Spark names (capes, pauldrons, kneepads, hands) so auto-rig slicing keeps them whole. Replies are decoded with `@meta-sam/parser`. |
 
 **Muse Code** isn't on the Model API (`GET /v1/models` doesn't list it), so the backend can't call it. Animation, which we first planned for Muse Code, runs on Muse Spark instead.
+
+### The agents
+
+RigForge runs **7 agents**. Each one has its own job, its own prompts and its own guardrails, and the remix live view credits every step to one of them ([frontend/app/lib/agents.ts](frontend/app/lib/agents.ts)). **6 of them call Muse Spark**, through **15 distinct prompts**. One (Poser Penny) only uses Muse Image.
+
+| Agent | Models | Used in | Muse Spark calls | What makes it different |
+| --- | --- | --- | --- | --- |
+| 🎬 **Director Dirk** | Muse Spark | Remix | `describeReference`, `describeStyle`, `planRemix`, `revisePlan`, `rewordForContentPolicy` | The only agent that writes *for another model*. It turns the user's words into an edit prompt for Muse Image, and it never judges its own work. After an inspector rejects a version, it rewrites the prompt from their issues, with every earlier rejected prompt attached so it doesn't undo an earlier fix. The winning version is picked by code (`scoreOf`), not by Dirk's opinion. |
+| 🖌️ **Designer Dani** | Muse Image (+ Muse Spark) | Remix, part fixes, auto-rig | `planPartFix` | The painter. It repaints atlas pages, single flagged parts, and the hidden areas behind auto-rig cuts. Spark only steps in for part fixes, expanding "fix the shield" into a paint instruction that names each part by where it sits in the image. Every paint goes through a code check (layout fit, part scale) before anyone sees it. |
+| 🎨 **Stylist Stella** | Muse Spark | Remix | `inspectStyle` | A judge with one question: does the assembled character have the look the user asked for? It sees code-rendered drawings of the character before and after, and returns a score and a list of issues in paint terms. Pass or fail is worked out from the score (≥ 0.7), never asked for, so the two can't disagree. |
+| 🦴 **Rigger Rick** | Muse Spark (+ SAM 3.1) | Remix, auto-rig, auto-tweak | `inspectRig`, `reviewTweaks`, `reviewAutoTweak`, `sparkJoints` | Structure, not looks. It checks whether the repainted parts still hold together, and approves the fixes code measured for each part's drift. In auto-rig it places 19 joints on a labelled grid and names the gear for SAM 3.1 to mask. It's the most tightly fenced agent: its numbers are clamped, its joints are checked against body proportions, and a tweak that tears a part from its neighbour is undone. |
+| 🎞️ **Animator Annie** | Muse Spark | Animate | director, keyframer, reviewer | Three passes of one agent, each with its own prompt. The director writes a beat sheet in plain text, the keyframer turns it into JSON keys with eases and effects, and the reviewer sees 8 rendered frames of its own first pass and rewrites it. It's the only agent that reviews its own output from pictures, and it runs at `reasoning_effort: "medium"`. |
+| 🧍 **Poser Penny** | Muse Image | Auto-rig | — | No Spark at all. It redraws an uploaded character in a rig-ready pose (A-pose, three-quarter or side) on flat magenta, keeping its identity and removing props. |
+| 📚 **Librarian Lou** | Muse Spark | Upload | `suggestTags` | Runs in the background, after the upload has already succeeded, so it can never fail one. It picks the art style and 4–8 search tags, reusing the catalogue's existing tags. For admin uploads it also picks the category and names the creature. Short structured replies run at `reasoning_effort: "low"`. |
+
+How they work together in a v3 remix: **Dirk** plans → **Dani** paints → **Stella** checks the style → **Rick** checks the fit → **Dirk** rewrites the plan, or **Dani** fixes a few parts → **Rick** lines the parts back up. Agents never talk to each other directly. Each one's output is checked in code and passed to the next as structured data (an edit prompt, a list of issues, measured fixes), so one agent's bad reply can't derail the loop.
 
 Every Meta call's token use is recorded per job from the response's `usage` field and billed as credits, so a failed job costs nothing ([backend/src/v3/lib/meta.ts](backend/src/v3/lib/meta.ts), `recordModelCalls`).
 
