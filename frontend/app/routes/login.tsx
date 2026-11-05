@@ -27,7 +27,6 @@ export async function loader({ request, context }: Route.LoaderArgs) {
  * so nobody can take one of these accounts over with a password-reset email.
  */
 const USERNAME_DOMAIN = "rigforge.test";
-
 export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   const next = safeNext(String(form.get("next") ?? ""));
@@ -96,6 +95,9 @@ export default function Login({ loaderData, actionData }: Route.ComponentProps) 
                 Hackathon judges
                 <Separator className="flex-1" />
               </div>
+              <p className="text-center text-sm text-muted-foreground">
+                Judges: the test username and password are at the top of the GitHub repo's README.
+              </p>
               <Form method="post" className="flex flex-col gap-3">
                 <input type="hidden" name="next" value={next} />
                 <div className="flex flex-col gap-2">

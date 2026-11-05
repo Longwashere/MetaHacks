@@ -9,7 +9,7 @@ export default function AppLayout() {
         <Outlet />
       </main>
       <footer className="border-t py-6 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-2 sm:flex-row sm:gap-4">
-        <span>RigForge · Spine is a trademark of Esoteric Software.</span>
+        <span>RigForge</span>
         <span className="hidden sm:inline">·</span>
         <div className="flex items-center gap-3">
           <Link to="/showcase" className="hover:text-foreground underline underline-offset-4">

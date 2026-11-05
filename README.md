@@ -20,6 +20,17 @@
 
 Built for the **Meta Global AI Developer Hackathon** (Oct 27 – Nov 4, 2026). Every AI feature runs on the Meta Model API: **Muse Spark**, **Muse Image** and **SAM 3.1**.
 
+## Judge login
+
+To try remixing, auto-rigging and animating without a Google account, sign in at [rigforge.app/login](https://rigforge.app/login) under **Hackathon judges**:
+
+| Username | Password |
+| --- | --- |
+| `judges` | `R3CafgWW8gf2gqJ8eciR5oVj` |
+
+The account is shared and has the Pro allowance.
+
+- [Judge login](#judge-login)
 - [What it does](#what-it-does)
 - [Meta models we use](#meta-models-we-use)
   - [The 7 agents](#the-agents)
